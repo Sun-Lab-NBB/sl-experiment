@@ -45,6 +45,22 @@ def globus_auth_client(client_id, refresh_tokens=True, scopes=globus_sdk.scopes.
     return client
 
 
+def save_globus_token(token, configname="globus-token.yml"):
+    """Save the Globus token to a configuration file.
+
+    Args:
+        token (dict): The Globus token data.
+        configname (str, optional): The name of the configuration file. Defaults to "globus-token.yml".
+    """
+    data = {
+        "refresh_token": token["refresh_token"],
+        "access_token": token["access_token"],
+        "expires_at_seconds": token["expires_at_seconds"],
+    }
+    path = get_config_path(configname)
+    with open(path, "w") as f:
+        yaml.safe_dump(data, f)
+
 def globus_token(
         client=None,
         client_id=None,
@@ -66,14 +82,7 @@ def globus_token(
     token_response = client.oauth2_exchange_code_for_tokens(auth_code)
     transfer_tokens = token_response.by_resource_server['transfer.api.globus.org']
 
-    data = {
-        "transfer_rt": transfer_tokens["refresh_token"],
-        "transfer_at": transfer_tokens["access_token"],
-        "expires_at_s": transfer_tokens["expires_at_seconds"],
-    }
-    path = get_config_path(configname)
-    with open(path, "w") as f:
-        yaml.safe_dump(data, f)
+    save_globus_token(transfer_tokens, configname=configname)
 
     return token_response.by_resource_server["transfer.api.globus.org"]["access_token"]
 
@@ -81,7 +90,7 @@ def globus_token(
 # Globus Transfer
 #######################
 
-def globus_transfer_rt(basename="globus-token.yml", key="transfer_rt"):
+def globus_transfer_rt(basename="globus-token.yml"):
     """Get the Globus refresh token from the configuration file.
 
     Returns:
@@ -90,7 +99,7 @@ def globus_transfer_rt(basename="globus-token.yml", key="transfer_rt"):
     path = get_config_path(basename)
     with open(path, 'r') as f:
         data = yaml.safe_load(f)
-    return data.get(key, None)
+    return data
 
 
 def globus_transfer_client(
@@ -114,7 +123,13 @@ def globus_transfer_client(
         globus_token(client_id=client_id, scopes=scope, configname=configname)
         transfer_rt = globus_transfer_rt()
     client = globus_auth_client(client_id, refresh_tokens=refresh_tokens, scopes=scope)
-    authorizer = globus_sdk.RefreshTokenAuthorizer(transfer_rt, client)
+    authorizer = globus_sdk.RefreshTokenAuthorizer(
+        transfer_rt.get("refresh_token", None),
+        client,
+        access_token=transfer_rt.get("access_token", None),
+        expires_at=transfer_rt.get("expires_at_seconds", None),
+        on_refresh=save_globus_token
+    )
     return globus_sdk.TransferClient(authorizer=authorizer)
 
 
