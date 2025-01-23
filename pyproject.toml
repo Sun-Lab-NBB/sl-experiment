@@ -51,6 +51,7 @@ dependencies = [
     "smbprotocol>=1,<2",
     "tqdm>=4,<5",
     "xxhash>=3,<4",
+    "globus-sdk>=3.50.0,<4",
 ]
 
 [project.urls]
