@@ -1378,3 +1378,96 @@ def purge_failed_session(session_data: SessionData) -> None:
 
     message = "Session data purging: Complete"
     console.echo(message=message, level=LogLevel.SUCCESS)
+
+
+def migrate_animal_between_projects(animal: str, source_project: str, target_project: str) -> None:
+    """Moves all sessions for the target animal from the source project to the target project.
+
+    This function is primarily used when animals are moved from the shared 'TestMice' project to a user-specific
+    project. It transfers all available data for the target animal across all destinations, based on the list of
+    sessions stored on the remote server. Any session that has not yet been transferred to the server is excluded from
+    the migration process and will remain on the local acquisition system PC.
+
+    Args:
+        animal: The animal for which to migrate the data.
+        source_project: The name of the project from which to migrate the data.
+        target_project: The name of the project to which the data should be migrated.
+    """
+
+    console.echo(f"Migrating animal {animal} from project {source_project} to project {target_project}...")
+
+    # Queries the system configuration parameters, which includes the paths to all filesystems used to store project
+    # data
+    system_configuration = get_system_configuration()
+
+    # The two main directories used in the migration process are the server storage directory (source) and the
+    # local acquisition-system PC project directory (destination)
+    source_server_root = system_configuration.paths.server_storage_directory.joinpath(source_project, animal)
+    destination_local_root = system_configuration.paths.root_directory.joinpath(target_project, animal)
+
+    # Also resolves the path to the local animal root. This is used when processing sessions to purge migrated sessions
+    # from the source project
+    source_local_root = system_configuration.paths.root_directory.joinpath(source_project, animal)
+
+    # If the target project does not exist, aborts with an error (analogous to how creating de-novo animal
+    # datastructures is handled)
+    if not destination_local_root.parent.exists():
+        message = (
+            f"Unable to migrate the animal {animal} from project {source_project} to project {target_project}. The "
+            f"target project does not exist. Use the 'sl-create-project' command to create the project before "
+            f"migrating animals to this project."
+        )
+        console.error(message=message, error=FileNotFoundError)
+
+    # Ensures that the root directory for the processed animal exists on the local machine.
+    ensure_directory_exists(destination_local_root)
+
+    # Loops over all sessions stored on the server and processes them sequentially
+    sessions = [file.parent for file in source_server_root.rglob("*session_data.yaml")]
+    for session in sessions:
+        console.echo(f"Migrating session {session.name}...")
+        local_session_path = destination_local_root.joinpath(session.name)
+        remote_session_path = source_server_root.joinpath(session.name)
+
+        # Pulls the session to the local machine. The data is pulled into the target project's directory structure.
+        ensure_directory_exists(destination_local_root)
+        transfer_directory(
+            source=remote_session_path, destination=local_session_path, num_threads=30, verify_integrity=False
+        )
+
+        # Copies the session_data.yaml file from the pulled directory to the old local directory for the processed
+        # session. This is then used to remove old session data from all destinations.
+        new_sd_path = local_session_path.joinpath("raw_data", "session_data.yaml")
+        old_sd_path = source_local_root.joinpath(session.name, "raw_data", "session_data.yaml")
+        sh.copy2(src=new_sd_path, dst=old_sd_path)
+
+        # Modifies the SessionData instance for the pulled session to use the new project name.
+        session_data = SessionData.load(session_path=local_session_path)
+        session_data.project_name = target_project
+        session_data._save()
+
+        # Runs preprocessing on the session data again, which regenerates the checksum and transfers the data to
+        # the long-term storage destinations.
+        preprocess_session_data(session_data=session_data)
+
+        # Removes now-obsolete server, NAS, and local machine directories. To do so, first marks the old session for
+        # deletion by creating the 'nk.bin' marker and then calls the purge pipeline on that session.
+        old_session_data = SessionData.load(session_path=old_sd_path)
+        old_session_data.raw_data.nk_path.touch()
+        purge_failed_session(old_session_data)
+
+    console.echo(f"Migrating persistent data directories...")
+    # Moves ScanImagePC persistent data for the animal between projects This preserves existing MotionEstimator and ROI
+    # data, if any was resolved for any processed session
+    old = system_configuration.paths.mesoscope_directory.joinpath(source_project, animal)
+    new = system_configuration.paths.mesoscope_directory.joinpath(target_project, animal)
+    sh.move(src=old, dst=new)
+
+    # Also moves the VRPC persistent data for the animal between projects.
+    old = source_local_root.joinpath("persistent_data")
+    new = destination_local_root.joinpath("persistent_data")
+    sh.move(src=old, dst=new)
+
+    # Note, this process intentionally preserves the now-empty animal directory in the original project to keep the
+    # animal project history.
+    console.echo(f"Migration: Complete.", level=LogLevel.SUCCESS)

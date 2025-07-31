@@ -8,7 +8,7 @@ build-backend = "hatchling.build"
 # Project metdata section. Provides the genral ID information about the project.
 [project]
 name = "sl-experiment"
-version = "3.0.3"
+version = "3.0.4"
 description = "Provides tools to acquire, manage, and preprocess scientific data in the Sun (NeuroAI) lab."
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -164,6 +164,7 @@ sl-check-window = "sl_experiment.cli:check_window"
 sl-preprocess = "sl_experiment.cli:preprocess_session"
 sl-purge = "sl_experiment.cli:purge_data"
 sl-delete-session-data = "sl_experiment.cli:delete_session"
+sl-migrate-animal = "sl_experiment.cli:migrate_animal"
 
 # Specifies files that should not be included in the source-code distribution but are also not part of gitignore.
 [tool.hatch.build.targets.sdist]

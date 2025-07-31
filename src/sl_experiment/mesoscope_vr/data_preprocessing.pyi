@@ -364,3 +364,17 @@ def purge_failed_session(session_data: SessionData) -> None:
     Args:
         session_data: The SessionData instance for the session whose data needs to be removed.
     """
+
+def migrate_animal_between_projects(animal: str, source_project: str, target_project: str) -> None:
+    """Moves all sessions for the target animal from the source project to the target project.
+
+    This function is primarily used when animals are moved from the shared 'TestMice' project to a user-specific
+    project. It transfers all available data for the target animal across all destinations, based on the list of
+    sessions stored on the remote server. Any session that has not yet been transferred to the server is excluded from
+    the migration process and will remain on the local acquisition system PC.
+
+    Args:
+        animal: The animal for which to migrate the data.
+        source_project: The name of the project from which to migrate the data.
+        target_project: The name of the project to which the data should be migrated.
+    """

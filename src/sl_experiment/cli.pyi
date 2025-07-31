@@ -11,6 +11,7 @@ from .mesoscope_vr import (
     window_checking_logic as window_checking_logic,
     discover_zaber_devices as discover_zaber_devices,
     preprocess_session_data as preprocess_session_data,
+    migrate_animal_between_projects as migrate_animal_between_projects,
 )
 
 def calculate_crc(input_string: str) -> None:
@@ -154,4 +155,13 @@ def delete_session(session_path: Path) -> None:
     This is an EXTREMELY dangerous command that can potentially delete valuable data if not used well. This command is
     intended exclusively for removing failed and test sessions from all computers used in the Sun lab data acquisition
     process. Never call this command unless you know what you are doing.
+    """
+
+def migrate_animal(source: str, destination: str, animal: str) -> None:
+    """Migrates all sessions for the specified animal from the source project to the target project.
+
+    This CLI command is primarily intended to move mice from the initial 'test' project to the final experiment project
+    in which they will participate. Note, the migration process determines what data to move based on the current state
+    of the project data on the remote compute server. Any session that has not been moved to the server will be ignored
+    during this command's runtime.
     """

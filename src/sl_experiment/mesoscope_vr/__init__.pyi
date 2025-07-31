@@ -13,6 +13,7 @@ from .data_preprocessing import (
     purge_failed_session as purge_failed_session,
     purge_redundant_data as purge_redundant_data,
     preprocess_session_data as preprocess_session_data,
+    migrate_animal_between_projects as migrate_animal_between_projects,
 )
 
 __all__ = [
@@ -26,4 +27,5 @@ __all__ = [
     "purge_redundant_data",
     "preprocess_session_data",
     "purge_failed_session",
+    "migrate_animal_between_projects",
 ]

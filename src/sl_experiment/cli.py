@@ -26,6 +26,7 @@ from .mesoscope_vr import (
     window_checking_logic,
     discover_zaber_devices,
     preprocess_session_data,
+    migrate_animal_between_projects,
 )
 
 
@@ -727,3 +728,36 @@ def delete_session(session_path: Path) -> None:
     # Removes all data of the target session from all data acquisition and long-term storage machines accessible to the
     # host-computer
     purge_failed_session(session_data)
+
+
+@click.command()
+@click.option(
+    "-s",
+    "--source",
+    type=str,
+    required=True,
+    help="The name of the project from which to migrate the data.",
+)
+@click.option(
+    "-d",
+    "--destination",
+    type=str,
+    required=True,
+    help="The name of the project to which to migrate the data.",
+)
+@click.option(
+    "-a",
+    "--animal",
+    type=str,
+    required=True,
+    help="The ID of the animal whose data is being migrated.",
+)
+def migrate_animal(source: str, destination: str, animal: str) -> None:
+    """Migrates all sessions for the specified animal from the source project to the target project.
+
+    This CLI command is primarily intended to move mice from the initial 'test' project to the final experiment project
+    in which they will participate. Note, the migration process determines what data to move based on the current state
+    of the project data on the remote compute server. Any session that has not been moved to the server will be ignored
+    during this command's runtime.
+    """
+    migrate_animal_between_projects(source_project=source, target_project=destination, animal=animal)
