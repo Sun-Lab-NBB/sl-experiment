@@ -1423,7 +1423,7 @@ def migrate_animal_between_projects(animal: str, source_project: str, target_pro
     ensure_directory_exists(destination_local_root)
 
     # Loops over all sessions stored on the server and processes them sequentially
-    sessions = [file.parent for file in source_server_root.rglob("*session_data.yaml")]
+    sessions = [file.parents[1] for file in source_server_root.rglob("*session_data.yaml")]
     for session in sessions:
         console.echo(f"Migrating session {session.name}...")
         local_session_path = destination_local_root.joinpath(session.name)
@@ -1439,12 +1439,18 @@ def migrate_animal_between_projects(animal: str, source_project: str, target_pro
         # session. This is then used to remove old session data from all destinations.
         new_sd_path = local_session_path.joinpath("raw_data", "session_data.yaml")
         old_sd_path = source_local_root.joinpath(session.name, "raw_data", "session_data.yaml")
+        ensure_directory_exists(old_sd_path)  # Since preprocessing removes the raw_data directory, this recreates it
         sh.copy2(src=new_sd_path, dst=old_sd_path)
 
-        # Modifies the SessionData instance for the pulled session to use the new project name.
+        # Modifies the SessionData instance for the pulled session to use the new project name and the new session data
+        # location
         session_data = SessionData.load(session_path=local_session_path)
         session_data.project_name = target_project
+        session_data.raw_data.session_data_path = new_sd_path
         session_data._save()
+
+        # Reloads session data to apply the changes
+        session_data = SessionData.load(session_path=local_session_path)
 
         # Runs preprocessing on the session data again, which regenerates the checksum and transfers the data to
         # the long-term storage destinations.
@@ -1452,7 +1458,7 @@ def migrate_animal_between_projects(animal: str, source_project: str, target_pro
 
         # Removes now-obsolete server, NAS, and local machine directories. To do so, first marks the old session for
         # deletion by creating the 'nk.bin' marker and then calls the purge pipeline on that session.
-        old_session_data = SessionData.load(session_path=old_sd_path)
+        old_session_data = SessionData.load(session_path=old_sd_path.parents[1])
         old_session_data.raw_data.nk_path.touch()
         purge_failed_session(old_session_data)
 
@@ -1461,11 +1467,13 @@ def migrate_animal_between_projects(animal: str, source_project: str, target_pro
     # data, if any was resolved for any processed session
     old = system_configuration.paths.mesoscope_directory.joinpath(source_project, animal)
     new = system_configuration.paths.mesoscope_directory.joinpath(target_project, animal)
+    sh.rmtree(new)
     sh.move(src=old, dst=new)
 
     # Also moves the VRPC persistent data for the animal between projects.
     old = source_local_root.joinpath("persistent_data")
     new = destination_local_root.joinpath("persistent_data")
+    sh.rmtree(new)
     sh.move(src=old, dst=new)
 
     # Note, this process intentionally preserves the now-empty animal directory in the original project to keep the
