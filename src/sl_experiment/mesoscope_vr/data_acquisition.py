@@ -38,7 +38,14 @@ from ataraxis_communication_interface import MQTTCommunication, MicroControllerI
 from .tools import MesoscopeData, RuntimeControlUI, CachedMotifDecomposer, get_system_configuration
 from .visualizers import BehaviorVisualizer
 from .binding_classes import ZaberMotors, VideoSystems, MicroControllerInterfaces
-from ..shared_components import WaterSheet, SurgerySheet, BreakInterface, ValveInterface, get_version_data
+from ..shared_components import (
+    WaterSheet,
+    SurgerySheet,
+    BreakInterface,
+    ValveInterface,
+    get_version_data,
+    get_animal_project,
+)
 from .data_preprocessing import purge_failed_session, preprocess_session_data, rename_mesoscope_directory
 
 
@@ -1096,10 +1103,10 @@ class _MesoscopeVRSystem:
         # Microcontroller and data-logger stopping was moved to the end of the shutdown sequence to avoid an extremely
         # rare issue related to one of the microcontrollers deadlocking internally. The idle() state combined with the
         # mesoscope stop sequence should cut all microcontroller data streams, so there is no urgency in actually
-        # terminating these assets before the animal is safely removed from the Mesoscope enclosure and the user
-        # generates the necessary session metadata. Conversely, if microcontrollers cannot be stopped and the user has
-        # to perform a hard shutdown, having this done after resolving session metadata ensures that the user can
-        # manually call preprocessing as soon as the runtime is terminated.
+        # terminating these assets before the animal is safely removed from the Mesoscope enclosure. Conversely, if
+        # microcontrollers cannot be stopped and the user has to perform a hard shutdown, having this done after
+        # resolving session metadata ensures that the user can manually call preprocessing as soon as the runtime is
+        # terminated.
 
         # Stops all microcontroller interfaces
         self._microcontrollers.stop()
@@ -1169,6 +1176,14 @@ class _MesoscopeVRSystem:
             f"delivery valve. When you are ready to start the runtime, use the UI to 'resume' it."
         )
         console.echo(message=message, level=LogLevel.SUCCESS)
+
+        # Secondary message added in 4.0.0 to address frequent user questions and errors.
+        message = (
+            f"Note: All sensors, including the lick sensor, are DISABLED at this time. If you are running a training "
+            f"session, apply the electroconductive gel to the headbar to ensure lick sensor works as expected once the "
+            f"runtime starts."
+        )
+        console.echo(message=message, level=LogLevel.WARNING)
 
         # At this point, the user can use the GUI and the Zaber UI to freely manipulate all components of the
         # mesoscope-VR system.
@@ -1262,7 +1277,7 @@ class _MesoscopeVRSystem:
 
         Raises:
             RuntimeError: If the mesoscope does not confirm frame acquisition within 2 seconds after the
-                acquisition marker file is created and the user chooses to abort the runtime.
+                acquisition marker file is created, and the user chooses to abort the runtime.
         """
 
         # Initializes a second-precise timer to ensure the request is fulfilled within a 2-second timeout
@@ -1323,7 +1338,7 @@ class _MesoscopeVRSystem:
                         message = "Mesoscope frame acquisition: Started."
                         console.echo(message=message, level=LogLevel.SUCCESS)
 
-                        # Prepares assets use to detect and recover from unwanted acquisition interruptions.
+                        # Prepares assets used to detect and recover from unwanted acquisition interruptions.
                         self._mesoscope_frame_count = self._microcontrollers.mesoscope_frame_count
                         self._mesoscope_timer.reset()  # type: ignore
                         self._mesoscope_started = True
@@ -1479,6 +1494,15 @@ class _MesoscopeVRSystem:
         self.descriptor.pause_dispensed_water_volume_ml = float(round(self._paused_water_volume / 1000, ndigits=3))
         self.descriptor.incomplete = False  # If the runtime reaches this point, the session is likely complete.
 
+        # Precalculates the volume of water that the experimenter needs to deliver to the animal if the combined
+        # volume delivered during runtime and paused state is less than 1 ml. This is used to pre-fill the
+        # experimenter-delivered volume field as a convenience feature for experimenters.
+        total_delivered_volume = (
+            self.descriptor.dispensed_water_volume_ml + self.descriptor.pause_dispensed_water_volume_ml
+        )
+        if total_delivered_volume < 1:
+            self.descriptor.experimenter_given_water_volume_ml = float(round(1 - total_delivered_volume, ndigits=3))
+
         # Ensures that the user updates the descriptor file.
         _verify_descriptor_update(
             descriptor=self.descriptor, session_data=self._session_data, mesoscope_data=self._mesoscope_data
@@ -1495,7 +1519,7 @@ class _MesoscopeVRSystem:
         once.
 
         Raises:
-            RuntimeError: If Unity does not send a start message within 10 minutes of this runtime starting and
+            RuntimeError: If Unity does not send a start message within 10 minutes of this runtime starting, and
                 the user chooses to abort the runtime.
         """
 
@@ -1555,7 +1579,7 @@ class _MesoscopeVRSystem:
                 break
 
         else:
-            # The only way to enter this clause if by triggering the 'abort' sequence. In that case,a borts with an
+            # The only way to enter this clause if by triggering the 'abort' sequence. In that case, aborts with an
             # error.
             message = f"Runtime aborted due to user request."
             console.error(message=message, error=RuntimeError)
@@ -1823,11 +1847,11 @@ class _MesoscopeVRSystem:
                     if outcome != "abort":
                         timeout_timer.reset()
                         continue
-
-                # Otherwise, if the scene name matches the expected name, ends the runtime.
-                message = "Unity scene configuration: Confirmed."
-                console.echo(message=message, level=LogLevel.SUCCESS)
-                return
+                else:
+                    # Otherwise, if the scene name matches the expected name, ends the runtime.
+                    message = "Unity scene configuration: Confirmed."
+                    console.echo(message=message, level=LogLevel.SUCCESS)
+                    return
 
             # If the time loop satisfies exit conditions, this is due to not receiving any message from Unity in time.
             # Requests user feedback.
@@ -2291,7 +2315,7 @@ class _MesoscopeVRSystem:
         """Depending on the current number of unconsumed rewards and runtime configuration, either delivers or simulates
         the requested volume of water reward.
 
-        This method functions as a wrapper that decides whether to call the _simulate_reward() or the _deliver_reward()
+        This method functions as a wrapper that decides whether to call the _simulate_reward() or _deliver_reward()
         method. This ensures that each external water delivery call complies with the runtime's policy on delivering
         rewards when the animal is not consuming them.
 
@@ -2883,6 +2907,25 @@ def lick_training_logic(
         )
         console.error(message=message, error=FileNotFoundError)
 
+    # These checks have been added in version 4.0.0 to help users abide by the 'one animal one project' policy. Now all
+    # runtimes require each animal to be assigned to a single project.
+    animal_projects = get_animal_project(animal_id=animal_id)
+    if len(animal_projects) > 1:  # Rare case, often indicative of old migration pipeline use
+        message = (
+            f"Unable to execute the lick training for the animal {animal_id} of project {project_name}. The animal "
+            f"is associated with multiple projects on the local machine, which is not allowed. Remove the animal from "
+            f"all extra projects and rerun the training."
+        )
+        console.error(message=message, error=ValueError)
+    elif len(animal_projects) == 1 and animal_projects[0] != project_name:  # This indicates user error
+        message = (
+            f"Unable to execute the lick training for the animal {animal_id} and project {project_name}. The animal "
+            f"is already associated with a different project '{animal_projects[0]}'. Either adjust the project name to "
+            f"match the animal's current project or use the 'sl-migrate-animal' CLI command to first migrate the "
+            f"animal to the desired project and rerun the training."
+        )
+        console.error(message=message, error=ValueError)
+
     # Queries the current Python and library version information. This is then used to initialize the SessionData
     # instance.
     python_version, library_version = get_version_data()
@@ -3144,6 +3187,25 @@ def run_training_logic(
             f"before running training or experiment sessions."
         )
         console.error(message=message, error=FileNotFoundError)
+
+    # These checks have been added in version 4.0.0 to help users abide by the 'one animal one project' policy. Now all
+    # runtimes require each animal to be assigned to a single project.
+    animal_projects = get_animal_project(animal_id=animal_id)
+    if len(animal_projects) > 1:  # Rare case, often indicative of old migration pipeline use
+        message = (
+            f"Unable to execute the run training for the animal {animal_id} of project {project_name}. The animal "
+            f"is associated with multiple projects on the local machine, which is not allowed. Remove the animal from "
+            f"all extra projects and rerun the training."
+        )
+        console.error(message=message, error=ValueError)
+    elif len(animal_projects) == 1 and animal_projects[0] != project_name:  # This indicates user error
+        message = (
+            f"Unable to execute the run training for the animal {animal_id} and project {project_name}. The animal "
+            f"is already associated with a different project '{animal_projects[0]}'. Either adjust the project name to "
+            f"match the animal's current project or use the 'sl-migrate-animal' CLI command to first migrate the "
+            f"animal to the desired project and rerun the training."
+        )
+        console.error(message=message, error=ValueError)
 
     # Queries the current Python and library version information. This is then used to initialize the SessionData
     # instance.
@@ -3504,6 +3566,25 @@ def experiment_logic(
         )
         console.error(message=message, error=FileNotFoundError)
 
+    # These checks have been added in version 4.0.0 to help users abide by the 'one animal one project' policy. Now all
+    # runtimes require each animal to be assigned to a single project.
+    animal_projects = get_animal_project(animal_id=animal_id)
+    if len(animal_projects) > 1:  # Rare case, often indicative of old migration pipeline use
+        message = (
+            f"Unable to execute the {experiment_name} experiment for the animal {animal_id} of project {project_name}. "
+            f"The animal is associated with multiple projects on the local machine, which is not allowed. Remove the "
+            f"animal from all extra projects and rerun the experiment."
+        )
+        console.error(message=message, error=ValueError)
+    elif len(animal_projects) == 1 and animal_projects[0] != project_name:  # This indicates user error
+        message = (
+            f"Unable to execute the {experiment_name} experiment for the animal {animal_id} and project "
+            f"{project_name}. The animal is already associated with a different project '{animal_projects[0]}'. Either "
+            f"adjust the project name to match the animal's current project or use the 'sl-migrate-animal' CLI command "
+            f"to first migrate the animal to the desired project and rerun the experiment."
+        )
+        console.error(message=message, error=ValueError)
+
     # Queries the current Python and library version information. This is then used to initialize the SessionData
     # instance.
     python_version, library_version = get_version_data()
@@ -3710,6 +3791,25 @@ def window_checking_logic(
             f"before running training or experiment sessions."
         )
         console.error(message=message, error=FileNotFoundError)
+
+    # These checks have been added in version 4.0.0 to help users abide by the 'one animal one project' policy. Now all
+    # runtimes require each animal to be assigned to a single project.
+    animal_projects = get_animal_project(animal_id=animal_id)
+    if len(animal_projects) > 1:  # Rare case, often indicative of old migration pipeline use
+        message = (
+            f"Unable to execute the window checking for the animal {animal_id} of project {project_name}. "
+            f"The animal is associated with multiple projects on the local machine, which is not allowed. Remove the "
+            f"animal from all extra projects and rerun the window checking."
+        )
+        console.error(message=message, error=ValueError)
+    elif len(animal_projects) == 1 and animal_projects[0] != project_name:  # This indicates user error
+        message = (
+            f"Unable to execute the window checking for the animal {animal_id} and project "
+            f"{project_name}. The animal is already associated with a different project '{animal_projects[0]}'. Either "
+            f"adjust the project name to match the animal's current project or use the 'sl-migrate-animal' CLI command "
+            f"to first migrate the animal to the desired project and rerun the window checking."
+        )
+        console.error(message=message, error=ValueError)
 
     # Queries the current Python and library version information. This is then used to initialize the SessionData
     # instance.

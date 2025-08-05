@@ -2,6 +2,7 @@
 
 import sys
 
+from sl_shared_assets import get_system_configuration_data
 from importlib_metadata import metadata as _metadata
 
 
@@ -15,3 +16,26 @@ def get_version_data() -> tuple[str, str]:
     sl_experiment_version = _metadata("sl-experiment")["version"]  # type: ignore
     python_version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"  # Python version
     return python_version, sl_experiment_version
+
+
+def get_animal_project(animal_id: str) -> list[str]:
+    """Scans the root project directory on the local machine and returns all project names that contain the given
+    animal ID.
+
+    Primarily, this worker function is used to prevent the user from assigning the animal to more than a single project.
+    It is also used to help the user correctly resolve the name of the project to which the animal is currently
+    assigned.
+
+    Args:
+        animal_id: The ID of the animal for which to search for project assignments.
+
+    Returns:
+        A list of project names that contain the given animal ID.
+    """
+    system_configuration = get_system_configuration_data()
+
+    return [
+        directory.name
+        for directory in system_configuration.paths.root_directory.iterdir()
+        if directory.is_dir() and directory.joinpath(animal_id).exists()
+    ]

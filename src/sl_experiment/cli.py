@@ -59,6 +59,17 @@ def list_devices(errors: bool) -> None:
 
 
 @click.command()
+def list_projects() -> None:
+    """Lists the names of all projects that have been configured to work with the acquisition system managed by this
+    PC."""
+    system_configuration = get_system_configuration_data()
+    projects = [
+        directory.stem for directory in system_configuration.paths.root_directory.iterdir() if directory.is_dir()
+    ]
+    console.echo(f"The acquisition system managed by this PC contains the following projects: {', '.join(projects)}.")
+
+
+@click.command()
 @click.option(
     "-od",
     "--output_directory",
