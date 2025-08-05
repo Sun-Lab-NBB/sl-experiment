@@ -45,6 +45,7 @@ from ..shared_components import (
     ValveInterface,
     get_version_data,
     get_animal_project,
+    get_project_experiments,
 )
 from .data_preprocessing import purge_failed_session, preprocess_session_data, rename_mesoscope_directory
 
@@ -3563,6 +3564,16 @@ def experiment_logic(
             f"Unable to execute the {experiment_name} experiment for the animal {animal_id} of project {project_name}. "
             f"The target project does not exist on the local machine. Use the 'sl-create-project' command to create "
             f"the project before running training or experiment sessions."
+        )
+        console.error(message=message, error=FileNotFoundError)
+
+    # Prevents the user from executing the runtime if the project is not configured to run the requested experiment
+    project_experiments = get_project_experiments(project=project_name)
+    if experiment_name not in project_experiments:
+        message = (
+            f"Unable to execute the {experiment_name} experiment for the animal {animal_id} of project {project_name}. "
+            f"The target project does not have an experiment configuration file named after the target experiment. Use "
+            f"the 'sl-create-experiment' command to create the experiment before rerunning the experiment session."
         )
         console.error(message=message, error=FileNotFoundError)
 

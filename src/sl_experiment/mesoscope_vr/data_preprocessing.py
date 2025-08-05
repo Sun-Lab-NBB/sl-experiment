@@ -1312,6 +1312,10 @@ def purge_redundant_data() -> None:
 
     # Removes all discovered redundant data directories
     for candidate in tqdm(deletion_candidates, desc="Deleting redundant data directories", unit="directory"):
+        # If the deletion candidate is a 'raw_data' session directory, escalates the deletion to remove the entire
+        # session directory.
+        if candidate.name == "raw_data":
+            candidate = candidate.parent
         _delete_directory(directory_path=candidate)
 
     message = "Redundant data purging: Complete"
@@ -1418,6 +1422,17 @@ def migrate_animal_between_projects(animal: str, source_project: str, target_pro
     # Ensures that the root directory for the processed animal exists on the local machine.
     ensure_directory_exists(destination_local_root)
 
+    # Ensures that all locally stored sessions have been processed and moved to the BioHPC server for storage. This is
+    # a prerequisite to ensure that all data is properly migrated from the source project to the target project.
+    local_sessions = [file.parents[1] for file in source_local_root.rglob("*session_data.yaml")]
+    if len(local_sessions) > 0:
+        message = (
+            f"Unable to migrate the animal {animal} from project {source_project} to project {target_project}. The "
+            f"source project directory on the local acquisition-system PC contains non-preprocessed session data. "
+            f"Preprocess all locally stored sessions before starting the migration process."
+        )
+        console.error(message=message, error=FileNotFoundError)
+
     # Loops over all sessions stored on the server and processes them sequentially
     sessions = [file.parents[1] for file in source_server_root.rglob("*session_data.yaml")]
     for session in sessions:
@@ -1471,6 +1486,19 @@ def migrate_animal_between_projects(animal: str, source_project: str, target_pro
     new = destination_local_root.joinpath("persistent_data")
     sh.rmtree(new)
     sh.move(src=old, dst=new)
+
+    # Removes the old animal directory from all destinations. This also removes any lingering data not moved during
+    # the migration process. This ensures that each animal is found under at most a single project directory on all
+    # destinations.
+    deletion_candidates = [
+        system_configuration.paths.mesoscope_directory.joinpath(source_project, animal),
+        system_configuration.paths.nas_directory.joinpath(source_project, animal),
+        system_configuration.paths.root_directory.joinpath(source_project, animal),
+        system_configuration.paths.server_storage_directory.joinpath(source_project, animal),
+        system_configuration.paths.server_working_directory.joinpath(source_project, animal),
+    ]
+    for candidate in tqdm(deletion_candidates, desc="Deleting redundant animal directories", unit="directory"):
+        _delete_directory(directory_path=candidate)
 
     # Note, this process intentionally preserves the now-empty animal directory in the original project to keep the
     # animal project history.

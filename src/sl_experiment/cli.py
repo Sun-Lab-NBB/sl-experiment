@@ -28,6 +28,7 @@ from .mesoscope_vr import (
     preprocess_session_data,
     migrate_animal_between_projects,
 )
+from .shared_components import get_project_experiments
 
 
 @click.command()
@@ -67,6 +68,23 @@ def list_projects() -> None:
         directory.stem for directory in system_configuration.paths.root_directory.iterdir() if directory.is_dir()
     ]
     console.echo(f"The acquisition system managed by this PC contains the following projects: {', '.join(projects)}.")
+
+
+@click.command()
+@click.option(
+    "-p",
+    "--project",
+    type=str,
+    required=True,
+    help="The name of the project for which to discover and print the experiment configurations.",
+)
+def list_experiments(project: str) -> None:
+    """Lists the names of all experiment configurations available on the local acquisition system PC for the target
+    project."""
+    experiments = get_project_experiments(project=project)
+    console.echo(
+        f"The '{project}' project is configured to execute the following experiments: {', '.join(experiments)}."
+    )
 
 
 @click.command()

@@ -169,6 +169,7 @@ sl-purge = "sl_experiment.cli:purge_data"
 sl-delete-session-data = "sl_experiment.cli:delete_session"
 sl-migrate-animal = "sl_experiment.cli:migrate_animal"
 sl-projects = "sl_experiment.cli:list_projects"
+sl-experiments = "sl_experiment.cli:list_experiments"
 
 # Specifies files that should not be included in the source-code distribution but are also not part of gitignore.
 [tool.hatch.build.targets.sdist]
