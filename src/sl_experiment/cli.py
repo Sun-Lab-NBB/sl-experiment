@@ -67,7 +67,15 @@ def list_projects() -> None:
     projects = [
         directory.stem for directory in system_configuration.paths.root_directory.iterdir() if directory.is_dir()
     ]
-    console.echo(f"The acquisition system managed by this PC contains the following projects: {', '.join(projects)}.")
+    if len(projects) > 0:
+        console.echo(
+            f"The acquisition system managed by this PC contains the following projects: {', '.join(projects)}."
+        )
+    else:
+        console.echo(
+            f"The acquisition system managed by this PC does not contain any projects. To add a new project, use the "
+            f"'sl-create-project' CLI command exposed by this library.."
+        )
 
 
 @click.command()
@@ -82,9 +90,16 @@ def list_experiments(project: str) -> None:
     """Lists the names of all experiment configurations available on the local acquisition system PC for the target
     project."""
     experiments = get_project_experiments(project=project)
-    console.echo(
-        f"The '{project}' project is configured to execute the following experiments: {', '.join(experiments)}."
-    )
+    if len(experiments) > 0:
+        console.echo(
+            f"The '{project}' project is configured to execute the following experiments: {', '.join(experiments)}."
+        )
+    else:
+        console.echo(
+            f"The '{project}' project is currently not configured to support any experiments. Use the "
+            f"'sl-create-experiment' CLI command exposed by this library to add experiment configurations to this "
+            f"project."
+        )
 
 
 @click.command()
