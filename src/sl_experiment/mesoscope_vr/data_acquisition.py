@@ -1549,42 +1549,17 @@ class _MesoscopeVRSystem:
         )
         console.echo(message=message, level=LogLevel.INFO)
 
-        # Blocks until Unity sends the task termination message or until the user manually aborts the runtime.
-        outcome = ""
-        while outcome != "abort":
-            # Blocks for at most 10 minutes (600 seconds, 600,000 milliseconds) at a time.
-            delay_timer.reset()
-            while delay_timer.elapsed < 600000:
-                # Parses all data received from the Unity game engine.
-                if not self._unity.has_data:
-                    continue
-                topic: str
-                topic, _ = self._unity.get_data()
+        # Blocks until Unity sends the task termination message.
+        while True:
+            # Parses all data received from the Unity game engine.
+            if not self._unity.has_data:
+                continue
+            topic: str
+            topic, _ = self._unity.get_data()
 
-                # If received data is a startup message, breaks the loop
-                if topic == self._unity_startup_topic:
-                    break
-            else:
-                # If the loop above is not broken, this is due to not receiving any message from Unity for 10 minutes.
-                message = (
-                    f"The Mesoscope-VR system did not receive a Unity runtime start message after waiting for 10 "
-                    f"minutes. It is likely that the Unity game engine is not running or is not configured to work "
-                    f"with Mesoscope-VR system. Make sure Unity game engine is started and configured before "
-                    f"continuing."
-                )
-                console.echo(message=message, level=LogLevel.ERROR)
-                outcome = input("Enter 'abort' to abort with an error. Enter anything else to retry: ").lower()
-
-            # Breaks the outer loop if the timer loop was broken due to receiving the expected topic.
-            if outcome != "abort":
+            # If received data is a startup message, breaks the loop
+            if topic == self._unity_startup_topic:
                 break
-
-        else:
-            # The only way to enter this clause if by triggering the 'abort' sequence. In that case, aborts with an
-            # error.
-            message = f"Runtime aborted due to user request."
-            console.error(message=message, error=RuntimeError)
-            raise RuntimeError(message)  # Fallback to appease mypy, should not be reachable
 
         # Verifies that the Unity scene (VR task) started by the user matches the task declared in the experiment
         # configuration file:
@@ -1794,82 +1769,57 @@ class _MesoscopeVRSystem:
         if self._unity is None or self._experiment_configuration is None:
             return
 
-        # Initializes a second-precise timer to ensure the request is fulfilled within a 20-second timeout
+        message = f"Verifying that the Unity game engine is configured to display the correct scene..."
+        console.echo(message=message, level=LogLevel.INFO)
+
+        # Initializes a second-precise timer to limit the rate at which the runtime requests the Unity scene name.
         timeout_timer = PrecisionTimer("s")
 
-        # Discards all data received from Unity up to this point.
+        # Discards all data received from Unity up to this point before entering the scene name verification runtime.
         while self._unity.has_data:
             _ = self._unity.get_data()
 
-        # The procedure repeats until it succeeds or until the user chooses to abort the runtime.
-        outcome = ""
-        while outcome != "abort":
-            # Sends a request for the scene (task) name to Unity GIMBL package.
-            self._unity.send_data(topic=self._unity_scene_request_topic)
+        # Sends a request for the scene (task) name to Unity GIMBL package.
+        self._unity.send_data(topic=self._unity_scene_request_topic)
+        timeout_timer.reset()
 
-            # Gives Unity time to respond
-            timeout_timer.delay_noblock(delay=2)
+        # Blocks until Unity sends the active task scene name.
+        while True:
+            # Continuously requests scene name at 2-second intervals.
+            if timeout_timer.elapsed > 2:
+                # Sends a request for the scene (task) name to Unity GIMBL package.
+                self._unity.send_data(topic=self._unity_scene_request_topic)
+                timeout_timer.reset()
 
-            # Waits at most 5 seconds to receive the response
-            timeout_timer.reset()
-            while timeout_timer.elapsed < 20 and outcome != "abort":
-                # Sends a second request if the response is not received within 2 seconds
-                if timeout_timer.elapsed > 10:
-                    self._unity.send_data(topic=self._unity_scene_request_topic)
+            # Parses all data received from the Unity game engine.
+            if not self._unity.has_data:
+                continue
+            topic: str
+            topic, payload = self._unity.get_data()
 
-                # Repeatedly queries and checks incoming messages from Unity.
-                if not self._unity.has_data:
-                    continue
+            # Specifically looks for a message sent to the scene name topic. Discards all other messages.
+            if topic != self._unity_scene_topic:
+                continue
 
-                topic: str
-                payload: bytes
-                topic, payload = self._unity.get_data()
+            # Extracts the name of the scene running in Unity.
+            scene_name: str = json.loads(payload.decode("utf-8"))["name"]
+            expected_scene_name: str = self._experiment_configuration.unity_scene_name
 
-                # Specifically looks for a message sent to the scene name topic. Discards all other messages.
-                if topic != self._unity_scene_topic:
-                    continue
-
-                # Extracts the name of the scene running in Unity.
-                scene_name: str = json.loads(payload.decode("utf-8"))["name"]
-                expected_scene_name: str = self._experiment_configuration.unity_scene_name
-
-                # Verifies if the scene name matches the expected VR task name from the experiment
-                # configuration file.
-                if scene_name != expected_scene_name:
-                    message = (
-                        f"The name of the scene (VR task) running in Unity ({scene_name}) does not match the expected "
-                        f"name defined in the experiment configuration file ({expected_scene_name}). Reconfigure Unity "
-                        f"to run the correct VR task and try again."
-                    )
-                    console.echo(message=message, level=LogLevel.ERROR)
-                    outcome = input("Enter 'abort' to abort with an error. Enter anything else to retry: ").lower()
-
-                    # Restarts the request-response loop if the user chose to retry
-                    if outcome != "abort":
-                        timeout_timer.reset()
-                        continue
-                else:
-                    # Otherwise, if the scene name matches the expected name, ends the runtime.
-                    message = "Unity scene configuration: Confirmed."
-                    console.echo(message=message, level=LogLevel.SUCCESS)
-                    return
-
-            # If the time loop satisfies exit conditions, this is due to not receiving any message from Unity in time.
-            # Requests user feedback.
-            else:
+            # Verifies if the scene name matches the expected VR task name from the experiment configuration file.
+            if scene_name != expected_scene_name:
                 message = (
-                    f"The Mesoscope-VR system has requested the active Unity scene name by sending the trigger to "
-                    f"the {self._unity_scene_request_topic}' topic and received no response in 20 seconds after two "
-                    f"requests. It is likely that the Unity game engine is not running or is not configured to work "
-                    f"with Mesoscope-VR system. Make sure Unity game engine is started and configured before "
-                    f"continuing."
+                    f"The name of the scene (VR task) running in Unity ({scene_name}) does not match the expected "
+                    f"name defined in the experiment configuration file ({expected_scene_name}). Reconfigure Unity "
+                    f"to run the correct VR task and try again."
                 )
                 console.echo(message=message, level=LogLevel.ERROR)
-                outcome = input("Enter 'abort' to abort with an error. Enter anything else to retry: ").lower()
+                input("Enter anything to retry: ")
 
-        message = f"Runtime aborted due to user request."
-        console.error(message=message, error=RuntimeError)
-        raise RuntimeError(message)  # Fallback to appease mypy, should not be reachable
+            else:
+                # Otherwise, if the scene name matches the expected name, ends the runtime.
+                message = "Unity scene configuration: Confirmed."
+                console.echo(message=message, level=LogLevel.SUCCESS)
+                return
 
     def _decompose_cue_sequence_into_trials(self) -> None:
         """Decomposes the Virtual Reality task wall cue sequence into a sequence of trials.

@@ -75,7 +75,7 @@ def _convert_date_time_to_timestamp(date: str, time: str) -> int:
         The number of microseconds elapsed since UTC epoch onset as an integer.
 
     Raises:
-        ValueError: If date or time are not non-empty strings. If the date or time format does not match any of the
+        ValueError: If date or time is not non-empty strings. If the date or time format does not match any of the
             supported formats.
     """
 
@@ -433,13 +433,13 @@ class SurgerySheet:
         # fall-back default values (0). A code value of 0 should be interpreted as not having a code.
         drug_data = DrugData(
             lactated_ringers_solution_volume_ml=animal_data["lrs (ml)"],
-            lactated_ringers_solution_code=animal_data.get("lrs code", 0),
+            lactated_ringers_solution_code=str(animal_data.get("lrs code", 0)),
             ketoprofen_volume_ml=animal_data["ketoprofen (ml)"],
-            ketoprofen_code=animal_data.get("ketoprofen code", 0),
+            ketoprofen_code=str(animal_data.get("ketoprofen code", 0)),
             buprenorphine_volume_ml=animal_data["buprenorphine (ml)"],
-            buprenorphine_code=animal_data.get("buprenorphine code", 0),
+            buprenorphine_code=str(animal_data.get("buprenorphine code", 0)),
             dexamethasone_volume_ml=animal_data["dexamethasone (ml)"],
-            dexamethasone_code=animal_data.get("dexamethasone code", 0),
+            dexamethasone_code=str(animal_data.get("dexamethasone code", 0)),
         )
 
         # Determines the number of implants and injections performed during the processed surgery. This is based on the
@@ -491,7 +491,7 @@ class SurgerySheet:
                     ImplantData(
                         implant=implant_name,
                         implant_target=animal_data[f"{base_key} location"],
-                        implant_code=animal_data.get(f"{base_key} code", 0),
+                        implant_code=str(animal_data.get(f"{base_key} code", 0)),
                         implant_ap_coordinate_mm=ap,
                         implant_ml_coordinate_mm=ml,
                         implant_dv_coordinate_mm=dv,
@@ -517,7 +517,7 @@ class SurgerySheet:
                         injection=injection_name,
                         injection_target=animal_data[f"{base_key} location"],
                         injection_volume_nl=animal_data[f"{base_key} volume (nl)"],
-                        injection_code=animal_data.get(f"{base_key} code", 0),
+                        injection_code=str(animal_data.get(f"{base_key} code", 0)),
                         injection_ap_coordinate_mm=ap,
                         injection_ml_coordinate_mm=ml,
                         injection_dv_coordinate_mm=dv,

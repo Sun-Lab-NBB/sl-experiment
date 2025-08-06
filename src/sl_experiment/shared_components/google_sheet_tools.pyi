@@ -21,7 +21,7 @@ def _convert_date_time_to_timestamp(date: str, time: str) -> int:
         The number of microseconds elapsed since UTC epoch onset as an integer.
 
     Raises:
-        ValueError: If date or time are not non-empty strings. If the date or time format does not match any of the
+        ValueError: If date or time is not non-empty strings. If the date or time format does not match any of the
             supported formats.
     """
 

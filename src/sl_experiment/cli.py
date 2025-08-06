@@ -460,7 +460,7 @@ def lick_training(
     "--initial_speed",
     type=float,
     show_default=True,
-    default=0.40,
+    default=1.10,
     help="The initial speed, in centimeters per second, the animal must maintain to obtain water rewards.",
 )
 @click.option(
@@ -468,7 +468,7 @@ def lick_training(
     "--initial_duration",
     type=float,
     show_default=True,
-    default=0.40,
+    default=1.10,
     help=(
         "The initial duration, in seconds, the animal must maintain above-threshold running speed to obtain water "
         "rewards."
@@ -479,7 +479,7 @@ def lick_training(
     "--increase_threshold",
     type=float,
     show_default=True,
-    default=0.1,
+    default=0.05,
     help=(
         "The volume of water delivered to the animal, in milliliters, after which the speed and duration thresholds "
         "are increased by the specified step-sizes. This is used to make the training progressively harder for the "
@@ -491,7 +491,7 @@ def lick_training(
     "--speed_step",
     type=float,
     show_default=True,
-    default=0.05,
+    default=0.1,
     help=(
         "The amount, in centimeters per second, to increase the speed threshold each time the animal receives the "
         "volume of water specified by the 'increase-threshold' parameter."
@@ -502,7 +502,7 @@ def lick_training(
     "--duration_step",
     type=float,
     show_default=True,
-    default=0.05,
+    default=0.1,
     help=(
         "The amount, in seconds, to increase the duration threshold each time the animal receives the volume of water "
         "specified by the 'increase-threshold' parameter."
@@ -540,7 +540,7 @@ def lick_training(
     "--maximum_idle_time",
     type=float,
     show_default=True,
-    default=0.3,
+    default=0.5,
     help=(
         "The maximum time, in seconds, the animal is allowed to maintain speed that is below the speed threshold, to"
         "still be rewarded. Set to 0 to disable allowing the animal to temporarily dip below running speed threshold."
