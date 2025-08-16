@@ -1,8 +1,6 @@
-# Defines the build system used for the project. For pure-python projects, uses the hatchling build system, which is
-# used internally by scikit-build for our C-extension projects. Therefore, there is clear continuity between our
-# c-extension and pure-python projects.
+# Defines the build system used for the project.
 [build-system]
-requires = ["hatchling>=1,<2"]
+requires = ["hatchling==1.27.0"]
 build-backend = "hatchling.build"
 
 # Project metdata section. Provides the genral ID information about the project.
@@ -30,24 +28,27 @@ classifiers = [
     # Development status
     "Development Status :: 5 - Production/Stable",
     # Intended audience and project topic
-    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering",
     # License
     "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
     # Supported Python Versions
     "Programming Language :: Python :: 3.11",
     # Supported OS systems
     "Operating System :: POSIX :: Linux",
+    # Typing
+    "Typing :: Typed"
 ]
 
-# Runtime project dependencies. This overlaps with the 'condarun' optional list.
+# Runtime project dependencies.
 dependencies = [
-    "zaber-motion==7.10.0",
+    "zaber-motion==7.11.0",
     "crc==7.1.0",
     "tabulate==0.9.0",
     "click==8.2.1",
     "numpy==2.2.6",
     "numba==0.61.2",
-    "intel-cmplr-lib-rt==2025.2.0",
+    "intel-cmplr-lib-rt==2025.2.1",
     "scipy==1.16.1",
     "matplotlib==3.10.5",
     "ataraxis-time==3.0.0",
@@ -59,7 +60,7 @@ dependencies = [
     "tifffile==2025.6.11",
     "imagecodecs==2025.8.2",
     "tqdm==4.67.1",
-    "google-api-python-client==2.177.0",
+    "google-api-python-client==2.179.0",
     "appdirs==1.4.4",
     "pyqt6==6.9.1",
     "pytz==2025.2",
@@ -72,83 +73,25 @@ dependencies = [
 Homepage = "https://github.com/Sun-Lab-NBB/sl-experiment"
 Documentation = "https://sl-experiment-api-docs.netlify.app/"
 
-# Specifies additional dependencies that can be installed alongside the main library. Also, this is the section that
-# stores conda, condarun, and noconda lists that facilitate setting up dependencies via conda where possible.
+# Specifies additional dependencies that can be installed alongside the main library.
 [project.optional-dependencies]
 
-# Runtime dependencies known to be installable with conda for all development platforms
-# (OSX ARM64, WIN AMD64, LIN AMD64). This specification is used by ataraxis-automation to resolve as many
-# project dependencies with conda over pip as possible.
-condarun = [
-    "zaber-motion==7.10.0",
-    "tabulate==0.9.0",
-    "click==8.2.1",
-    "numpy==2.2.6",
-    "numba==0.61.2",
-    "intel-cmplr-lib-rt==2025.2.0",
-    "matplotlib==3.10.5",
-    "tifffile==2025.6.11",
-    "imagecodecs==2025.8.2",
-    "tqdm==4.67.1",
-    "google-api-python-client==2.177.0",
-    "appdirs==1.4.4",
-    "importlib_metadata==8.7.0",
-    "pytz==2025.2",
-    "natsort==8.4.0",
-]
-
-# Dependencies known to be installable with conda for all development platforms (OSX ARM64, WIN AMD64, LIN AMD64).
-conda = [
+# Dependencies that support developing this project.
+dev = [
     # Tox
-    "tox==4.27.0",
-    "tox-uv==1.26.2",
-    "uv==0.8.4",
+    "tox==4.28.4",
+    "uv==0.8.8",
+    "tox-uv==1.27.0",
 
-    # Documentation
-    "sphinx==8.2.3",
-    "sphinx-click==6.0.0",
-    "sphinx-autodoc-typehints==3.2.0",
-
-    # Linting and Stub-generation
-    "mypy==1.17.1",
-    "ruff==0.12.7",
-
-    # Building
-    "hatchling==1.27.0",
-
-    # Distribution
-    "twine==6.1.0",
+    # Development Automation
+    "ataraxis-automation==6.0.0",
 
     # Types
+    "google-api-python-client-stubs==1.30.0",
+    "scipy-stubs==1.16.1.0",
     "types-pytz==2025.2.0.20250516",
     "types-tabulate==0.9.0.20241207",
     "types-tqdm==4.67.0.20250516",
-]
-
-# Dependencies known to not be installable with conda for at least one supported development platform
-# (OSX ARM64, WIN AMD64, LIN AMD64).
-noconda = [
-    # Types:
-    "google-api-python-client-stubs==1.30.0",
-    "scipy-stubs==1.16.1.0",
-
-    # Documentation
-    "sphinx-rtd-dark-mode==1.3.0",
-    "sphinx-rtd-theme==3.0.2",
-
-    # Building
-    "build==1.3.0",
-
-    # Automation
-    "ataraxis-automation==5.0.0",
-]
-
-# A shorthand specification that installs tox and all packages required for development tasks. This specification can
-# be used by developers to quickly install all necessary components for working on this project. Has to be installed
-# from pip.
-dev = [
-    "sl-experiment[conda]",
-    "sl-experiment[noconda]"
 ]
 
 # Currently, the library is intended to be interfaced with more or less exclusively through the CLI commands exported
