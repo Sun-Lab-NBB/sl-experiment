@@ -1,14 +1,12 @@
-# Defines the build system used for the project. For pure-python projects, uses the hatchling build system, which is
-# used internally by scikit-build for our C-extension projects. Therefore, there is clear continuity between our
-# c-extension and pure-python projects.
+# Defines the build system used for the project.
 [build-system]
-requires = ["hatchling>=1,<2"]
+requires = ["hatchling==1.27.0"]
 build-backend = "hatchling.build"
 
 # Project metdata section. Provides the genral ID information about the project.
 [project]
 name = "sl-experiment"
-version = "3.0.3"
+version = "4.0.0rc1"
 description = "Provides tools to acquire, manage, and preprocess scientific data in the Sun (NeuroAI) lab."
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -30,26 +28,29 @@ classifiers = [
     # Development status
     "Development Status :: 5 - Production/Stable",
     # Intended audience and project topic
-    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering",
     # License
     "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
     # Supported Python Versions
     "Programming Language :: Python :: 3.11",
     # Supported OS systems
     "Operating System :: POSIX :: Linux",
+    # Typing
+    "Typing :: Typed"
 ]
 
-# Runtime project dependencies. This overlaps with the 'condarun' optional list.
+# Runtime project dependencies.
 dependencies = [
-    "zaber-motion==7.10.0",
+    "zaber-motion==7.11.0",
     "crc==7.1.0",
     "tabulate==0.9.0",
     "click==8.2.1",
     "numpy==2.2.6",
     "numba==0.61.2",
-    "intel-cmplr-lib-rt==2025.2.0",
+    "intel-cmplr-lib-rt==2025.2.1",
     "scipy==1.16.1",
-    "matplotlib==3.10.3",
+    "matplotlib==3.10.5",
     "ataraxis-time==3.0.0",
     "ataraxis-base-utilities==3.1.0",
     "ataraxis-data-structures==3.1.1",
@@ -57,95 +58,40 @@ dependencies = [
     "ataraxis-communication-interface==3.2.1",
     "ataraxis-video-system==1.1.0",
     "tifffile==2025.6.11",
-    "imagecodecs==2025.3.30",
+    "imagecodecs==2025.8.2",
     "tqdm==4.67.1",
-    "google-api-python-client==2.177.0",
+    "google-api-python-client==2.179.0",
+    "appdirs==1.4.4",
     "pyqt6==6.9.1",
     "pytz==2025.2",
     "importlib_metadata==8.7.0",
     "natsort==8.4.0",
-    "sl-shared-assets==3.1.3",
+    "sl-shared-assets==4.0.1",
 ]
 
 [project.urls]
 Homepage = "https://github.com/Sun-Lab-NBB/sl-experiment"
 Documentation = "https://sl-experiment-api-docs.netlify.app/"
 
-# Specifies additional dependencies that can be installed alongside the main library. Also, this is the section that
-# stores conda, condarun, and noconda lists that facilitate setting up dependencies via conda where possible.
+# Specifies additional dependencies that can be installed alongside the main library.
 [project.optional-dependencies]
 
-# Runtime dependencies known to be installable with conda for all development platforms
-# (OSX ARM64, WIN AMD64, LIN AMD64). This specification is used by ataraxis-automation to resolve as many
-# project dependencies with conda over pip as possible.
-condarun = [
-    "numpy==2.2.6",
-    "numba==0.61.2",
-    "tifffile==2025.6.11",
-    "imagecodecs==2025.3.30",
-    "tqdm==4.67.1",
-    "matplotlib==3.10.3",
-    "zaber-motion==7.8.4",
-    "tabulate==0.9.0",
-    "click==8.2.1",
-    "google-api-python-client==2.177.0",
-    "appdirs==1.4.4",
-    "importlib_metadata==8.7.0",
-    "pytz==2025.2",
-    "natsort==8.4.0",
-]
-
-# Dependencies known to be installable with conda for all development platforms (OSX ARM64, WIN AMD64, LIN AMD64).
-conda = [
-    # Documentation
-    "sphinx>=8,<9",
-    "sphinx-rtd-theme>=3,<4",
-    "sphinx-click>=6,<7",
-    "sphinx-autodoc-typehints>=3,<4",
-
-    # Linting and Stub-generation
-    "mypy>=1,<2",
-    "ruff>=0,<1",
-
-    # Building
-    "hatchling>=1,<2",
-
-    # Distribution
-    "twine>=6,<7",
-    "grayskull>=2,<3",
-]
-
-# Dependencies known to not be installable with conda for at least one supported development platform
-# (OSX ARM64, WIN AMD64, LIN AMD64).
-noconda = [
-    # Tox
-    "tox>=4,<5",
-    "tox-uv>=1,<2",
-    "uv>=0,<1",
-
-    # Types:
-    "google-api-python-client-stubs>=1,<2",
-    "types-tqdm>=4,<5",
-    "types-tabulate>=0,<1",
-    "scipy-stubs>=1,<2",
-    "types-pytz>=2025,<2026",
-
-    # Documentation
-    "sphinx-rtd-dark-mode>=1,<2",
-
-    # Building
-    "build>=1,<2",
-
-    # Automation
-    "ataraxis-automation>=5,<6",
-]
-
-# A shorthand specification that installs tox and all packages required for development tasks. This specification can
-# be used by developers to quickly install all necessary components for working on this project. Has to be installed
-# from pip.
+# Dependencies that support developing this project.
 dev = [
-    "sl-experiment[conda]",
-    "sl-experiment[noconda]"
+    # Tox
+    "tox==4.28.4",
+    "uv==0.8.8",
+    "tox-uv==1.27.0",
+
+    # Development Automation
+    "ataraxis-automation==6.0.0",
+
+    # Types
+    "google-api-python-client-stubs==1.30.0",
+    "scipy-stubs==1.16.1.0",
+    "types-pytz==2025.2.0.20250516",
+    "types-tabulate==0.9.0.20241207",
+    "types-tqdm==4.67.0.20250516",
 ]
 
 # Currently, the library is intended to be interfaced with more or less exclusively through the CLI commands exported
@@ -164,6 +110,9 @@ sl-check-window = "sl_experiment.cli:check_window"
 sl-preprocess = "sl_experiment.cli:preprocess_session"
 sl-purge = "sl_experiment.cli:purge_data"
 sl-delete-session-data = "sl_experiment.cli:delete_session"
+sl-migrate-animal = "sl_experiment.cli:migrate_animal"
+sl-projects = "sl_experiment.cli:list_projects"
+sl-experiments = "sl_experiment.cli:list_experiments"
 
 # Specifies files that should not be included in the source-code distribution but are also not part of gitignore.
 [tool.hatch.build.targets.sdist]
@@ -202,7 +151,7 @@ lint.ignore = [
 quote-style = "double"             # Uses double quotes for strings
 indent-style = "space"             # Uses space for indents
 skip-magic-trailing-comma = false  # Like black, ignores trailing commas
-line-ending = "auto"               # Automatically detects and standardizes line ending character
+line-ending = "auto"               # Automatically detects and standardizes line-ending character
 
 # Docstrings and comments' line length
 [tool.ruff.lint.pycodestyle]

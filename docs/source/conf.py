@@ -46,5 +46,8 @@ typehints_formatter = None
 typehints_use_signature = False
 typehints_use_signature_return = False
 
+# Disables the dark mode by default.
+default_dark_mode = False
+
 # -- Options for HTML output -------------------------------------------------
 html_theme = 'sphinx_rtd_theme'  # Directs sphinx to use RTD theme

@@ -25,16 +25,19 @@ from sl_shared_assets import (
     SessionData,
     SurgeryData,
     SessionTypes,
-    ProcessingTracker,
+    TrackerFileNames,
     RunTrainingDescriptor,
     LickTrainingDescriptor,
     WindowCheckingDescriptor,
     MesoscopeExperimentDescriptor,
     transfer_directory,
+    generate_manager_id,
+    get_processing_tracker,
     calculate_directory_checksum,
 )
 from ataraxis_base_utilities import LogLevel, console, ensure_directory_exists
 from ataraxis_data_structures import compress_npy_logs
+from ataraxis_time.time_helpers import get_timestamp
 
 from .tools import MesoscopeData, get_system_configuration
 from ..shared_components import WaterSheet, SurgerySheet
@@ -1101,67 +1104,64 @@ def _verify_remote_data_integrity(session_data: SessionData) -> None:
 
     Args:
         session_data: The SessionData instance for the processed session.
-
     """
     # Instantiates additional configuration and data classes that contain required information to execute server-side
     # verification
     system_configuration = get_system_configuration()
 
-    # Resolves the path to the server access credentials file.
-    server_credentials = system_configuration.paths.server_credentials_path
-
     # Establishes bidirectional communication with the server via the SSH protocol.
-    server = Server(credentials_path=server_credentials)
+    server = Server(credentials_path=system_configuration.paths.server_credentials_path)
 
-    # The paths below map the same directories, but relative to different roots. 'remote' paths are relative to the
-    # BioHPC server root, providing the paths to the target directories the server itself would use. 'local' paths point
-    # to the same directories as 'remote' paths do, but relative to the VRPC root. These directories are mounted on the
-    # VRPC filesystem via the SMB protocol.
-    remote_processed_directory = Path(server.processed_data_root)
-    remote_job_working_directory = remote_processed_directory.joinpath("temp")  # Shared temporary directory
+    # Resolves the name and the working directory for the verification job
+    timestamp = get_timestamp()
+    job_name = f"{session_data.session_name}_integrity_verification"
+    working_directory = Path(server.user_working_root).joinpath("job_logs", f"{job_name}_{timestamp}")
+
+    # Ensures that the working directory exists on the remote server
+    server.create_directory(remote_path=working_directory)
 
     # Instantiates the Job object for the integrity verification job.
     job = Job(
-        job_name=f"{session_data.session_name}_integrity_verification",
-        output_log=remote_job_working_directory.joinpath(f"{session_data.session_name}_output.txt"),
-        error_log=remote_job_working_directory.joinpath(f"{session_data.session_name}_errors.txt"),
-        working_directory=remote_job_working_directory,
+        job_name=job_name,
+        output_log=working_directory.joinpath(f"output.txt"),
+        error_log=working_directory.joinpath(f"errors.txt"),
+        working_directory=working_directory,
         conda_environment="manage",
-        cpus_to_use=20,
-        ram_gb=50,
-        time_limit=20,
+        cpus_to_use=10,
+        ram_gb=10,
+        time_limit=30,
     )
 
-    # Instructs the job to verify the integrity of the session data on the server and to create the processed data
-    # hierarchy for the session. Since version 3.0.2, (version 3.1.0 of sl-shared-assets), also updates the project
-    # manifest file to reflect the addition of a new session.
-    remote_session_directory = Path(server.raw_data_root).joinpath(
+    # Instructs the server to verify the integrity of the data stored in the remote (server-side) session directory.
+    remote_session_path = Path(server.raw_data_root).joinpath(
         session_data.project_name, session_data.animal_id, session_data.session_name
     )
-    job.add_command(f"sl-verify-session -sp {remote_session_directory} -c -pdr {remote_processed_directory} -um")
+    process_id = generate_manager_id()
+    job.add_command(
+        f"sl-verify-session -sp {remote_session_path} -id {process_id} -c -pdr {server.processed_data_root} -um"
+    )
 
     # Submits the job to be executed on the server.
     job = server.submit_job(job)
-    message = f"Server-side session data integrity verification job: Submitted. SLURM-assigned job ID: {job.job_id}."
-    console.echo(message=message, level=LogLevel.SUCCESS)
 
     # Waits for the job to complete. Unless the server is overbooked, this should not take long.
     delay_timer = PrecisionTimer("s")
     while not server.job_complete(job=job):
-        # Checks completion status every 10 seconds
+        # Checks completion status every 5 seconds
         message = f"Waiting for the integrity verification job with ID {job.job_id} to complete..."
         console.echo(message=message, level=LogLevel.INFO)
         delay_timer.delay_noblock(delay=5, allow_sleep=True)
 
     # Resolves the path to the verification tracker .yaml file on the server and the path to a local copy. The remote
     # tracker is 'pulled' to the specified local path to determine the outcome of the verification.
-    remote_tracker_path = remote_session_directory.joinpath("raw_data", "integrity_verification_tracker.yaml")
+    remote_tracker_path = remote_session_path.joinpath("raw_data", TrackerFileNames.INTEGRITY)
+    tracker_file = session_data.raw_data.raw_data_path.joinpath(TrackerFileNames.INTEGRITY)
 
     # Checks the outcome of the job by evaluating the processing status stored inside the verification tracker file.
-    # To do so, first pulls the tracker file from the remote server to the local machine.
-    tracker_file = session_data.raw_data.raw_data_path.joinpath("tracker.yaml")  # Dumps the file into local raw_data
+    # To do so, first pulls the tracker file from the remote server to the local machine and then loads its data into
+    # a ProcessingTracker instance.
     server.pull_file(remote_file_path=remote_tracker_path, local_file_path=tracker_file)
-    tracker = ProcessingTracker(tracker_file)
+    tracker = get_processing_tracker(root=session_data.raw_data.raw_data_path, file_name=TrackerFileNames.INTEGRITY)
 
     # The tracker should indicate that the job is 'complete' if runtime finishes successfully.
     if not tracker.is_complete:
@@ -1174,12 +1174,8 @@ def _verify_remote_data_integrity(session_data: SessionData) -> None:
         message = f"Session {session_data.session_name} server-side data integrity: Verified."
         console.echo(message=message, level=LogLevel.SUCCESS)
 
-        # Removes job log files from the server temporary directory to avoid unnecessary clutter. For this, uses the
-        # 'remove()' method exposed by the Server class to remove the files via SFTP protocol.
-        stderr_file = remote_job_working_directory.joinpath(f"{session_data.session_name}_errors.txt")
-        stdout_file = remote_job_working_directory.joinpath(f"{session_data.session_name}_output.txt")
-        server.remove(remote_path=stderr_file, is_dir=False)
-        server.remove(remote_path=stdout_file, is_dir=False)
+        # Removes job log files from the server to avoid unnecessary clutter.
+        server.remove(remote_path=working_directory, recursive=True, is_dir=True)
 
         # Dumps the 'ubiquitin.bin' marker file into the raw_data folder on the VRPC, marking the folder for deletion.
         session_data.raw_data.ubiquitin_path.touch(exist_ok=True)
@@ -1316,6 +1312,10 @@ def purge_redundant_data() -> None:
 
     # Removes all discovered redundant data directories
     for candidate in tqdm(deletion_candidates, desc="Deleting redundant data directories", unit="directory"):
+        # If the deletion candidate is a 'raw_data' session directory, escalates the deletion to remove the entire
+        # session directory.
+        if candidate.name == "raw_data":
+            candidate = candidate.parent
         _delete_directory(directory_path=candidate)
 
     message = "Redundant data purging: Complete"
@@ -1378,3 +1378,128 @@ def purge_failed_session(session_data: SessionData) -> None:
 
     message = "Session data purging: Complete"
     console.echo(message=message, level=LogLevel.SUCCESS)
+
+
+def migrate_animal_between_projects(animal: str, source_project: str, target_project: str) -> None:
+    """Moves all sessions for the target animal from the source project to the target project.
+
+    This function is primarily used when animals are moved from the shared 'TestMice' project to a user-specific
+    project. It transfers all available data for the target animal across all destinations, based on the list of
+    sessions stored on the remote server. Any session that has not yet been transferred to the server is excluded from
+    the migration process and will remain on the local acquisition system PC.
+
+    Args:
+        animal: The animal for which to migrate the data.
+        source_project: The name of the project from which to migrate the data.
+        target_project: The name of the project to which the data should be migrated.
+    """
+
+    console.echo(f"Migrating animal {animal} from project {source_project} to project {target_project}...")
+
+    # Queries the system configuration parameters, which includes the paths to all filesystems used to store project
+    # data
+    system_configuration = get_system_configuration()
+
+    # The two main directories used in the migration process are the server storage directory (source) and the
+    # local acquisition-system PC project directory (destination)
+    source_server_root = system_configuration.paths.server_storage_directory.joinpath(source_project, animal)
+    destination_local_root = system_configuration.paths.root_directory.joinpath(target_project, animal)
+
+    # Also resolves the path to the local animal root. This is used when processing sessions to purge migrated sessions
+    # from the source project
+    source_local_root = system_configuration.paths.root_directory.joinpath(source_project, animal)
+
+    # If the target project does not exist, aborts with an error (analogous to how creating de-novo animal
+    # datastructures is handled)
+    if not destination_local_root.parent.exists():
+        message = (
+            f"Unable to migrate the animal {animal} from project {source_project} to project {target_project}. The "
+            f"target project does not exist. Use the 'sl-create-project' command to create the project before "
+            f"migrating animals to this project."
+        )
+        console.error(message=message, error=FileNotFoundError)
+
+    # Ensures that the root directory for the processed animal exists on the local machine.
+    ensure_directory_exists(destination_local_root)
+
+    # Ensures that all locally stored sessions have been processed and moved to the BioHPC server for storage. This is
+    # a prerequisite to ensure that all data is properly migrated from the source project to the target project.
+    local_sessions = [file.parents[1] for file in source_local_root.rglob("*session_data.yaml")]
+    if len(local_sessions) > 0:
+        message = (
+            f"Unable to migrate the animal {animal} from project {source_project} to project {target_project}. The "
+            f"source project directory on the local acquisition-system PC contains non-preprocessed session data. "
+            f"Preprocess all locally stored sessions before starting the migration process."
+        )
+        console.error(message=message, error=FileNotFoundError)
+
+    # Loops over all sessions stored on the server and processes them sequentially
+    sessions = [file.parents[1] for file in source_server_root.rglob("*session_data.yaml")]
+    for session in sessions:
+        console.echo(f"Migrating session {session.name}...")
+        local_session_path = destination_local_root.joinpath(session.name)
+        remote_session_path = source_server_root.joinpath(session.name)
+
+        # Pulls the session to the local machine. The data is pulled into the target project's directory structure.
+        ensure_directory_exists(destination_local_root)
+        transfer_directory(
+            source=remote_session_path, destination=local_session_path, num_threads=30, verify_integrity=False
+        )
+
+        # Copies the session_data.yaml file from the pulled directory to the old local directory for the processed
+        # session. This is then used to remove old session data from all destinations.
+        new_sd_path = local_session_path.joinpath("raw_data", "session_data.yaml")
+        old_sd_path = source_local_root.joinpath(session.name, "raw_data", "session_data.yaml")
+        ensure_directory_exists(old_sd_path)  # Since preprocessing removes the raw_data directory, this recreates it
+        sh.copy2(src=new_sd_path, dst=old_sd_path)
+
+        # Modifies the SessionData instance for the pulled session to use the new project name and the new session data
+        # location
+        session_data = SessionData.load(session_path=local_session_path)
+        session_data.project_name = target_project
+        session_data.raw_data.session_data_path = new_sd_path
+        session_data.save()
+
+        # Reloads session data to apply the changes
+        session_data = SessionData.load(session_path=local_session_path)
+
+        # Runs preprocessing on the session data again, which regenerates the checksum and transfers the data to
+        # the long-term storage destinations.
+        preprocess_session_data(session_data=session_data)
+
+        # Removes now-obsolete server, NAS, and local machine directories. To do so, first marks the old session for
+        # deletion by creating the 'nk.bin' marker and then calls the purge pipeline on that session.
+        old_session_data = SessionData.load(session_path=old_sd_path.parents[1])
+        old_session_data.raw_data.nk_path.touch()
+        purge_failed_session(old_session_data)
+
+    console.echo(f"Migrating persistent data directories...")
+    # Moves ScanImagePC persistent data for the animal between projects This preserves existing MotionEstimator and ROI
+    # data, if any was resolved for any processed session
+    old = system_configuration.paths.mesoscope_directory.joinpath(source_project, animal)
+    new = system_configuration.paths.mesoscope_directory.joinpath(target_project, animal)
+    sh.rmtree(new)
+    sh.move(src=old, dst=new)
+
+    # Also moves the VRPC persistent data for the animal between projects.
+    old = source_local_root.joinpath("persistent_data")
+    new = destination_local_root.joinpath("persistent_data")
+    sh.rmtree(new)
+    sh.move(src=old, dst=new)
+
+    # Removes the old animal directory from all destinations. This also removes any lingering data not moved during
+    # the migration process. This ensures that each animal is found under at most a single project directory on all
+    # destinations.
+    deletion_candidates = [
+        system_configuration.paths.mesoscope_directory.joinpath(source_project, animal),
+        system_configuration.paths.nas_directory.joinpath(source_project, animal),
+        system_configuration.paths.root_directory.joinpath(source_project, animal),
+        system_configuration.paths.server_storage_directory.joinpath(source_project, animal),
+        system_configuration.paths.server_working_directory.joinpath(source_project, animal),
+    ]
+    for candidate in tqdm(deletion_candidates, desc="Deleting redundant animal directories", unit="directory"):
+        _delete_directory(directory_path=candidate)
+
+    # Note, this process intentionally preserves the now-empty animal directory in the original project to keep the
+    # animal project history.
+    console.echo(f"Migration: Complete.", level=LogLevel.SUCCESS)

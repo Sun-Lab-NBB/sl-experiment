@@ -38,7 +38,15 @@ from ataraxis_communication_interface import MQTTCommunication, MicroControllerI
 from .tools import MesoscopeData, RuntimeControlUI, CachedMotifDecomposer, get_system_configuration
 from .visualizers import BehaviorVisualizer
 from .binding_classes import ZaberMotors, VideoSystems, MicroControllerInterfaces
-from ..shared_components import WaterSheet, SurgerySheet, BreakInterface, ValveInterface, get_version_data
+from ..shared_components import (
+    WaterSheet,
+    SurgerySheet,
+    BreakInterface,
+    ValveInterface,
+    get_version_data,
+    get_animal_project,
+    get_project_experiments,
+)
 from .data_preprocessing import purge_failed_session, preprocess_session_data, rename_mesoscope_directory
 
 
@@ -1096,10 +1104,10 @@ class _MesoscopeVRSystem:
         # Microcontroller and data-logger stopping was moved to the end of the shutdown sequence to avoid an extremely
         # rare issue related to one of the microcontrollers deadlocking internally. The idle() state combined with the
         # mesoscope stop sequence should cut all microcontroller data streams, so there is no urgency in actually
-        # terminating these assets before the animal is safely removed from the Mesoscope enclosure and the user
-        # generates the necessary session metadata. Conversely, if microcontrollers cannot be stopped and the user has
-        # to perform a hard shutdown, having this done after resolving session metadata ensures that the user can
-        # manually call preprocessing as soon as the runtime is terminated.
+        # terminating these assets before the animal is safely removed from the Mesoscope enclosure. Conversely, if
+        # microcontrollers cannot be stopped and the user has to perform a hard shutdown, having this done after
+        # resolving session metadata ensures that the user can manually call preprocessing as soon as the runtime is
+        # terminated.
 
         # Stops all microcontroller interfaces
         self._microcontrollers.stop()
@@ -1169,6 +1177,14 @@ class _MesoscopeVRSystem:
             f"delivery valve. When you are ready to start the runtime, use the UI to 'resume' it."
         )
         console.echo(message=message, level=LogLevel.SUCCESS)
+
+        # Secondary message added in 4.0.0 to address frequent user questions and errors.
+        message = (
+            f"Note: All sensors, including the lick sensor, are DISABLED at this time. If you are running a training "
+            f"session, apply the electroconductive gel to the headbar to ensure lick sensor works as expected once the "
+            f"runtime starts."
+        )
+        console.echo(message=message, level=LogLevel.WARNING)
 
         # At this point, the user can use the GUI and the Zaber UI to freely manipulate all components of the
         # mesoscope-VR system.
@@ -1262,7 +1278,7 @@ class _MesoscopeVRSystem:
 
         Raises:
             RuntimeError: If the mesoscope does not confirm frame acquisition within 2 seconds after the
-                acquisition marker file is created and the user chooses to abort the runtime.
+                acquisition marker file is created, and the user chooses to abort the runtime.
         """
 
         # Initializes a second-precise timer to ensure the request is fulfilled within a 2-second timeout
@@ -1323,7 +1339,7 @@ class _MesoscopeVRSystem:
                         message = "Mesoscope frame acquisition: Started."
                         console.echo(message=message, level=LogLevel.SUCCESS)
 
-                        # Prepares assets use to detect and recover from unwanted acquisition interruptions.
+                        # Prepares assets used to detect and recover from unwanted acquisition interruptions.
                         self._mesoscope_frame_count = self._microcontrollers.mesoscope_frame_count
                         self._mesoscope_timer.reset()  # type: ignore
                         self._mesoscope_started = True
@@ -1479,6 +1495,15 @@ class _MesoscopeVRSystem:
         self.descriptor.pause_dispensed_water_volume_ml = float(round(self._paused_water_volume / 1000, ndigits=3))
         self.descriptor.incomplete = False  # If the runtime reaches this point, the session is likely complete.
 
+        # Precalculates the volume of water that the experimenter needs to deliver to the animal if the combined
+        # volume delivered during runtime and paused state is less than 1 ml. This is used to pre-fill the
+        # experimenter-delivered volume field as a convenience feature for experimenters.
+        total_delivered_volume = (
+            self.descriptor.dispensed_water_volume_ml + self.descriptor.pause_dispensed_water_volume_ml
+        )
+        if total_delivered_volume < 1:
+            self.descriptor.experimenter_given_water_volume_ml = float(round(1 - total_delivered_volume, ndigits=3))
+
         # Ensures that the user updates the descriptor file.
         _verify_descriptor_update(
             descriptor=self.descriptor, session_data=self._session_data, mesoscope_data=self._mesoscope_data
@@ -1495,7 +1520,7 @@ class _MesoscopeVRSystem:
         once.
 
         Raises:
-            RuntimeError: If Unity does not send a start message within 10 minutes of this runtime starting and
+            RuntimeError: If Unity does not send a start message within 10 minutes of this runtime starting, and
                 the user chooses to abort the runtime.
         """
 
@@ -1524,42 +1549,17 @@ class _MesoscopeVRSystem:
         )
         console.echo(message=message, level=LogLevel.INFO)
 
-        # Blocks until Unity sends the task termination message or until the user manually aborts the runtime.
-        outcome = ""
-        while outcome != "abort":
-            # Blocks for at most 10 minutes (600 seconds, 600,000 milliseconds) at a time.
-            delay_timer.reset()
-            while delay_timer.elapsed < 600000:
-                # Parses all data received from the Unity game engine.
-                if not self._unity.has_data:
-                    continue
-                topic: str
-                topic, _ = self._unity.get_data()
+        # Blocks until Unity sends the task termination message.
+        while True:
+            # Parses all data received from the Unity game engine.
+            if not self._unity.has_data:
+                continue
+            topic: str
+            topic, _ = self._unity.get_data()
 
-                # If received data is a startup message, breaks the loop
-                if topic == self._unity_startup_topic:
-                    break
-            else:
-                # If the loop above is not broken, this is due to not receiving any message from Unity for 10 minutes.
-                message = (
-                    f"The Mesoscope-VR system did not receive a Unity runtime start message after waiting for 10 "
-                    f"minutes. It is likely that the Unity game engine is not running or is not configured to work "
-                    f"with Mesoscope-VR system. Make sure Unity game engine is started and configured before "
-                    f"continuing."
-                )
-                console.echo(message=message, level=LogLevel.ERROR)
-                outcome = input("Enter 'abort' to abort with an error. Enter anything else to retry: ").lower()
-
-            # Breaks the outer loop if the timer loop was broken due to receiving the expected topic.
-            if outcome != "abort":
+            # If received data is a startup message, breaks the loop
+            if topic == self._unity_startup_topic:
                 break
-
-        else:
-            # The only way to enter this clause if by triggering the 'abort' sequence. In that case,a borts with an
-            # error.
-            message = f"Runtime aborted due to user request."
-            console.error(message=message, error=RuntimeError)
-            raise RuntimeError(message)  # Fallback to appease mypy, should not be reachable
 
         # Verifies that the Unity scene (VR task) started by the user matches the task declared in the experiment
         # configuration file:
@@ -1769,82 +1769,57 @@ class _MesoscopeVRSystem:
         if self._unity is None or self._experiment_configuration is None:
             return
 
-        # Initializes a second-precise timer to ensure the request is fulfilled within a 20-second timeout
+        message = f"Verifying that the Unity game engine is configured to display the correct scene..."
+        console.echo(message=message, level=LogLevel.INFO)
+
+        # Initializes a second-precise timer to limit the rate at which the runtime requests the Unity scene name.
         timeout_timer = PrecisionTimer("s")
 
-        # Discards all data received from Unity up to this point.
+        # Discards all data received from Unity up to this point before entering the scene name verification runtime.
         while self._unity.has_data:
             _ = self._unity.get_data()
 
-        # The procedure repeats until it succeeds or until the user chooses to abort the runtime.
-        outcome = ""
-        while outcome != "abort":
-            # Sends a request for the scene (task) name to Unity GIMBL package.
-            self._unity.send_data(topic=self._unity_scene_request_topic)
+        # Sends a request for the scene (task) name to Unity GIMBL package.
+        self._unity.send_data(topic=self._unity_scene_request_topic)
+        timeout_timer.reset()
 
-            # Gives Unity time to respond
-            timeout_timer.delay_noblock(delay=2)
+        # Blocks until Unity sends the active task scene name.
+        while True:
+            # Continuously requests scene name at 2-second intervals.
+            if timeout_timer.elapsed > 2:
+                # Sends a request for the scene (task) name to Unity GIMBL package.
+                self._unity.send_data(topic=self._unity_scene_request_topic)
+                timeout_timer.reset()
 
-            # Waits at most 5 seconds to receive the response
-            timeout_timer.reset()
-            while timeout_timer.elapsed < 20 and outcome != "abort":
-                # Sends a second request if the response is not received within 2 seconds
-                if timeout_timer.elapsed > 10:
-                    self._unity.send_data(topic=self._unity_scene_request_topic)
+            # Parses all data received from the Unity game engine.
+            if not self._unity.has_data:
+                continue
+            topic: str
+            topic, payload = self._unity.get_data()
 
-                # Repeatedly queries and checks incoming messages from Unity.
-                if not self._unity.has_data:
-                    continue
+            # Specifically looks for a message sent to the scene name topic. Discards all other messages.
+            if topic != self._unity_scene_topic:
+                continue
 
-                topic: str
-                payload: bytes
-                topic, payload = self._unity.get_data()
+            # Extracts the name of the scene running in Unity.
+            scene_name: str = json.loads(payload.decode("utf-8"))["name"]
+            expected_scene_name: str = self._experiment_configuration.unity_scene_name
 
-                # Specifically looks for a message sent to the scene name topic. Discards all other messages.
-                if topic != self._unity_scene_topic:
-                    continue
+            # Verifies if the scene name matches the expected VR task name from the experiment configuration file.
+            if scene_name != expected_scene_name:
+                message = (
+                    f"The name of the scene (VR task) running in Unity ({scene_name}) does not match the expected "
+                    f"name defined in the experiment configuration file ({expected_scene_name}). Reconfigure Unity "
+                    f"to run the correct VR task and try again."
+                )
+                console.echo(message=message, level=LogLevel.ERROR)
+                input("Enter anything to retry: ")
 
-                # Extracts the name of the scene running in Unity.
-                scene_name: str = json.loads(payload.decode("utf-8"))["name"]
-                expected_scene_name: str = self._experiment_configuration.unity_scene_name
-
-                # Verifies if the scene name matches the expected VR task name from the experiment
-                # configuration file.
-                if scene_name != expected_scene_name:
-                    message = (
-                        f"The name of the scene (VR task) running in Unity ({scene_name}) does not match the expected "
-                        f"name defined in the experiment configuration file ({expected_scene_name}). Reconfigure Unity "
-                        f"to run the correct VR task and try again."
-                    )
-                    console.echo(message=message, level=LogLevel.ERROR)
-                    outcome = input("Enter 'abort' to abort with an error. Enter anything else to retry: ").lower()
-
-                    # Restarts the request-response loop if the user chose to retry
-                    if outcome != "abort":
-                        timeout_timer.reset()
-                        continue
-
+            else:
                 # Otherwise, if the scene name matches the expected name, ends the runtime.
                 message = "Unity scene configuration: Confirmed."
                 console.echo(message=message, level=LogLevel.SUCCESS)
                 return
-
-            # If the time loop satisfies exit conditions, this is due to not receiving any message from Unity in time.
-            # Requests user feedback.
-            else:
-                message = (
-                    f"The Mesoscope-VR system has requested the active Unity scene name by sending the trigger to "
-                    f"the {self._unity_scene_request_topic}' topic and received no response in 20 seconds after two "
-                    f"requests. It is likely that the Unity game engine is not running or is not configured to work "
-                    f"with Mesoscope-VR system. Make sure Unity game engine is started and configured before "
-                    f"continuing."
-                )
-                console.echo(message=message, level=LogLevel.ERROR)
-                outcome = input("Enter 'abort' to abort with an error. Enter anything else to retry: ").lower()
-
-        message = f"Runtime aborted due to user request."
-        console.error(message=message, error=RuntimeError)
-        raise RuntimeError(message)  # Fallback to appease mypy, should not be reachable
 
     def _decompose_cue_sequence_into_trials(self) -> None:
         """Decomposes the Virtual Reality task wall cue sequence into a sequence of trials.
@@ -2291,7 +2266,7 @@ class _MesoscopeVRSystem:
         """Depending on the current number of unconsumed rewards and runtime configuration, either delivers or simulates
         the requested volume of water reward.
 
-        This method functions as a wrapper that decides whether to call the _simulate_reward() or the _deliver_reward()
+        This method functions as a wrapper that decides whether to call the _simulate_reward() or _deliver_reward()
         method. This ensures that each external water delivery call complies with the runtime's policy on delivering
         rewards when the animal is not consuming them.
 
@@ -2883,6 +2858,25 @@ def lick_training_logic(
         )
         console.error(message=message, error=FileNotFoundError)
 
+    # These checks have been added in version 4.0.0 to help users abide by the 'one animal one project' policy. Now all
+    # runtimes require each animal to be assigned to a single project.
+    animal_projects = get_animal_project(animal_id=animal_id)
+    if len(animal_projects) > 1:  # Rare case, often indicative of old migration pipeline use
+        message = (
+            f"Unable to execute the lick training for the animal {animal_id} of project {project_name}. The animal "
+            f"is associated with multiple projects on the local machine, which is not allowed. Remove the animal from "
+            f"all extra projects and rerun the training."
+        )
+        console.error(message=message, error=ValueError)
+    elif len(animal_projects) == 1 and animal_projects[0] != project_name:  # This indicates user error
+        message = (
+            f"Unable to execute the lick training for the animal {animal_id} and project {project_name}. The animal "
+            f"is already associated with a different project '{animal_projects[0]}'. Either adjust the project name to "
+            f"match the animal's current project or use the 'sl-migrate-animal' CLI command to first migrate the "
+            f"animal to the desired project and rerun the training."
+        )
+        console.error(message=message, error=ValueError)
+
     # Queries the current Python and library version information. This is then used to initialize the SessionData
     # instance.
     python_version, library_version = get_version_data()
@@ -3144,6 +3138,25 @@ def run_training_logic(
             f"before running training or experiment sessions."
         )
         console.error(message=message, error=FileNotFoundError)
+
+    # These checks have been added in version 4.0.0 to help users abide by the 'one animal one project' policy. Now all
+    # runtimes require each animal to be assigned to a single project.
+    animal_projects = get_animal_project(animal_id=animal_id)
+    if len(animal_projects) > 1:  # Rare case, often indicative of old migration pipeline use
+        message = (
+            f"Unable to execute the run training for the animal {animal_id} of project {project_name}. The animal "
+            f"is associated with multiple projects on the local machine, which is not allowed. Remove the animal from "
+            f"all extra projects and rerun the training."
+        )
+        console.error(message=message, error=ValueError)
+    elif len(animal_projects) == 1 and animal_projects[0] != project_name:  # This indicates user error
+        message = (
+            f"Unable to execute the run training for the animal {animal_id} and project {project_name}. The animal "
+            f"is already associated with a different project '{animal_projects[0]}'. Either adjust the project name to "
+            f"match the animal's current project or use the 'sl-migrate-animal' CLI command to first migrate the "
+            f"animal to the desired project and rerun the training."
+        )
+        console.error(message=message, error=ValueError)
 
     # Queries the current Python and library version information. This is then used to initialize the SessionData
     # instance.
@@ -3504,6 +3517,35 @@ def experiment_logic(
         )
         console.error(message=message, error=FileNotFoundError)
 
+    # Prevents the user from executing the runtime if the project is not configured to run the requested experiment
+    project_experiments = get_project_experiments(project=project_name)
+    if experiment_name not in project_experiments:
+        message = (
+            f"Unable to execute the {experiment_name} experiment for the animal {animal_id} of project {project_name}. "
+            f"The target project does not have an experiment configuration file named after the target experiment. Use "
+            f"the 'sl-create-experiment' command to create the experiment before rerunning the experiment session."
+        )
+        console.error(message=message, error=FileNotFoundError)
+
+    # These checks have been added in version 4.0.0 to help users abide by the 'one animal one project' policy. Now all
+    # runtimes require each animal to be assigned to a single project.
+    animal_projects = get_animal_project(animal_id=animal_id)
+    if len(animal_projects) > 1:  # Rare case, often indicative of old migration pipeline use
+        message = (
+            f"Unable to execute the {experiment_name} experiment for the animal {animal_id} of project {project_name}. "
+            f"The animal is associated with multiple projects on the local machine, which is not allowed. Remove the "
+            f"animal from all extra projects and rerun the experiment."
+        )
+        console.error(message=message, error=ValueError)
+    elif len(animal_projects) == 1 and animal_projects[0] != project_name:  # This indicates user error
+        message = (
+            f"Unable to execute the {experiment_name} experiment for the animal {animal_id} and project "
+            f"{project_name}. The animal is already associated with a different project '{animal_projects[0]}'. Either "
+            f"adjust the project name to match the animal's current project or use the 'sl-migrate-animal' CLI command "
+            f"to first migrate the animal to the desired project and rerun the experiment."
+        )
+        console.error(message=message, error=ValueError)
+
     # Queries the current Python and library version information. This is then used to initialize the SessionData
     # instance.
     python_version, library_version = get_version_data()
@@ -3710,6 +3752,25 @@ def window_checking_logic(
             f"before running training or experiment sessions."
         )
         console.error(message=message, error=FileNotFoundError)
+
+    # These checks have been added in version 4.0.0 to help users abide by the 'one animal one project' policy. Now all
+    # runtimes require each animal to be assigned to a single project.
+    animal_projects = get_animal_project(animal_id=animal_id)
+    if len(animal_projects) > 1:  # Rare case, often indicative of old migration pipeline use
+        message = (
+            f"Unable to execute the window checking for the animal {animal_id} of project {project_name}. "
+            f"The animal is associated with multiple projects on the local machine, which is not allowed. Remove the "
+            f"animal from all extra projects and rerun the window checking."
+        )
+        console.error(message=message, error=ValueError)
+    elif len(animal_projects) == 1 and animal_projects[0] != project_name:  # This indicates user error
+        message = (
+            f"Unable to execute the window checking for the animal {animal_id} and project "
+            f"{project_name}. The animal is already associated with a different project '{animal_projects[0]}'. Either "
+            f"adjust the project name to match the animal's current project or use the 'sl-migrate-animal' CLI command "
+            f"to first migrate the animal to the desired project and rerun the window checking."
+        )
+        console.error(message=message, error=ValueError)
 
     # Queries the current Python and library version information. This is then used to initialize the SessionData
     # instance.

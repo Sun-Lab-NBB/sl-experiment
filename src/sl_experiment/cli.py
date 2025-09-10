@@ -6,14 +6,9 @@ from pathlib import Path
 import click
 from sl_shared_assets import (
     SessionData,
-    ExperimentState,
-    ExperimentTrial,
-    MesoscopeSystemConfiguration,
-    MesoscopeExperimentConfiguration,
     get_system_configuration_data,
-    set_system_configuration_file,
 )
-from ataraxis_base_utilities import LogLevel, console, ensure_directory_exists
+from ataraxis_base_utilities import console
 
 from .mesoscope_vr import (
     CRCCalculator,
@@ -26,105 +21,12 @@ from .mesoscope_vr import (
     window_checking_logic,
     discover_zaber_devices,
     preprocess_session_data,
+    migrate_animal_between_projects,
 )
+from .shared_components import get_project_experiments
 
 
-@click.command()
-@click.option(
-    "-i",
-    "--input_string",
-    prompt="Enter the string to be checksummed: ",
-    help="The string to calculate the CRC checksum for.",
-)
-def calculate_crc(input_string: str) -> None:
-    """Calculates the CRC32-XFER checksum for the input string."""
-    calculator = CRCCalculator()
-    crc_checksum = calculator.string_checksum(input_string)
-    click.echo(f"The CRC32-XFER checksum for the input string '{input_string}' is: {crc_checksum}.")
-
-
-@click.command()
-@click.option(
-    "-e",
-    "--errors",
-    is_flag=True,
-    show_default=True,
-    default=False,
-    help="Determines whether to display errors encountered when connecting to evaluated serial ports.",
-)
-def list_devices(errors: bool) -> None:
-    """Displays information about all Zaber devices available through USB ports of the host-system."""
-    discover_zaber_devices(silence_errors=not errors)
-
-
-@click.command()
-@click.option(
-    "-od",
-    "--output_directory",
-    type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
-    required=True,
-    help="The absolute path to the directory where to store the generated system configuration file.",
-)
-@click.option(
-    "-as",
-    "--acquisition_system",
-    type=str,
-    show_default=True,
-    required=True,
-    default="mesoscope-vr",
-    help=(
-        "The type (name) of the data acquisition system for which to generate the configuration file. Note, currently, "
-        "only the following types are supported: mesoscope-vr."
-    ),
-)
-def generate_system_configuration_file(output_directory: str, acquisition_system: str) -> None:
-    """Generates a precursor system configuration file for the target acquisition system and configures all local
-    Sun lab libraries to use that file to load the acquisition system configuration data.
-
-    This command is typically used when setting up a new data acquisition system in the lab. The system configuration
-    only needs to be specified on the machine (PC) that runs the sl-experiment library and manages the acquisition
-    runtime if the system uses multiple machines (PCs). Once the system configuration .yaml file is created via this
-    command, editing the configuration parameters in the file will automatically take effect during all following
-    runtimes.
-    """
-
-    # Verifies that the input path is a valid directory path and, if necessary, creates the directory specified by the
-    # path.
-    path = Path(output_directory)
-    if not path.is_dir():
-        message = (
-            f"Unable to generate the system configuration file for the system '{acquisition_system}'. The path to "
-            f"the output directory ({path}) is not a valid directory path."
-        )
-        console.error(message=message, error=ValueError)
-    else:
-        ensure_directory_exists(path)
-
-    # Mesoscope
-    if acquisition_system.lower() == "mesoscope-vr":
-        file_name = "mesoscope_system_configuration.yaml"
-        file_path = path.joinpath(file_name)
-        system_configuration = MesoscopeSystemConfiguration()
-        system_configuration.save(file_path)
-        set_system_configuration_file(file_path)
-        message = (
-            f"Mesoscope-VR system configuration file: generated. Edit the configuration parameters stored inside the "
-            f"{file_name} file to match the state of the acquisition system and use context."
-        )
-        # noinspection PyTypeChecker
-        console.echo(message=message, level=LogLevel.SUCCESS)
-
-    # For unsupported system types, raises an error message
-    else:
-        message = (
-            f"Unable to generate the system configuration file for the system '{acquisition_system}'. The input "
-            f"acquisition system is not supported (not recognized). Currently, only the following acquisition "
-            f"systems are supported: mesoscope-vr."
-        )
-        console.error(message=message, error=ValueError)
-
-
-@click.command()
+@click.command("project")
 @click.option(
     "-p",
     "--project",
@@ -154,7 +56,7 @@ def generate_project_data_structure(project: str) -> None:
     console.echo(message=f"Project {project} data structure: generated.", level=LogLevel.SUCCESS)
 
 
-@click.command()
+@click.command("experiment")
 @click.option(
     "-p",
     "--project",
@@ -251,6 +153,77 @@ def generate_experiment_configuration_file(project: str, experiment: str, state_
     experiment_configuration.to_yaml(file_path=file_path)
     # noinspection PyTypeChecker
     console.echo(message=f"Experiment {experiment} configuration file: generated.", level=LogLevel.SUCCESS)
+
+
+@click.command()
+@click.option(
+    "-i",
+    "--input_string",
+    prompt="Enter the string to be checksummed: ",
+    help="The string to calculate the CRC checksum for.",
+)
+def calculate_crc(input_string: str) -> None:
+    """Calculates the CRC32-XFER checksum for the input string."""
+    calculator = CRCCalculator()
+    crc_checksum = calculator.string_checksum(input_string)
+    click.echo(f"The CRC32-XFER checksum for the input string '{input_string}' is: {crc_checksum}.")
+
+
+@click.command()
+@click.option(
+    "-e",
+    "--errors",
+    is_flag=True,
+    show_default=True,
+    default=False,
+    help="Determines whether to display errors encountered when connecting to evaluated serial ports.",
+)
+def list_devices(errors: bool) -> None:
+    """Displays information about all Zaber devices available through USB ports of the host-system."""
+    discover_zaber_devices(silence_errors=not errors)
+
+
+@click.command()
+def list_projects() -> None:
+    """Lists the names of all projects that have been configured to work with the acquisition system managed by this
+    PC."""
+    system_configuration = get_system_configuration_data()
+    projects = [
+        directory.stem for directory in system_configuration.paths.root_directory.iterdir() if directory.is_dir()
+    ]
+    if len(projects) > 0:
+        console.echo(
+            f"The acquisition system managed by this PC contains the following projects: {', '.join(projects)}."
+        )
+    else:
+        console.echo(
+            f"The acquisition system managed by this PC does not contain any projects. To add a new project, use the "
+            f"'sl-create-project' CLI command exposed by this library.."
+        )
+
+
+@click.command()
+@click.option(
+    "-p",
+    "--project",
+    type=str,
+    required=True,
+    help="The name of the project for which to discover and print the experiment configurations.",
+)
+def list_experiments(project: str) -> None:
+    """Lists the names of all experiment configurations available on the local acquisition system PC for the target
+    project."""
+    experiments = get_project_experiments(project=project)
+    if len(experiments) > 0:
+        console.echo(
+            f"The '{project}' project is configured to execute the following experiments: {', '.join(experiments)}."
+        )
+    else:
+        console.echo(
+            f"The '{project}' project is currently not configured to support any experiments. Use the "
+            f"'sl-create-experiment' CLI command exposed by this library to add experiment configurations to this "
+            f"project."
+        )
 
 
 @click.command()
@@ -415,7 +388,7 @@ def lick_training(
     "--initial_speed",
     type=float,
     show_default=True,
-    default=0.40,
+    default=1.10,
     help="The initial speed, in centimeters per second, the animal must maintain to obtain water rewards.",
 )
 @click.option(
@@ -423,7 +396,7 @@ def lick_training(
     "--initial_duration",
     type=float,
     show_default=True,
-    default=0.40,
+    default=1.10,
     help=(
         "The initial duration, in seconds, the animal must maintain above-threshold running speed to obtain water "
         "rewards."
@@ -434,7 +407,7 @@ def lick_training(
     "--increase_threshold",
     type=float,
     show_default=True,
-    default=0.1,
+    default=0.05,
     help=(
         "The volume of water delivered to the animal, in milliliters, after which the speed and duration thresholds "
         "are increased by the specified step-sizes. This is used to make the training progressively harder for the "
@@ -446,7 +419,7 @@ def lick_training(
     "--speed_step",
     type=float,
     show_default=True,
-    default=0.05,
+    default=0.1,
     help=(
         "The amount, in centimeters per second, to increase the speed threshold each time the animal receives the "
         "volume of water specified by the 'increase-threshold' parameter."
@@ -457,7 +430,7 @@ def lick_training(
     "--duration_step",
     type=float,
     show_default=True,
-    default=0.05,
+    default=0.1,
     help=(
         "The amount, in seconds, to increase the duration threshold each time the animal receives the volume of water "
         "specified by the 'increase-threshold' parameter."
@@ -495,7 +468,7 @@ def lick_training(
     "--maximum_idle_time",
     type=float,
     show_default=True,
-    default=0.3,
+    default=0.5,
     help=(
         "The maximum time, in seconds, the animal is allowed to maintain speed that is below the speed threshold, to"
         "still be rewarded. Set to 0 to disable allowing the animal to temporarily dip below running speed threshold."
@@ -727,3 +700,36 @@ def delete_session(session_path: Path) -> None:
     # Removes all data of the target session from all data acquisition and long-term storage machines accessible to the
     # host-computer
     purge_failed_session(session_data)
+
+
+@click.command()
+@click.option(
+    "-s",
+    "--source",
+    type=str,
+    required=True,
+    help="The name of the project from which to migrate the data.",
+)
+@click.option(
+    "-d",
+    "--destination",
+    type=str,
+    required=True,
+    help="The name of the project to which to migrate the data.",
+)
+@click.option(
+    "-a",
+    "--animal",
+    type=str,
+    required=True,
+    help="The ID of the animal whose data is being migrated.",
+)
+def migrate_animal(source: str, destination: str, animal: str) -> None:
+    """Migrates all sessions for the specified animal from the source project to the target project.
+
+    This CLI command is primarily intended to move mice from the initial 'test' project to the final experiment project
+    in which they will participate. Note, the migration process determines what data to move based on the current state
+    of the project data on the remote compute server. Any session that has not been moved to the server will be ignored
+    during this command's runtime.
+    """
+    migrate_animal_between_projects(source_project=source, target_project=destination, animal=animal)
