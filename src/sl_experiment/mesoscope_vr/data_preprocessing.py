@@ -15,7 +15,7 @@ from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_compl
 
 from tqdm import tqdm
 import numpy as np
-from natsort import natsorted
+from natsort_rs import natsort as natsorted
 import tifffile
 from numpy.typing import NDArray
 from ataraxis_time import PrecisionTimer
