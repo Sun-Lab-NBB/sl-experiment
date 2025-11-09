@@ -15,12 +15,9 @@ from ataraxis_communication_interface import (
     ModuleData,
     ModuleState,
     ModuleInterface,
-    ModuleParameters,
-    OneOffModuleCommand,
-    RepeatedModuleCommand,
 )
 
-# Precreates NumPy constants used when resetting SharedMemoryArray instances to optimize runtime performance.
+# Pre-creates NumPy constants used when resetting SharedMemoryArray instances to optimize runtime performance.
 _zero_uint = np.uint64(0)
 _zero_float = np.float64(0.0)
 
@@ -74,9 +71,7 @@ class EncoderInterface(ModuleInterface):
         super().__init__(
             module_type=np.uint8(2),
             module_id=np.uint8(1),
-            mqtt_communication=False,
             data_codes=data_codes,
-            mqtt_command_topics=None,
             error_codes=None,
         )
 
