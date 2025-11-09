@@ -7,10 +7,10 @@ build-backend = "hatchling.build"
 [project]
 name = "sl-experiment"
 version = "4.0.0rc1"
-description = "Provides tools to acquire, manage, and preprocess scientific data in the Sun (NeuroAI) lab."
+description = "Provides the assets for acquiring and preprocessing scientific data in the Sun (NeuroAI) lab."
 readme = "README.md"
 license = { file = "LICENSE" }
-requires-python = ">=3.11, <3.12"  # Limited to 3.11 until AXVS (genicam) supports 3.12+
+requires-python = ">=3.13, <3.14"  # Limited to 3.13 until AXVS (genicam) supports 3.14+
 authors = [
     { name = "Ivan Kondratyev" },
     { name = "Kushaan Gupta" },
@@ -33,7 +33,7 @@ classifiers = [
     # License
     "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
     # Supported Python Versions
-    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.13",
     # Supported OS systems
     "Operating System :: POSIX :: Linux",
     # Typing
@@ -42,31 +42,31 @@ classifiers = [
 
 # Runtime project dependencies.
 dependencies = [
-    "zaber-motion==7.11.0",
+    "zaber-motion==7.14.0",
     "crc==7.1.0",
-    "tabulate==0.9.0",
-    "click==8.2.1",
-    "numpy==2.2.6",
-    "numba==0.61.2",
-    "intel-cmplr-lib-rt==2025.2.1",
-    "scipy==1.16.1",
-    "matplotlib==3.10.5",
-    "ataraxis-time==3.0.0",
-    "ataraxis-base-utilities==3.1.0",
-    "ataraxis-data-structures==3.1.1",
-    "ataraxis-transport-layer-pc==1.1.0",
-    "ataraxis-communication-interface==3.2.1",
-    "ataraxis-video-system==1.1.0",
-    "tifffile==2025.6.11",
+    "tabulate2==1.10.2",
+    "click==8.3.0",
+    "numpy==2.3.4",
+    "numba==0.62.1",
+    "intel-cmplr-lib-rt==2025.3.1",
+    "scipy==1.16.3",
+    "matplotlib==3.10.7",
+    "ataraxis-time==5.0.0",
+    "ataraxis-base-utilities==5.0.0",
+    "ataraxis-data-structures==5.0.0",
+    "ataraxis-transport-layer-pc==3.0.0",
+    "ataraxis-communication-interface==4.0.1",
+    "ataraxis-video-system==2.0.0",
+    "tifffile==2025.10.16",
     "imagecodecs==2025.8.2",
     "tqdm==4.67.1",
-    "google-api-python-client==2.179.0",
+    "google-api-python-client==2.187.0",
     "appdirs==1.4.4",
-    "pyqt6==6.9.1",
+    "pyqt6==6.10.0",
     "pytz==2025.2",
     "importlib_metadata==8.7.0",
-    "natsort==8.4.0",
-    "sl-shared-assets==4.0.1",
+    "natsort-rs==0.1.15",
+    "sl-shared-assets==6.0.1rc1",
 ]
 
 [project.urls]
@@ -79,19 +79,20 @@ Documentation = "https://sl-experiment-api-docs.netlify.app/"
 # Dependencies that support developing this project.
 dev = [
     # Tox
-    "tox==4.28.4",
-    "uv==0.8.8",
-    "tox-uv==1.27.0",
+    "tox>=4,<5",
+    "uv>=0,<1",
+    "tox-uv>=1,<2",
 
     # Development Automation
-    "ataraxis-automation==6.0.0",
+    "ataraxis-automation>=7,<8",
 
     # Types
-    "google-api-python-client-stubs==1.30.0",
-    "scipy-stubs==1.16.1.0",
-    "types-pytz==2025.2.0.20250516",
-    "types-tabulate==0.9.0.20241207",
-    "types-tqdm==4.67.0.20250516",
+    "types-appdirs>=1,<2",
+    "google-api-python-client-stubs>=1,<2",
+    "scipy-stubs>=1,<2",
+    "types-pytz>=2025,<2026",
+    "types-tabulate>=0,<1",
+    "types-tqdm>=4,<5",
 ]
 
 # Currently, the library is intended to be interfaced with more or less exclusively through the CLI commands exported
@@ -126,7 +127,7 @@ packages = ["src/sl_experiment"]
 [tool.ruff]
 line-length = 120         # The maximum column length is set to 120 for this project.
 indent-width = 4          # Same as black, indents are 4 spaces
-target-version = "py311"  # Targets the lowest supported version of python
+target-version = "py313"  # Targets the lowest supported version of python
 src = ["src"]             # The name of the source directory
 
 # Excludes 'service' .py files, such as the sphinx configuration file, from linting.
