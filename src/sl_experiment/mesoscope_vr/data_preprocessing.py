@@ -15,8 +15,8 @@ from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_compl
 
 from tqdm import tqdm
 import numpy as np
-from natsort_rs import natsort as natsorted
 import tifffile
+from natsort_rs import natsort as natsorted
 from numpy.typing import NDArray
 from ataraxis_time import PrecisionTimer
 from sl_shared_assets import (
@@ -435,7 +435,6 @@ def _process_invariant_metadata(file: Path, ops_path: Path, metadata_path: Path)
         metadata_path: The path to the metadata.json file that should be created by this function. This is resolved
             by the ProjectData class to match the processed project, animal, and session combination.
     """
-
     # Reads the frame-invariant metadata from the first page (frame) of the stack. This metadata is the same across
     # all frames and stacks.
     with tifffile.TiffFile(file) as tiff:
@@ -467,7 +466,6 @@ def _preprocess_video_names(session_data: SessionData) -> None:
     Args:
         session_data: The SessionData instance for the processed session.
     """
-
     # Resolves the path to the camera frame directory
     camera_frame_directory = Path(session_data.raw_data.camera_data_path)
     session_name = session_data.session_name
@@ -604,8 +602,8 @@ def _pull_mesoscope_data(
     # If the user has repeatedly failed 5 attempts in a row, exits with a runtime error.
     if error:
         message = (
-            f"Failed 5 consecutive attempts to locate all required mesoscope frame files. Aborting mesoscope "
-            f"data processing and terminating the preprocessing runtime."
+            "Failed 5 consecutive attempts to locate all required mesoscope frame files. Aborting mesoscope "
+            "data processing and terminating the preprocessing runtime."
         )
         console.error(message=message, error=RuntimeError)
 
@@ -893,7 +891,6 @@ def _resolve_telomere_marker(session_data: SessionData) -> None:
     Args:
         session_data: The SessionData instance for the processed session.
     """
-
     # Loads the session descriptor file to read the state of the 'incomplete' flag.
     descriptor_path = Path(session_data.raw_data.session_descriptor_path)
     descriptor: RunTrainingDescriptor | LickTrainingDescriptor | MesoscopeExperimentDescriptor
@@ -930,7 +927,6 @@ def _preprocess_google_sheet_data(session_data: SessionData) -> None:
     Raises:
         ValueError: If the session_type attribute of the input SessionData instance is not one of the supported options.
     """
-
     # Queries the data acquisition system configuration parameters.
     system_configuration = get_system_configuration()
 
@@ -991,7 +987,7 @@ def _preprocess_google_sheet_data(session_data: SessionData) -> None:
             session_type=session_data.session_type,
         )
 
-        message = f"Water restriction log entry: Written."
+        message = "Water restriction log entry: Written."
         console.echo(message=message, level=LogLevel.SUCCESS)
 
     # Loads the surgery log Google Sheet file
@@ -1006,7 +1002,7 @@ def _preprocess_google_sheet_data(session_data: SessionData) -> None:
     if quality != "":
         sl_sheet.update_surgery_quality(quality=int(quality))
 
-        message = f"Surgery quality: Updated."
+        message = "Surgery quality: Updated."
         console.echo(message=message, level=LogLevel.SUCCESS)
 
     # Extracts the surgery data from the Google sheet file
@@ -1015,7 +1011,7 @@ def _preprocess_google_sheet_data(session_data: SessionData) -> None:
     # Saves the data as a .yaml file to the session directory
     data.to_yaml(Path(session_data.raw_data.surgery_metadata_path))
 
-    message = f"Surgery data snapshot: Saved."
+    message = "Surgery data snapshot: Saved."
     console.echo(message=message, level=LogLevel.SUCCESS)
 
 
@@ -1042,7 +1038,6 @@ def _push_data(
             advised to set this value so that num_threads * 2 (number of destinations) does not exceed the total
             number of CPU cores - 4.
     """
-
     # Uses SessionData to get the paths to remote destinations
     mesoscope_data = MesoscopeData(session_data)
     destinations = (
@@ -1123,8 +1118,8 @@ def _verify_remote_data_integrity(session_data: SessionData) -> None:
     # Instantiates the Job object for the integrity verification job.
     job = Job(
         job_name=job_name,
-        output_log=working_directory.joinpath(f"output.txt"),
-        error_log=working_directory.joinpath(f"errors.txt"),
+        output_log=working_directory.joinpath("output.txt"),
+        error_log=working_directory.joinpath("errors.txt"),
         working_directory=working_directory,
         conda_environment="manage",
         cpus_to_use=10,
@@ -1331,7 +1326,6 @@ def purge_failed_session(session_data: SessionData) -> None:
     Args:
         session_data: The SessionData instance for the session whose data needs to be removed.
     """
-
     # If a session does not contain the nk.bin marker, this suggests that it was able to successfully initialize the
     # runtime and likely contains valid data. IN this case, asks the user to confirm they intend to proceed with the
     # deletion. Sessions with nk.bin markers are considered safe for removal at all times.
@@ -1352,7 +1346,7 @@ def purge_failed_session(session_data: SessionData) -> None:
                 break
 
             # Aborts without deleting
-            elif answer.lower() == "no":
+            if answer.lower() == "no":
                 message = f"Session {session_data.session_name} data purging: Aborted"
                 console.echo(message=message, level=LogLevel.SUCCESS)
                 return
@@ -1393,7 +1387,6 @@ def migrate_animal_between_projects(animal: str, source_project: str, target_pro
         source_project: The name of the project from which to migrate the data.
         target_project: The name of the project to which the data should be migrated.
     """
-
     console.echo(f"Migrating animal {animal} from project {source_project} to project {target_project}...")
 
     # Queries the system configuration parameters, which includes the paths to all filesystems used to store project
@@ -1473,7 +1466,7 @@ def migrate_animal_between_projects(animal: str, source_project: str, target_pro
         old_session_data.raw_data.nk_path.touch()
         purge_failed_session(old_session_data)
 
-    console.echo(f"Migrating persistent data directories...")
+    console.echo("Migrating persistent data directories...")
     # Moves ScanImagePC persistent data for the animal between projects This preserves existing MotionEstimator and ROI
     # data, if any was resolved for any processed session
     old = system_configuration.paths.mesoscope_directory.joinpath(source_project, animal)
@@ -1502,4 +1495,4 @@ def migrate_animal_between_projects(animal: str, source_project: str, target_pro
 
     # Note, this process intentionally preserves the now-empty animal directory in the original project to keep the
     # animal project history.
-    console.echo(f"Migration: Complete.", level=LogLevel.SUCCESS)
+    console.echo("Migration: Complete.", level=LogLevel.SUCCESS)

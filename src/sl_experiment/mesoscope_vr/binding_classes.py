@@ -1,11 +1,11 @@
 """This module binds low-level API classes for all Mesoscope-VR components (cameras, microcontrollers, Zaber motors).
-These bindings streamline the API used to interface with these components during experiment and training runtimes."""
+These bindings streamline the API used to interface with these components during experiment and training runtimes.
+"""
 
 from pathlib import Path
 
 import numpy as np
-from ataraxis_time import PrecisionTimer
-from sl_shared_assets import ZaberPositions
+from sl_shared_assets import ZaberPositions, MesoscopeSystemConfiguration
 from ataraxis_video_system import (
     VideoCodecs,
     VideoSystem,
@@ -17,7 +17,7 @@ from ataraxis_video_system import (
 )
 from ataraxis_base_utilities import LogLevel, console
 from ataraxis_data_structures import DataLogger
-from ataraxis_time.time_helpers import convert_time
+from ataraxis_time.time_helpers import TimeUnits, convert_time
 from ataraxis_communication_interface import MicroControllerInterface
 
 from .tools import get_system_configuration
@@ -137,7 +137,6 @@ class ZaberMotors:
             This method moves all Zaber axes in parallel to optimize runtime speed. This relies on the Mesoscope-VR
             system to be assembled in a way where it is safe to move all motors at the same time.
         """
-
         # Disables the safety motor lock before moving the motors.
         self.unpark_motors()
 
@@ -212,7 +211,6 @@ class ZaberMotors:
         Notes:
             This method moves all motor axes in parallel to optimize runtime speed.
         """
-
         # Disables the safety motor lock before moving the motors.
         self.unpark_motors()
 
@@ -241,7 +239,6 @@ class ZaberMotors:
             The motors are moved to the parking positions stored in the non-volatile memory of each motor controller.
             This method moves all motor axes in parallel to optimize runtime speed.
         """
-
         # Disables the safety motor lock before moving the motors.
         self.unpark_motors()
 
@@ -273,7 +270,6 @@ class ZaberMotors:
             Formerly, the only maintenance step was the calibration of the water-valve, so some low-level functions
             still reference it as 'valve-position' and 'calibrate-position'.
         """
-
         # Disables the safety motor lock before moving the motors.
         self.unpark_motors()
 
@@ -301,7 +297,6 @@ class ZaberMotors:
         Notes:
             This method moves all MOTOR axes in parallel to optimize runtime speed.
         """
-
         # Disables the safety motor lock before moving the motors.
         self.unpark_motors()
 
@@ -344,7 +339,6 @@ class ZaberMotors:
             identically to this command. However, to improve runtime safety and the clarity of the class API, it is
             highly encouraged to use this method to unmount the animal.
         """
-
         # Disables the safety motor lock before moving the motors.
         self.unpark_motors()
 
@@ -384,7 +378,6 @@ class ZaberMotors:
         Primarily, this method is used to issue commands to multiple motor groups and then block until all motors in
         all groups finish moving. This optimizes the overall time taken to move the motors.
         """
-
         # Waits for the motors to finish moving. Note, motor state polling includes the built-in delay mechanism to
         # prevent overwhelming the communication interface.
         while (
@@ -410,7 +403,8 @@ class ZaberMotors:
 
     def park_motors(self) -> None:
         """Parks all managed motor groups, preventing them from being moved via this library or Zaber GUI until
-        they are unparked via the unpark_motors() command."""
+        they are unparked via the unpark_motors() command.
+        """
         self._headbar_pitch.park()
         self._headbar_roll.park()
         self._headbar_z.park()
@@ -441,28 +435,22 @@ class ZaberMotors:
 
 
 class MicroControllerInterfaces:
-    """Interfaces with all Ataraxis Micro Controller (AMC) devices that control Mesoscope-VR system hardware and acquire
-    non-video behavior data.
-
-    This class interfaces with the three AMC controllers used during various runtimes: Actor, Sensor, and Encoder. The
-    class exposes methods to send commands to the hardware modules managed by these microcontrollers. In turn, these
-    modules control specific components of the Mesoscope-Vr system, such as rotary encoders, solenoid valves, and
-    conductive lick sensors.
+    """Interfaces with the Ataraxis Micro Controller (AMC) devices that control the Mesoscope-VR system's virtual
+    reality environment hardware and acquire non-video behavior data.
 
     Notes:
-        This class is primarily intended to be used internally by the _MesoscopeExperiment and _BehaviorTraining
-        classes. Our maintenance CLI (sl-maintain) is the only exception to this rule, as it directly uses this class to
-        facilitate Mesoscope-VR maintenance tasks.
+        This class interfaces with the three AMC controllers used during various runtimes: Actor, Sensor, and Encoder.
 
-        Calling the initializer does not start the underlying processes. Use the start() method before issuing other
-        commands to properly initialize all remote processes. This design is intentional and is used during experiment
-        and training runtimes to parallelize data preprocessing for the previous session and runtime preparation for the
-        following session.
+        Calling the class initializer does not start the microcontroller communication processes. Use the start() method
+        before calling other instance methods.
+
+        The instance reserves 3 CPU cores for running the microcontroller communication processes.
 
     Args:
-        data_logger: The initialized DataLogger instance used to log the data generated by the managed microcontrollers.
-            For most runtimes, this argument is resolved by the _MesoscopeExperiment or _BehaviorTraining classes that
-            initialize this class.
+        data_logger: The initialized DataLogger instance to use for logging the data generated by the managed
+            microcontrollers.
+        system_configuration: The MesoscopeSystemConfiguration instance that stores the configuration parameters for the
+            Mesoscope-VR system.
 
     Attributes:
         _started: Tracks whether the VR system and experiment runtime are currently running.
@@ -475,10 +463,7 @@ class MicroControllerInterfaces:
         _screen_state: Tracks the current VR screen state.
         _frame_monitoring: Tracks the current mesoscope frame monitoring state.
         _torque_monitoring: Tracks the current torque monitoring state.
-        _lick_monitoring: Tracks the current lick monitoring state.
-        _encoder_monitoring: Tracks the current encoder monitoring state.
         _break_state: Tracks the current break state.
-        _delay_timer: Stores a millisecond-precise timer used by certain sequential command methods.
         wheel_break: The interface that controls the electromagnetic break attached to the running wheel.
         valve: The interface that controls the solenoid water valve that delivers water to the animal.
         screens: The interface that controls the power state of the VR display screens.
@@ -492,19 +477,18 @@ class MicroControllerInterfaces:
         _encoder: The main interface for the 'Encoder' Ataraxis Micro Controller (AMC) device.
     """
 
-    def __init__(self, data_logger: DataLogger) -> None:
-        # Initializes the start state tracker first
+    def __init__(self, data_logger: DataLogger, system_configuration: MesoscopeSystemConfiguration) -> None:
+        # Tracks whether the communication processes have been started.
         self._started: bool = False
 
-        # Retrieves the Mesoscope-VR system configuration parameters and saves them to class attribute to use them from
-        # class methods.
-        self._system_configuration = get_system_configuration()
+        # Caches the system configuration parameters to the instance attribute.
+        self._system_configuration: MesoscopeSystemConfiguration = system_configuration
 
-        # Converts the general sensor polling delay and stores it in class attribute. Unless other duration / delay
-        # parameters, this one is frequently queried by class methods, so it is beneficial to statically compute
-        # it once.
-        self._sensor_polling_delay: float = convert_time(  # type: ignore
-            time=self._system_configuration.microcontrollers.sensor_polling_delay_ms, from_units="ms", to_units="us"
+        # Converts the sensor polling frequency from milliseconds to microseconds.
+        self._sensor_polling_delay: float = convert_time(
+            time=self._system_configuration.microcontrollers.sensor_polling_delay_ms,
+            from_units=TimeUnits.MILLISECOND,
+            to_units=TimeUnits.MICROSECOND,
         )
 
         # Initializes internal tracker variables
@@ -513,11 +497,7 @@ class MicroControllerInterfaces:
         self._screen_state: bool = False
         self._frame_monitoring: bool = False
         self._torque_monitoring: bool = False
-        self._lick_monitoring: bool = False
-        self._encoder_monitoring: bool = False
         self._break_state: bool = True  # The break is normally engaged, so it starts engaged by default
-
-        self._delay_timer = PrecisionTimer("ms")
 
         # ACTOR. Actor AMC controls the hardware that needs to be triggered by PC at irregular intervals. Most of such
         # hardware is designed to produce some form of an output: deliver water reward, engage wheel breaks, issue a
@@ -541,9 +521,9 @@ class MicroControllerInterfaces:
 
         # Main interface:
         self._actor: MicroControllerInterface = MicroControllerInterface(
-            controller_id=np.uint8(101),  # Hardcoded
-            microcontroller_serial_buffer_size=8192,  # Hardcoded
-            microcontroller_usb_port=self._system_configuration.microcontrollers.actor_port,
+            controller_id=np.uint8(101),
+            buffer_size=8192,
+            port=self._system_configuration.microcontrollers.actor_port,
             data_logger=data_logger,
             module_interfaces=(self.wheel_break, self.valve, self.screens),
         )
@@ -566,36 +546,36 @@ class MicroControllerInterfaces:
             baseline_voltage=self._system_configuration.microcontrollers.torque_baseline_voltage_adc,
             maximum_voltage=self._system_configuration.microcontrollers.torque_maximum_voltage_adc,
             sensor_capacity=self._system_configuration.microcontrollers.torque_sensor_capacity_g_cm,
-            object_diameter=self._system_configuration.microcontrollers.wheel_diameter_cm,
+            wheel_diameter=self._system_configuration.microcontrollers.wheel_diameter_cm,
             debug=self._system_configuration.microcontrollers.debug,
         )
 
         # Main interface:
         self._sensor: MicroControllerInterface = MicroControllerInterface(
-            controller_id=np.uint8(152),  # Hardcoded
-            microcontroller_serial_buffer_size=8192,  # Hardcoded
-            microcontroller_usb_port=self._system_configuration.microcontrollers.sensor_port,
+            controller_id=np.uint8(152),
+            buffer_size=8192,
+            port=self._system_configuration.microcontrollers.sensor_port,
             data_logger=data_logger,
             module_interfaces=(self.mesoscope_frame, self.lick, self.torque),
         )
 
-        # ENCODER. Encoder AMC is specifically designed to interface with a rotary encoder connected to the running
-        # wheel. The encoder uses hardware interrupt logic to maintain high precision and, therefore, it is isolated
-        # to a separate microcontroller to ensure adequate throughput.
+        # ENCODER. Encoder AMC is specifically designed to interface with a quadrature encoder connected to the running
+        # wheel. The encoder uses hardware interrupt logic to maintain high precision and is isolated to a separate
+        # microcontroller to ensure the highest possible throughput and sensor resolution.
 
         # Module interfaces:
         self.wheel_encoder: EncoderInterface = EncoderInterface(
             encoder_ppr=self._system_configuration.microcontrollers.wheel_encoder_ppr,
-            object_diameter=self._system_configuration.microcontrollers.wheel_diameter_cm,
+            wheel_diameter=self._system_configuration.microcontrollers.wheel_diameter_cm,
             cm_per_unity_unit=self._system_configuration.microcontrollers.cm_per_unity_unit,
-            debug=self._system_configuration.microcontrollers.debug,
+            polling_frequency=system_configuration.microcontrollers.wheel_encoder_polling_delay_us,
         )
 
         # Main interface:
         self._encoder: MicroControllerInterface = MicroControllerInterface(
-            controller_id=np.uint8(203),  # Hardcoded
-            microcontroller_serial_buffer_size=8192,  # Hardcoded
-            microcontroller_usb_port=self._system_configuration.microcontrollers.encoder_port,
+            controller_id=np.uint8(203),
+            buffer_size=8192,
+            port=self._system_configuration.microcontrollers.encoder_port,
             data_logger=data_logger,
             module_interfaces=(self.wheel_encoder,),
         )
@@ -620,7 +600,6 @@ class MicroControllerInterfaces:
             to call this method before enabling the DataLogger class. However, it is strongly advised to enable the
             DataLogger as soon as possible to avoid data piling up in the buffer.
         """
-
         # Prevents executing this method if the MicroControllers are already running.
         if self._started:
             return
@@ -630,7 +609,6 @@ class MicroControllerInterfaces:
 
         # Starts all microcontroller interfaces
         self._actor.start()
-        self._actor.unlock_controller()  # Only Actor outputs data, so no need to unlock other controllers.
         self._sensor.start()
         self._encoder.start()
 
@@ -691,7 +669,6 @@ class MicroControllerInterfaces:
         MicroControllers, so calling this method also guarantees no MicroController data will be lost if the DataLogger
         process is terminated.
         """
-
         # Prevents stopping an already stopped VR process.
         if not self._started:
             return
@@ -709,25 +686,6 @@ class MicroControllerInterfaces:
 
         message = "Ataraxis Micro Controller (AMC) Interfaces: Terminated."
         console.echo(message=message, level=LogLevel.SUCCESS)
-
-    def enable_encoder_monitoring(self) -> None:
-        """Enables wheel encoder monitoring at a 2 kHz rate.
-
-        This means that, at most, the Encoder will send the data to the PC at the 2 kHz rate. The Encoder collects data
-        at the native rate supported by the microcontroller hardware, which likely exceeds the reporting rate.
-        """
-        if not self._encoder_monitoring:
-            self.wheel_encoder.reset_pulse_count()
-            self.wheel_encoder.check_state(
-                repetition_delay=np.uint32(self._system_configuration.microcontrollers.wheel_encoder_polling_delay_us)
-            )
-            self._encoder_monitoring = True
-
-    def disable_encoder_monitoring(self) -> None:
-        """Stops monitoring the wheel encoder."""
-        if self._encoder_monitoring:
-            self.wheel_encoder.reset_command_queue()
-            self._encoder_monitoring = False
 
     def enable_break(self) -> None:
         """Engages the wheel break at maximum strength, preventing the animal from running on the wheel."""
@@ -770,23 +728,6 @@ class MicroControllerInterfaces:
         if self._frame_monitoring:
             self.mesoscope_frame.reset_command_queue()
             self._frame_monitoring = False
-
-    def enable_lick_monitoring(self) -> None:
-        """Enables monitoring the state of the conductive lick sensor at ~ 1 kHZ rate.
-
-        The lick sensor measures the voltage across the lick sensor and reports surges in voltage to the PC as a
-        reliable proxy for tongue-to-sensor contact. Most lick events span at least 100 ms of time and, therefore, the
-        rate of 1 kHZ is adequate for resolving all expected single-lick events.
-        """
-        if not self._lick_monitoring:
-            self.lick.check_state(repetition_delay=np.uint32(self._sensor_polling_delay))
-            self._lick_monitoring = True
-
-    def disable_lick_monitoring(self) -> None:
-        """Stops monitoring the conductive lick sensor."""
-        if self._lick_monitoring:
-            self.lick.reset_command_queue()
-            self._lick_monitoring = False
 
     def enable_torque_monitoring(self) -> None:
         """Enables monitoring the torque sensor at ~ 1 kHZ rate.
@@ -834,7 +775,6 @@ class MicroControllerInterfaces:
                 with this argument ensures that the delivered reward always uses the same volume and tone_duration as
                 the previous reward command. Primarily, this argument is used when receiving reward commands from Unity.
         """
-
         # This ensures that the valve settings are only updated if volume, tone_duration, or both changed compared to
         # the previous command runtime. This ensures that the valve settings are only updated when this is necessary,
         # reducing communication overhead.
@@ -866,7 +806,6 @@ class MicroControllerInterfaces:
             tone_duration: The duration of the auditory tone, in milliseconds, to emit while simulating the water
                 reward delivery.
         """
-
         # This ensures that the valve settings are only updated if tone_duration changed compared to the previous
         # command runtime. This ensures that the valve settings are only updated when this is necessary, reducing
         # communication overhead.
@@ -972,12 +911,6 @@ class MicroControllerInterfaces:
         """Resets the mesoscope frame counter to 0."""
         self.mesoscope_frame.reset_pulse_count()
 
-    def reset_distance_tracker(self) -> None:
-        """Resets the total distance traveled by the animal since runtime onset and the current position of the animal
-        relative to runtime onset to 0.
-        """
-        self.wheel_encoder.reset_distance_tracker()
-
     @property
     def mesoscope_frame_count(self) -> np.uint64:
         """Returns the total number of mesoscope frame acquisition pulses recorded since runtime onset."""
@@ -987,25 +920,6 @@ class MicroControllerInterfaces:
     def delivered_water_volume(self) -> np.float64:
         """Returns the total volume of water, in microliters, dispensed by the valve since runtime onset."""
         return self.valve.delivered_volume
-
-    @property
-    def lick_count(self) -> np.uint64:
-        """Returns the total number of licks recorded since runtime onset."""
-        return self.lick.lick_count
-
-    @property
-    def traveled_distance(self) -> np.float64:
-        """Returns the total distance, in centimeters, traveled by the animal since runtime onset.
-
-        This value does not account for the direction of travel and is a monotonically increasing count of traveled
-        centimeters.
-        """
-        return self.wheel_encoder.traveled_distance
-
-    @property
-    def position(self) -> np.float64:
-        """Returns the current absolute position of the animal, in Unity units, relative to runtime onset."""
-        return self.wheel_encoder.absolute_position
 
 
 class VideoSystems:
@@ -1158,7 +1072,6 @@ class VideoSystems:
         This method sets up both the frame acquisition (producer) process and the frame saver (consumer) process.
         However, the consumer process will not save any frames until the save_face_camera_frames () method is called.
         """
-
         # Prevents executing this method if the face camera is already running
         if self._face_camera_started:
             return
@@ -1180,7 +1093,6 @@ class VideoSystems:
         both cameras. However, the consumer processes will not save any frames until the save_body_camera_frames ()
         method is called.
         """
-
         # Prevents executing this method if the body cameras are already running
         if self._body_cameras_started:
             return
@@ -1198,7 +1110,6 @@ class VideoSystems:
 
     def save_face_camera_frames(self) -> None:
         """Starts saving the frames acquired by the face camera as a video file."""
-
         # Starts frame saving process
         self._face_camera.start_frame_saving()
 
@@ -1207,7 +1118,6 @@ class VideoSystems:
 
     def save_body_camera_frames(self) -> None:
         """Starts saving the frames acquired by the left and right body cameras as a video file."""
-
         # Starts frame saving process
         self._left_camera.start_frame_saving()
         self._right_camera.start_frame_saving()
@@ -1223,7 +1133,6 @@ class VideoSystems:
         VideoSystems, so calling this method also guarantees no VideoSystem data will be lost if the DataLogger
         process is terminated. Similarly, this guarantees the integrity of the generated video files.
         """
-
         # Prevents executing this method if no cameras are running.
         if not self._face_camera_started and not self._body_cameras_started:
             return
@@ -1254,17 +1163,20 @@ class VideoSystems:
     @property
     def face_camera_log_path(self) -> Path:
         """Returns the path to the compressed .npz archive that stores the data logged by the face camera during
-        runtime."""
+        runtime.
+        """
         return self._face_camera.log_path
 
     @property
     def left_camera_log_path(self) -> Path:
         """Returns the path to the compressed .npz archive that stores the data logged by the left body camera during
-        runtime."""
+        runtime.
+        """
         return self._left_camera.log_path
 
     @property
     def right_camera_log_path(self) -> Path:
         """Returns the path to the compressed .npz archive that stores the data logged by the right body camera during
-        runtime."""
+        runtime.
+        """
         return self._right_camera.log_path

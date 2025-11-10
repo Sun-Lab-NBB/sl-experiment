@@ -1,15 +1,16 @@
 """This module provides classes and methods used to interface with Google Sheet files to extract the stored data or
 write new data. Primarily, these tools are used to synchronize the data acquired and stored during training and
-experiment runtimes with the data inside the lab's Google Sheets."""
+experiment runtimes with the data inside the lab's Google Sheets.
+"""
 
 import re
 from typing import Any
 from pathlib import Path
 from datetime import (
+    UTC,
     date as dt_date,
     time as dt_time,
     datetime,
-    timezone,
 )
 
 import pytz
@@ -47,8 +48,6 @@ _required_surgery_headers: set[str] = {
     "ketoprofen (ml)",
     "buprenorphine (ml)",
     "dexamethasone (ml)",
-    # Updating surgery quality:
-    "surgery quality",
 }
 
 _required_water_restriction_headers: set[str] = {
@@ -78,7 +77,6 @@ def _convert_date_time_to_timestamp(date: str, time: str) -> int:
         ValueError: If date or time is not non-empty strings. If the date or time format does not match any of the
             supported formats.
     """
-
     # Ensures date and time are provided
     if not isinstance(date, str) or len(date) < 1:
         message = (
@@ -124,7 +122,7 @@ def _convert_date_time_to_timestamp(date: str, time: str) -> int:
 
     # Constructs the full DT object and converts it into the UTC timestamp in microseconds.
     full_datetime = datetime.combine(date=date_obj, time=time_obj)
-    full_datetime = full_datetime.replace(tzinfo=timezone.utc)
+    full_datetime = full_datetime.replace(tzinfo=UTC)
 
     # Gets and translates the second timestamp (float) into microseconds (int). Then, returns it to the caller
     return int(full_datetime.timestamp() * 1_000_000)
@@ -145,7 +143,6 @@ def _extract_coordinate_value(substring: str) -> float:
     Raises:
         ValueError: If the input substring does not contain a numerical value for the anatomical coordinate.
     """
-
     # Finds the coordinate number that precedes the anatomical axis designator (AP, ML, DV) and extracts it as a float.
     match = re.search(r"([-+]?\d*\.?\d+)\s*(AP|ML|DV)", substring)
 
@@ -198,7 +195,7 @@ def _convert_index_to_column_letter(index: int) -> str:
     This is used when parsing the available headers from the Google Sheet to generate the initial column-to-header
     mapping dictionary.
 
-     Args:
+    Args:
         index: The 0-based column index to be converted.
 
     Returns:
@@ -374,7 +371,6 @@ class SurgerySheet:
         Returns:
             A fully configured SurgeryData instance that stores the extracted data.
         """
-
         # Finds the index of the target animal in the ID value tuple to determine the row number to parse from the
         # sheet. The index is modified by 2 because: +1 for 0-indexing to 1-indexing conversion, +1 to account for the
         # header row
@@ -610,11 +606,9 @@ class SurgerySheet:
             The column ID (e.g., "A", "B", "C") corresponding to the column name. If the target column header does not
             exist, the method returns None to indicate the header is not available.
         """
-
         if column_name.lower() in self._headers:
             return self._headers[column_name]
-        else:
-            return None
+        return None
 
 
 class WaterSheet:
@@ -881,7 +875,7 @@ class WaterSheet:
 
         return row_index
 
-    def _write_value(self, column_name: str, row_index: int, value: int | float | str) -> None:
+    def _write_value(self, column_name: str, row_index: int, value: float | str) -> None:
         """Writes the input value to the specific cell based on column name and row index.
 
         This is the primary method used to write new values to the managed water restriction log Google Sheet.
@@ -899,9 +893,7 @@ class WaterSheet:
 
         # Formats value based on its type and column
         formatted_value = value
-        if column_name.lower() == "weight (g)":
-            formatted_value = round(float(value), ndigits=1)
-        elif column_name.lower() == "water given (ml)":
+        if column_name.lower() == "weight (g)" or column_name.lower() == "water given (ml)":
             formatted_value = round(float(value), ndigits=1)
 
         # Writes the value to the target cell

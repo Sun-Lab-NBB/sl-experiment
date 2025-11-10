@@ -13,16 +13,16 @@ from .module_interfaces import (
 from .google_sheet_tools import WaterSheet, SurgerySheet
 
 __all__ = [
-    "EncoderInterface",
-    "TTLInterface",
     "BreakInterface",
-    "ValveInterface",
+    "EncoderInterface",
     "LickInterface",
-    "TorqueInterface",
     "ScreenInterface",
     "SurgerySheet",
+    "TTLInterface",
+    "TorqueInterface",
+    "ValveInterface",
     "WaterSheet",
-    "get_version_data",
     "get_animal_project",
     "get_project_experiments",
+    "get_version_data",
 ]

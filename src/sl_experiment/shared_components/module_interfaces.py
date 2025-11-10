@@ -1,6 +1,7 @@
-"""This module provides the interfaces (ModuleInterface class implementations) for the hardware designed in the Sun lab.
-These interfaces are designed to work with the hardware modules assembled and configured according to the instructions
-from our microcontrollers' library: https://github.com/Sun-Lab-NBB/sl-micro-controllers."""
+"""This module provides the interfaces (ModuleInterface class implementations) for the hardware modules assembled and
+configured according to the instructions from the Sun lab's microcontrollers library:
+https://github.com/Sun-Lab-NBB/sl-micro-controllers.
+"""
 
 import math
 from typing import Any
@@ -17,54 +18,49 @@ from ataraxis_communication_interface import (
     ModuleInterface,
 )
 
-# Pre-creates NumPy constants used when resetting SharedMemoryArray instances to optimize runtime performance.
-_zero_uint = np.uint64(0)
-_zero_float = np.float64(0.0)
+# Pre-creates NumPy constants used throughout the module to optimize runtime performance by avoiding unnecessary
+# object recreation.
+_ZERO_UINT64 = np.uint64(0)
+_ZERO_FLOAT64 = np.float64(0.0)
+_ZERO_UINT32 = np.uint32(0)
+_FALSE = np.bool(False)
 
 
 class EncoderInterface(ModuleInterface):
-    """Interfaces with EncoderModule instances running on Ataraxis MicroControllers.
-
-    EncoderModule allows interfacing with quadrature encoders used to monitor the direction and magnitude of a connected
-    object's rotation. To achieve the highest resolution, the module relies on hardware interrupt pins to detect and
-    handle the pulses sent by the two encoder channels.
+    """Interfaces with EncoderModule instances running on the Encoder MicroController.
 
     Notes:
-        This interface sends CW and CCW motion data to Unity via the 'LinearTreadmill/Data' MQTT topic.
-
-        The default initial encoder readout is zero (no CW or CCW motion). The class instance is zeroed at communication
-        initialization.
+        Type code 2.
 
     Args:
-        encoder_ppr: The resolution of the managed quadrature encoder, in Pulses Per Revolution (PPR). This is the
-            number of quadrature pulses the encoder emits per full 360-degree rotation. If this number is not known,
-            provide a placeholder value and use the get_ppr () command to estimate the PPR using the index channel of
-            the encoder.
-        object_diameter: The diameter of the rotating object connected to the encoder, in centimeters. This is used to
-            convert encoder pulses into rotated distance in cm.
-        cm_per_unity_unit: The length of each Unity 'unit' in centimeters. This is used to translate raw encoder pulses
-            into Unity 'units' before sending the data to Unity.
-        debug: A boolean flag that configures the interface to dump certain data received from the microcontroller into
-            the terminal. This is used during debugging and system calibration and should be disabled for most runtimes.
+        encoder_ppr: The resolution of the module's quadrature encoder, in Pulses Per Revolution (PPR).
+        wheel_diameter: The diameter of the running wheel attached to the encoder, in centimeters.
+        cm_per_unity_unit: The length of each Virtual Reality environment distance unit (Unity unit) in centimeters.
+        polling_frequency: The frequency, in microseconds, at which to check the encoder's state.
 
     Attributes:
-        _motion_topic: Stores the MQTT motion topic.
-        _ppr: Stores the resolution of the managed quadrature encoder.
-        _object_diameter: Stores the diameter of the object connected to the encoder.
-        _cm_per_pulse: Stores the conversion factor that translates encoder pulses into centimeters.
-        _unity_unit_per_pulse: Stores the conversion factor to translate encoder pulses into Unity units.
-        _debug: Stores the debug flag.
-        _distance_tracker: Stores the SharedMemoryArray that stores the absolute distance traveled by the animal since
-            class initialization, in centimeters. Note, the distance does NOT account for the direction of travel. It is
-            a monotonically incrementing count of traversed centimeters.
+        _motion_topic: The MQTT topic used to transfer the collected motion data to the Virtual Reality environment
+            manager.
+        _ppr: The resolution of the managed quadrature encoder.
+        _wheel_diameter: The diameter of the running wheel connected to the encoder.
+        _cm_per_pulse: The conversion factor that translates encoder pulses into centimeters.
+        _unity_unit_per_pulse: The conversion factor that translates encoder pulses into Unity units.
+        _polling_frequency: The frequency, in microseconds, at which to check the encoder's state when monitoring the
+            encoder.
+        _distance_tracker: The SharedMemoryArray instance that transfers the distance data collected by the module from
+            the communication process to other runtime processes.
+        _check_state: The code for the CheckState module command.
+        _reset_encoder: The code for the ResetEncoder module command.
+        _get_ppr: The code for the GetPPR module command.
+        _monitoring: Tracks whether the instance is currently configured to monitor the managed encoder's state.
     """
 
     def __init__(
         self,
-        encoder_ppr: int = 8192,
-        object_diameter: float = 15.0333,  # 0333 is to account for the wheel wrap
-        cm_per_unity_unit: float = 10.0,
-        debug: bool = False,
+        encoder_ppr: int,
+        wheel_diameter: float,
+        cm_per_unity_unit: float,
+        polling_frequency: int,
     ) -> None:
         data_codes: set[np.uint8] = {np.uint8(51), np.uint8(52), np.uint8(53)}  # kRotatedCCW, kRotatedCW, kPPR
 
@@ -76,67 +72,70 @@ class EncoderInterface(ModuleInterface):
         )
 
         # Saves additional data to class attributes.
-        self._motion_topic: str = "LinearTreadmill/Data"  # Hardcoded output topic
+        self._motion_topic: str = "LinearTreadmill/Data"
         self._ppr: int = encoder_ppr
-        self._object_diameter: float = object_diameter
-        self._debug: bool = debug
+        self._wheel_diameter: float = wheel_diameter
 
         # Computes the conversion factor to go from pulses to centimeters
         self._cm_per_pulse: np.float64 = np.round(
-            a=np.float64((math.pi * self._object_diameter) / self._ppr),
+            a=np.float64((math.pi * self._wheel_diameter) / self._ppr),
             decimals=8,
         )
 
         # Computes the conversion factor to translate encoder pulses into unity units. Rounds to 8 decimal places for
         # consistency and to ensure repeatability.
         self._unity_unit_per_pulse: np.float64 = np.round(
-            a=np.float64((math.pi * object_diameter) / (encoder_ppr * cm_per_unity_unit)),
+            a=np.float64((math.pi * wheel_diameter) / (encoder_ppr * cm_per_unity_unit)),
             decimals=8,
         )
 
-        # Precreates a shared memory array used to track and share the absolute distance, in centimeters, traveled by
+        # Saves the encoder's polling frequency in microseconds.
+        self._polling_frequency = np.uint32(polling_frequency)
+
+        # Pre-creates a shared memory array used to track and share the absolute distance, in centimeters, traveled by
         # the animal since class initialization and the current absolute position of the animal in centimeters relative
-        # to onset position.
+        # to the onset position.
         self._distance_tracker: SharedMemoryArray = SharedMemoryArray.create_array(
             name=f"{self._module_type}_{self._module_id}_distance_tracker",
             prototype=np.zeros(shape=2, dtype=np.float64),
-            exist_ok=True,
+            exists_ok=True,
         )
 
+        # Statically computes command code objects
+        self._check_state = np.uint8(1)
+        self._reset_encoder = np.uint8(2)
+        self._get_ppr = np.uint8(3)
+
+        # Tracks the current encoder monitoring status
+        self._monitoring: bool = False
+
     def __del__(self) -> None:
-        """Ensures the speed_tracker is properly cleaned up when the class is garbage-collected."""
+        """Ensures the instance's shared memory buffer is properly cleaned up when the instance is garbage-collected."""
         self._distance_tracker.disconnect()
         self._distance_tracker.destroy()
 
+    def initialize_local_assets(self) -> None:
+        """Connects to the instance's shared memory buffer and enables buffer cleanup at shutdown."""
+        self._distance_tracker.connect()
+        self._distance_tracker.enable_buffer_destruction()
+
     def initialize_remote_assets(self) -> None:
-        """Connects to the speed_tracker SharedMemoryArray."""
+        """Connects to the instance's shared memory buffer."""
         self._distance_tracker.connect()
 
     def terminate_remote_assets(self) -> None:
-        """Disconnects from the speed_tracker SharedMemoryArray."""
+        """Disconnects from the instance's shared memory buffer."""
         self._distance_tracker.disconnect()
 
-    def process_received_data(self, message: ModuleState | ModuleData) -> None:
-        """Processes incoming data in real time.
-
-        Motion data (codes 51 and 52) is converted into CW / CCW vectors, translated from pulses to Unity units, and
-        is sent to Unity via MQTT. Encoder PPR data (code 53) is printed via the console.
-
-        Also, keeps track of the total distance traveled by the animal since class initialization, relative to the
-        initial position at runtime onset and updates the distance_tracker SharedMemoryArray.
-
-        Notes:
-            If debug mode is enabled, motion data is also converted to centimeters and printed via the console.
+    def process_received_data(self, message: ModuleData) -> None:
+        """Updates the distance data stored in the instance's shared memory buffer based on the messages received from
+        the microcontroller.
         """
-        # Static guard to appease mypy, all processed module messages are ModuleData types at this point.
-        if isinstance(message, ModuleState):
-            return
-
-        # If the incoming message is the PPR report, prints the data via console.
+        # If the incoming message is the PPR report, prints the data to the terminal via console.
         if message.event == 53:
-            console.echo(f"Encoder ppr: {message.data_object}")
+            console.echo(f"Encoder ppr: {message.data_object}.")
 
-        # Otherwise, the message necessarily has to be reporting rotation into CCW or CW direction
+        # Otherwise, the message necessarily has to be reporting rotation in the CCW or CW direction
         # (event code 51 or 52).
 
         # The rotation direction is encoded via the message event code. CW rotation (code 52) is interpreted as negative
@@ -145,82 +144,426 @@ class EncoderInterface(ModuleInterface):
 
         # Translates the absolute motion into the CW / CCW vector and converts from raw pulse count to Unity units
         # using the precomputed conversion factor. Uses float64 and rounds to 8 decimal places for consistency and
-        # precision
-        signed_motion = np.round(
+        # precision.
+        unity_motion = np.round(
             a=np.float64(message.data_object) * self._unity_unit_per_pulse * sign,
             decimals=8,
         )
 
-        # Converts the motion into centimeters. Does NOT include the sign as right now we do not care about the
-        # direction of motion with how we use this data.
+        # Converts the motion into centimeters. Does not include the sign, as this value is used to compute the absolute
+        # traveled distance regardless of the traveled direction.
         cm_motion = np.round(
             a=np.float64(message.data_object) * self._cm_per_pulse,
             decimals=8,
         )
 
-        # Continuously aggregates the distance data into the tracker array.
-        distance = self._distance_tracker.read_data(index=0, convert_output=False)
-        distance += cm_motion
-        self._distance_tracker.write_data(index=0, data=distance)
+        # Increments the total distance traveled by the animal.
+        self._distance_tracker[0] += cm_motion
 
-        # Also updates the current absolute position of the animal (given relative to experiment onset position 0)
-        absolute_position = self._distance_tracker.read_data(index=1, convert_output=False)
-        absolute_position += signed_motion
-        self._distance_tracker.write_data(index=1, data=absolute_position)
-
-        # If the class is in the debug mode, prints the motion data via the console
-        if self._debug:
-            console.echo(message=f"Encoder moved {cm_motion * sign} cm.")  # Includes the sign here
-
-    def parse_mqtt_command(self, topic: str, payload: bytes | bytearray) -> None:
-        """Not used."""
-        return
+        # Updates the current absolute position of the animal in the VR environment (given relative to experiment onset
+        # position 0).
+        self._distance_tracker[1] += unity_motion
 
     def set_parameters(
         self,
-        report_ccw: np.bool | bool = np.bool(True),
-        report_cw: np.bool | bool = np.bool(True),
-        delta_threshold: np.uint32 | int = np.uint32(10),
+        report_ccw: np.bool,
+        report_cw: np.bool,
+        delta_threshold: np.uint32,
     ) -> None:
-        """Changes the PC-addressable runtime parameters of the EncoderModule instance.
-
-        Use this method to package and apply new PC-addressable parameters to the EncoderModule instance managed by
-        this Interface class.
+        """Sets the module's PC-addressable runtime parameters to the input values.
 
         Args:
-            report_ccw: Determines whether to report rotation in the CCW (positive) direction.
-            report_cw: Determines whether to report rotation in the CW (negative) direction.
-            delta_threshold: The minimum number of pulses required for the motion to be reported. Depending on encoder
-                resolution, this allows setting the 'minimum rotation distance' threshold for reporting. Note, if the
-                change is 0 (the encoder readout did not change), it will not be reported, regardless of the
-                value of this parameter. Sub-threshold motion will be aggregated (summed) across readouts until a
-                significant overall change in position is reached to justify reporting it to the PC.
+            report_ccw: Determines whether to report rotation in the counterclockwise (CCW; positive) direction.
+            report_cw: Determines whether to report rotation in the clockwise (CW; negative) direction.
+            delta_threshold: The minimum displacement change (delta) between any two consecutive readouts for reporting
+                the rotation to the PC.
+        """
+        self.send_parameters(parameter_data=(report_ccw, report_cw, delta_threshold))
+
+    def enable_monitoring(self) -> None:
+        """Begins continuously monitoring the direction and magnitude of the encoder's rotation.'"""
+        if not self._monitoring:
+            self.reset_pulse_count()
+            self.check_state(repetition_delay=self._polling_frequency)
+            self._monitoring = True
+
+    def disable_monitoring(self) -> None:
+        """Stops continuously monitoring the direction and magnitude of the encoder's rotation."""
+        if self._monitoring:
+            self.reset_command_queue()
+            self._monitoring = False
+
+    def check_state(self, repetition_delay: np.uint32) -> None:
+        """Checks the direction and magnitude of the encoder's rotation at regular intervals and, if necessary,
+        notifies the PC about significant changes.
+
+        Args:
+            repetition_delay: The time, in microseconds, to wait between repeatedly checking the encoder's state or 0
+                to only check the encoder state once.
+        """
+        self.send_command(command=self._check_state, noblock=_FALSE, repetition_delay=repetition_delay)
+
+    def reset_pulse_count(self) -> None:
+        """Resets the module's internal pulse tracker to 0."""
+        self.send_command(command=self._reset_encoder, noblock=_FALSE, repetition_delay=_ZERO_UINT32)
+
+    def get_ppr(self) -> None:
+        """Estimates the Pulse-per-Revolution (PPR) parameter of the managed encoder by using the index channel.
+
+        Notes:
+            Ensure that the evaluated encoder rotates at a slow and steady speed until the module completes the
+            command's execution. The motion direction is not relevant for this command, as long as the wheel makes the
+            full 360-degree revolution. The command requires ~11 full rotation cycles to complete.
+        """
+        self.send_command(command=self._get_ppr, noblock=_FALSE, repetition_delay=_ZERO_UINT32)
+
+    @property
+    def mqtt_topic(self) -> str:
+        """Returns the MQTT topic used to transfer the motion (distance) data from the interface to the Virtual Reality
+        manager (Unity).
+        """
+        return self._motion_topic
+
+    @property
+    def cm_per_pulse(self) -> np.float64:
+        """Returns the conversion factor that translates the raw encoder pulse counts to traveled centimeters."""
+        return self._cm_per_pulse
+
+    @property
+    def absolute_position(self) -> np.float64:
+        """Returns the absolute position of the animal, in Unity units, relative to the runtime onset."""
+        return self._distance_tracker[1]
+
+    @property
+    def traveled_distance(self) -> np.float64:
+        """Returns the total distance, in centimeters, traveled by the animal since the runtime onset."""
+        return self._distance_tracker[0]
+
+    def reset_distance_tracker(self) -> None:
+        """Resets the traveled distance array."""
+        self._distance_tracker[0] = _ZERO_FLOAT64
+        self._distance_tracker[1] = _ZERO_FLOAT64
+
+
+class LickInterface(ModuleInterface):
+    """Interfaces with LickModule instances running on Ataraxis MicroControllers.
+
+    Notes:
+        Type code 4.
+
+    Args:
+        lick_threshold: The threshold voltage, in raw analog units measured by a 3.3 Volt 12-bit
+            Analog-to-Digital-Converter module, for interpreting the signal received from the sensor as a lick event.
+        polling_frequency: The frequency, in microseconds, at which to check the lick sensor's state.
+
+    Attributes:
+        _sensor_topic: The MQTT topic used to transfer the collected lick event data to the Virtual Reality environment
+            manager.
+        _lick_threshold: The threshold voltage for detecting lick events.
+        _polling_frequency: The frequency, in microseconds, at which to check the lick sensor's state when monitoring
+            the sensor.
+        _lick_tracker: The SharedMemoryArray instance that transfers the lick data collected by the module from
+            the communication process to other runtime processes.
+        _previous_readout_zero: Tracks whether the previous voltage readout reported by the sensor was 0 (no contact).
+        _check_state: The code for the CheckState module command.
+        _monitoring: Tracks whether the instance is currently configured to monitor the managed lick sensor's state.
+    """
+
+    def __init__(self, lick_threshold: int, polling_frequency: int) -> None:
+        data_codes: set[np.uint8] = {np.uint8(51)}  # kChanged
+
+        # Initializes the subclassed ModuleInterface using the input instance data.
+        super().__init__(
+            module_type=np.uint8(4),
+            module_id=np.uint8(1),
+            data_codes=data_codes,
+            error_codes=None,
+        )
+
+        self._sensor_topic: str = "LickPort/"
+        self._lick_threshold: np.uint16 = np.uint16(lick_threshold)
+        self._polling_frequency = np.uint32(polling_frequency)
+
+        # Pre-creates a shared memory array used to track and share the total number of licks recorded by the sensor
+        # since class initialization.
+        self._lick_tracker: SharedMemoryArray = SharedMemoryArray.create_array(
+            name=f"{self._module_type}_{self._module_id}_lick_tracker",
+            prototype=np.zeros(shape=1, dtype=np.uint64),
+            exists_ok=True,
+        )
+
+        # Prevents excessive lick reporting by ensuring that lick counter is only incremented after the signal reaches
+        # the zero value.
+        self._previous_readout_zero: bool = False
+
+        # Statically computes command code objects
+        self._check_state = np.uint8(1)
+
+        # Tracks the current sensor monitoring status
+        self._monitoring: bool = False
+
+    def __del__(self) -> None:
+        """Ensures the instance's shared memory buffer is properly cleaned up when the instance is garbage-collected."""
+        self._lick_tracker.disconnect()
+        self._lick_tracker.destroy()
+
+    def initialize_local_assets(self) -> None:
+        """Connects to the instance's shared memory buffer and enables buffer cleanup at shutdown."""
+        self._lick_tracker.connect()
+        self._lick_tracker.enable_buffer_destruction()
+
+    def initialize_remote_assets(self) -> None:
+        """Connects to the instance's shared memory buffer."""
+        self._lick_tracker.connect()
+
+    def terminate_remote_assets(self) -> None:
+        """Disconnects from the instance's shared memory buffer."""
+        self._lick_tracker.disconnect()
+
+    def process_received_data(self, message: ModuleData) -> None:
+        """Updates the lick event data stored in the instance's shared memory buffer based on the messages received from
+        the microcontroller.
+        """
+        # Currently, only code 51 ModuleData messages are passed to this method. From each, extracts the detected
+        # voltage level.
+        detected_voltage: np.uint16 = message.data_object
+
+        # Since the sensor is pulled to 0 to indicate the lack of tongue contact, a zero-readout necessarily means no
+        # lick. Sets the zero-tracker to 1 to indicate that a zero-state has been encountered.
+        if detected_voltage == 0:
+            self._previous_readout_zero = True
+            return
+
+        # If the voltage level exceeds the lick threshold and this is the first time the threshold is exceeded since
+        # the last zero-value, classifies the current sensor's state as a lick event and increments the shared memory
+        # counter.
+        if detected_voltage >= self._lick_threshold and self._previous_readout_zero:
+            # Increments the shared lick counter
+            self._lick_tracker[0] += 1
+
+            # Disables further reports until the sensor sends a zero-value again
+            self._previous_readout_zero = False
+
+    def set_parameters(
+        self,
+        signal_threshold: np.uint16,
+        delta_threshold: np.uint16,
+        averaging_pool_size: np.uint8,
+    ) -> None:
+        """Sets the module's PC-addressable runtime parameters to the input values.
+
+        Args:
+            signal_threshold: The minimum voltage level, in raw analog units of 12-bit Analog-to-Digital-Converter
+                (ADC), reported to the PC as a significant sensor interaction. Note; signals below the threshold are
+                pulled to 0.
+            delta_threshold: The minimum difference between two consecutive voltage level readouts for reporting the
+                new signal value to the PC.
+            averaging_pool_size: The number of analog pin readouts to average together when checking the sensor's state.
+        """
+        self.send_parameters(parameter_data=(signal_threshold, delta_threshold, averaging_pool_size))
+
+    def enable_monitoring(self) -> None:
+        """Begins continuously monitoring the lick sensor's state.'"""
+        if not self._monitoring:
+            self.check_state(repetition_delay=self._polling_frequency)
+            self._monitoring = True
+
+    def disable_monitoring(self) -> None:
+        """Stops continuously monitoring the lick sensor's state."""
+        if self._monitoring:
+            self.reset_command_queue()
+            self._monitoring = False
+
+    def check_state(self, repetition_delay: np.uint32) -> None:
+        """Checks the voltage level detected by the lick sensor at regular intervals and, if necessary, notifies the
+        PC about significant changes.
+
+        Args:
+            repetition_delay: The time, in microseconds, to wait between repeatedly checking the lick sensor's state or
+                0 to only check the sensor state once.
+        """
+        self.send_command(command=self._check_state, noblock=_FALSE, repetition_delay=repetition_delay)
+
+    @property
+    def mqtt_topic(self) -> str:
+        """Returns the MQTT topic used to transfer the lick event data from the interface to the Virtual Reality
+        manager (Unity).
+        """
+        return self._sensor_topic
+
+    @property
+    def lick_count(self) -> np.uint64:
+        """Returns the total number of licks detected by the module since the runtime onset."""
+        return self._lick_tracker[0]
+
+    @property
+    def lick_threshold(self) -> np.uint16:
+        """Returns the voltage threshold, in raw ADC units of a 12-bit Analog-to-Digital voltage converter, interpreted
+        as the animal licking at the sensor.
+        """
+        return self._lick_threshold
+
+
+class TorqueInterface(ModuleInterface):
+    """Interfaces with TorqueModule instances running on Ataraxis MicroControllers.
+
+    Notes:
+        Type code 6.
+
+    Args:
+        baseline_voltage: The voltage level, in raw analog units measured by a 3.3 Volt 12-bit
+            Analog-to-Digital-Converter module, that corresponds to no torque (0) readout.
+        maximum_voltage: The voltage level, in raw analog units measured by a 3.3 Volt 12-bit
+            Analog-to-Digital-Converter module, that corresponds to the absolute maximum torque detectable by the
+            sensor.
+        sensor_capacity: The maximum torque level, in grams centimeter (g cm) detectable by the sensor.
+        polling_frequency: The frequency, in microseconds, at which to check the torque sensor's state.
+
+    Attributes:
+        _polling_frequency: The frequency, in microseconds, at which to check the torque sensor's state when monitoring
+            the sensor.
+        _torque_per_adc_unit: The conversion factor that translates the raw analog units of a 3.3 Volt 12-bit ADC to
+            torque in Newtons centimeter.
+        _check_state: The code for the CheckState module command.
+        _monitoring: Tracks whether the instance is currently configured to monitor the managed lick sensor's state.
+    """
+
+    def __init__(
+        self,
+        baseline_voltage: int,
+        maximum_voltage: int,
+        sensor_capacity: float,
+        polling_frequency: int
+    ) -> None:
+        # data_codes = {np.uint8(51), np.uint8(52)}  # kCCWTorque, kCWTorque
+
+        # Initializes the subclassed ModuleInterface using the input instance data. Type data is hardcoded.
+        super().__init__(
+            module_type=np.uint8(6),
+            module_id=np.uint8(1),
+            data_codes=None,
+            error_codes=None,
+        )
+
+        # Caches the polling frequency to an instance attribute
+        self._polling_frequency = np.uint32(polling_frequency)
+
+        # Computes the conversion factor to translate the recorded raw analog readouts of the 3.3V 12-bit ADC to
+        # torque in Newton centimeter. Rounds to 12 decimal places for consistency and to ensure
+        # repeatability. Uses a hardcoded conversion factor to translate sensor capacity from g cm to N cm.
+        self._torque_per_adc_unit: np.float64 = np.round(
+            a=(np.float64(sensor_capacity) * np.float64(0.00981) / (maximum_voltage - baseline_voltage)),
+            decimals=8,
+        )
+
+        # Statically computes command code objects
+        self._check_state = np.uint8(1)
+
+        # Tracks the current sensor monitoring status
+        self._monitoring: bool = False
+
+    def initialize_remote_assets(self) -> None:
+        """Not used."""
+        return
+
+    def terminate_remote_assets(self) -> None:
+        """Not used."""
+        return
+
+    def process_received_data(self, message: ModuleData | ModuleState) -> None:
+        """If the class is initialized in debug mode, prints the received torque data to the terminal via console.
+
+        In debug mode, this method parses incoming code 51 (CW torque) and code 52 (CCW torque) data and dumps it into
+         the terminal via console. If the class is not initialized in debug mode, this method does nothing.
+
+        Notes:
+            Make sure the console is enabled before calling this method.
+        """
+        # This is here to appease mypy, currently all message inputs are ModuleData messages
+        if isinstance(message, ModuleState):
+            return
+
+        # The torque direction is encoded via the message event code. CW torque (code 52) is interpreted as negative
+        # and CCW (code 51) as positive.
+        sign = 1 if message.event == np.uint8(51) else -1
+
+        # Translates the absolute torque into the CW / CCW vector and converts from raw ADC units to Newton centimeters
+        # using the precomputed conversion factor. Uses float64 and rounds to 8 decimal places for consistency and
+        # precision
+        signed_torque = np.round(
+            a=np.float64(message.data_object) * self._torque_per_adc_unit * sign,
+            decimals=8,
+        )
+
+        # Since this method is only called in the debug mode, always prints the data to the console
+        console.echo(message=f"Torque: {signed_torque} N cm, ADC: {np.int32(message.data_object) * sign}.")
+
+    def set_parameters(
+        self,
+        report_ccw: np.bool = np.bool(True),
+        report_cw: np.bool = np.bool(True),
+        signal_threshold: np.uint16 = np.uint16(100),
+        delta_threshold: np.uint16 = np.uint16(70),
+        averaging_pool_size: np.uint8 = np.uint8(10),
+    ) -> None:
+        """Changes the PC-addressable runtime parameters of the TorqueModule instance.
+
+        Use this method to package and apply new PC-addressable parameters to the TorqueModule instance managed by this
+        Interface class.
+
+        Notes:
+            All threshold parameters are inclusive! If you need help determining appropriate threshold levels for
+            specific targeted torque levels, use the get_adc_units_from_torque() method of the interface instance.
+
+        Args:
+            report_ccw: Determines whether the sensor should report torque in the CounterClockwise (CCW) direction.
+            report_cw: Determines whether the sensor should report torque in the Clockwise (CW) direction.
+            signal_threshold: The minimum torque level, in raw analog units of 12-bit Analog-to-Digital-Converter
+                (ADC), that needs to be reported to the PC. Setting this threshold to a number above zero allows
+                high-pass filtering the incoming signals. Note, Signals below the threshold will be pulled to 0.
+            delta_threshold: The minimum value by which the signal has to change, relative to the previous check, for
+                the change to be reported to the PC. Note, if the change is 0, the signal will not be reported to the
+                PC, regardless of this parameter value.
+            averaging_pool_size: The number of analog pin readouts to average together when checking pin state. This
+                is used to smooth the recorded values to avoid communication line noise. Teensy microcontrollers have
+                built-in analog pin averaging, but we disable it by default and use this averaging method instead. It is
+                recommended to set this value between 15 and 30 readouts.
         """
         message = ModuleParameters(
             module_type=self._module_type,
             module_id=self._module_id,
-            return_code=np.uint8(0),
-            parameter_data=(np.bool(report_ccw), np.bool(report_cw), np.uint32(delta_threshold)),
+            return_code=np.uint8(0),  # Generally, return code is only helpful for debugging.
+            parameter_data=(
+                report_ccw,
+                report_cw,
+                signal_threshold,
+                delta_threshold,
+                averaging_pool_size,
+            ),
         )
         self._input_queue.put(message)  # type: ignore
 
-    def check_state(self, repetition_delay: np.uint32 = np.uint32(200)) -> None:
-        """Returns the number of pulses accumulated by the EncoderModule since the last check or reset.
+    def check_state(self, repetition_delay: np.uint32 = np.uint32(0)) -> None:
+        """Returns the torque signal detected by the analog pin monitored by the TorqueModule.
 
-        If there has been a significant change in the absolute count of pulses, reports the change and direction to the
-        PC. It is highly advised to issue this command to repeat (recur) at a desired interval to continuously monitor
-        the encoder state, rather than repeatedly calling it as a one-off command for best runtime efficiency.
+        If there has been a significant change in the detected signal (voltage) level and the level is within the
+        reporting thresholds, reports the change to the PC. It is highly advised to issue this command to repeat
+        (recur) at a desired interval to continuously monitor the lick sensor state, rather than repeatedly calling it
+        as a one-off command for best runtime efficiency.
 
-        This command allows continuously monitoring the rotation of the object connected to the encoder. It is designed
-        to return the absolute raw count of pulses emitted by the encoder in response to the object ration. This allows
-        avoiding floating-point arithmetic on the microcontroller and relies on the PC to convert pulses to standard
-        units, such as centimeters. The specific conversion algorithm depends on the encoder and motion diameter.
+        This command allows continuously monitoring the CW and CCW torque experienced by the object connected to the
+        torque sensor. It is designed to return the raw analog units, measured by a 3.3V ADC with 12-bit resolution.
+        To avoid floating-point math, the value is returned as an unsigned 16-bit integer.
+
+        Notes:
+            Due to how the torque signal is measured and processed, the returned value will always be between 0 and
+            the baseline ADC value. For a 3.3V 12-bit ADC, this is between 0 and ~1.65 Volts.
 
         Args:
             repetition_delay: The time, in microseconds, to delay before repeating the command. If set to 0, the
-                command will only run once.
+            command will only run once.
         """
-        command: RepeatedModuleCommand | OneOffModuleCommand
+        command: OneOffModuleCommand | RepeatedModuleCommand
         if repetition_delay == 0:
             command = OneOffModuleCommand(
                 module_type=self._module_type,
@@ -236,90 +579,16 @@ class EncoderInterface(ModuleInterface):
                 return_code=np.uint8(0),
                 command=np.uint8(1),
                 noblock=np.bool(False),
-                cycle_delay=np.uint32(repetition_delay),
+                cycle_delay=repetition_delay,
             )
         self._input_queue.put(command)  # type: ignore
 
-    def reset_pulse_count(self) -> None:
-        """Resets the EncoderModule pulse tracker to 0.
-
-        This command allows resetting the encoder without evaluating its current pulse count. Currently, this command
-        is designed to only run once.
-        """
-        command = OneOffModuleCommand(
-            module_type=self._module_type,
-            module_id=self._module_id,
-            return_code=np.uint8(0),
-            command=np.uint8(2),
-            noblock=np.bool(False),
-        )
-
-        self._input_queue.put(command)  # type: ignore
-
-    def get_ppr(self) -> None:
-        """Uses the index channel of the EncoderModule to estimate its Pulse-per-Revolution (PPR).
-
-        The PPR allows converting raw pulse counts the EncoderModule sends to the PC to accurate displacement in
-        standard distance units, such as centimeters. This is a service command not intended to be used during most
-        runtimes if the PPR is already known. It relies on the object tracked by the encoder completing up to 11 full
-        revolutions and uses the index channel of the encoder to measure the number of pulses per each revolution.
-
-        Notes:
-            Make sure the evaluated encoder rotates at a slow and stead speed until this command completes. Similar to
-            other service commands, it is designed to deadlock the controller until the command completes. Note, the
-            EncoderModule does not provide the rotation, this needs to be done manually.
-
-            The direction of the rotation is not relevant for this command, as long as the object makes the full
-            360-degree revolution.
-
-            The command is optimized for the object to be rotated with a human hand at a steady rate, so it delays
-            further index pin polling for 100 milliseconds each time the index pin is triggered. Therefore, if the
-            object is moving too fast (or too slow), the command will not work as intended.
-        """
-        command = OneOffModuleCommand(
-            module_type=self._module_type,
-            module_id=self._module_id,
-            return_code=np.uint8(0),
-            command=np.uint8(3),
-            noblock=np.bool(False),
-        )
-        self._input_queue.put(command)  # type: ignore
-
     @property
-    def mqtt_topic(self) -> str:
-        """Returns the MQTT topic used to transfer motion data from the interface to Unity."""
-        return self._motion_topic
-
-    @property
-    def cm_per_pulse(self) -> np.float64:
-        """Returns the conversion factor to translate raw encoder pulse count to distance moved in centimeters."""
-        return self._cm_per_pulse
-
-    @property
-    def absolute_position(self) -> np.float64:
-        """Returns the absolute position of the animal relative to the runtime onset in Unity units.
-
-        The position is given relative to the position at runtime onset ('0').
+    def torque_per_adc_unit(self) -> np.float64:
+        """Returns the conversion factor to translate the raw analog values recorded by the 12-bit ADC into torque in
+        Newton centimeter.
         """
-        return self._distance_tracker.read_data(index=1, convert_output=False)  # type: ignore
-
-    @property
-    def traveled_distance(self) -> np.float64:
-        """Returns the total distance, in centimeters, traveled by the animal since runtime onset.
-
-        This distance tracker is a monotonically incrementing count of traversed centimeters that does not account for
-        the direction of travel.
-        """
-        return self._distance_tracker.read_data(index=0, convert_output=False)  # type: ignore
-
-    def reset_distance_tracker(self) -> None:
-        """Resets the array that tracks the total traveled distance and the absolute position of the animal relative to
-        the runtime onset.
-        """
-        # noinspection PyTypeChecker
-        self._distance_tracker.write_data(index=0, data=_zero_float)
-        # noinspection PyTypeChecker
-        self._distance_tracker.write_data(index=1, data=_zero_float)
+        return self._torque_per_adc_unit
 
 
 class TTLInterface(ModuleInterface):
@@ -394,7 +663,8 @@ class TTLInterface(ModuleInterface):
 
     def __del__(self) -> None:
         """Destroys the _pulse_tracker memory buffer and releases the resources reserved by the array during class
-        runtime."""
+        runtime.
+        """
         if self._pulse_tracker is not None:
             self._pulse_tracker.disconnect()
             self._pulse_tracker.destroy()
@@ -558,14 +828,14 @@ class TTLInterface(ModuleInterface):
         """Returns the total number of received TTL pulses recorded by the class since initialization."""
         if self._pulse_tracker is not None:
             return self._pulse_tracker.read_data(index=0, convert_output=False)  # type: ignore
-        else:
-            return _zero_uint  # If the array does not exist, always returns 0
+        return _ZERO_UINT64  # If the array does not exist, always returns 0
 
     def reset_pulse_count(self) -> None:
         """Resets the tracked mesoscope pulse count to zero if the TTLInterface instance is used to monitor mesoscope
-        frame acquisition pulses."""
+        frame acquisition pulses.
+        """
         if self._pulse_tracker is not None:
-            self._pulse_tracker.write_data(index=0, data=_zero_uint)
+            self._pulse_tracker.write_data(index=0, data=_ZERO_UINT64)
 
 
 class BreakInterface(ModuleInterface):
@@ -659,7 +929,6 @@ class BreakInterface(ModuleInterface):
 
     def initialize_remote_assets(self) -> None:
         """Not used."""
-        pass
 
     def terminate_remote_assets(self) -> None:
         """Not used."""
@@ -676,9 +945,9 @@ class BreakInterface(ModuleInterface):
         """
         # The method is ONLY called during debug runtime, so prints all received data via console.
         if message.event == 52:
-            console.echo(f"Break is engaged")
+            console.echo("Break is engaged")
         if message.event == 53:
-            console.echo(f"Break is disengaged")
+            console.echo("Break is disengaged")
 
     def parse_mqtt_command(self, topic: str, payload: bytes | bytearray) -> None:
         """Not used."""
@@ -912,7 +1181,8 @@ class ValveInterface(ModuleInterface):
 
     def initialize_remote_assets(self) -> None:
         """Connects to the reward tracker SharedMemoryArray and initializes the cycle PrecisionTimer from the
-        Communication process."""
+        Communication process.
+        """
         self._valve_tracker.connect()
         self._cycle_timer = PrecisionTimer("us")
 
@@ -933,7 +1203,7 @@ class ValveInterface(ModuleInterface):
         """
         if message.event == 52:
             if self._debug:
-                console.echo(f"Valve Opened")
+                console.echo("Valve Opened")
 
             # Resets the cycle timer each time the valve transitions to open state.
             if not self._previous_state:
@@ -942,7 +1212,7 @@ class ValveInterface(ModuleInterface):
 
         elif message.event == 53:
             if self._debug:
-                console.echo(f"Valve Closed")
+                console.echo("Valve Closed")
 
             # Each time the valve transitions to closed state, records the period of time the valve was open and uses it
             # to estimate the volume of fluid delivered through the valve. Accumulates the total volume in the tracker
@@ -960,7 +1230,7 @@ class ValveInterface(ModuleInterface):
                 # noinspection PyTypeChecker
                 self._valve_tracker.write_data(index=0, data=new_volume)
         elif message.event == 54:
-            console.echo(f"Valve Calibration: Complete")
+            console.echo("Valve Calibration: Complete")
 
     def parse_mqtt_command(self, topic: str, payload: bytes | bytearray) -> None:
         """Not used."""
@@ -1219,493 +1489,6 @@ class ValveInterface(ModuleInterface):
         return self._valve_tracker
 
 
-class LickInterface(ModuleInterface):
-    """Interfaces with LickModule instances running on Ataraxis MicroControllers.
-
-    LickModule allows interfacing with conductive lick sensors used in the Sun Lab to detect mouse interaction with
-    water dispensing tubes. The sensor works by sending a small direct current through the mouse, which is picked up by
-    the sensor connected to the metal lick tube. When the mouse completes the circuit by making the contact with the
-    tube, the sensor determines whether the resultant voltage matches the threshold expected for a tongue contact and,
-    if so, notifies the PC about the contact.
-
-    Notes:
-        The sensor is calibrated to work with very small currents that are not detectable by the animal, so it does not
-        interfere with behavior during experiments. The sensor will, however, interfere with electrophysiological
-        recordings.
-
-        The resolution of the sensor is high enough to distinguish licks from paw touches. By default, the
-        microcontroller is configured in a way that will likely send both licks and non-lick interactions to the PC.
-        Use the lick_threshold argument to provide a more exclusive lick threshold.
-
-        The interface automatically sends significant lick triggers to Unity via the "LickPort/" MQTT topic. This only
-        includes the 'onset' triggers, the interface does not report voltage level reductions (associated with the end
-        of the tongue-to-tube contact).
-
-    Args:
-        lick_threshold: The threshold voltage, in raw analog units recorded by a 12-bit ADC, for detecting the tongue
-            contact. Note, 12-bit ADC only supports values between 0 and 4095, so setting the threshold above 4095 will
-            result in no licks being reported to Unity.
-        debug: A boolean flag that configures the interface to dump certain data received from the microcontroller into
-            the terminal. This is used during debugging and system calibration and should be disabled for most runtimes.
-
-    Attributes:
-        _sensor_topic: Stores the output MQTT topic.
-        _lick_threshold: The threshold voltage for detecting a tongue contact.
-        _volt_per_adc_unit: The conversion factor to translate the raw analog values recorded by the 12-bit ADC into
-            voltage in Volts.
-        _debug: Stores the debug flag.
-        _lick_tracker: Stores the SharedMemoryArray that stores the current lick detection status and the total number
-            of licks detected since class initialization.
-        _previous_readout_zero: Stores a boolean indicator of whether the previous voltage readout was a 0-value.
-    """
-
-    def __init__(self, lick_threshold: int = 1000, debug: bool = False) -> None:
-        data_codes: set[np.uint8] = {np.uint8(51)}  # kChanged
-        self._debug: bool = debug
-
-        # Initializes the subclassed ModuleInterface using the input instance data. Type data is hardcoded.
-        super().__init__(
-            module_type=np.uint8(4),
-            module_id=np.uint8(1),
-            mqtt_communication=False,
-            data_codes=data_codes,
-            mqtt_command_topics=None,
-            error_codes=None,
-        )
-
-        self._sensor_topic: str = "LickPort/"
-        self._lick_threshold: np.uint16 = np.uint16(lick_threshold)
-
-        # Statically computes the voltage resolution of each analog step, assuming a 3.3V ADC with 12-bit resolution.
-        self._volt_per_adc_unit: np.float64 = np.round(a=np.float64(3.3 / (2**12)), decimals=8)
-
-        # Precreates a shared memory array used to track and share the total number of licks recorded by the sensor
-        # since class initialization.
-        self._lick_tracker: SharedMemoryArray = SharedMemoryArray.create_array(
-            name=f"{self._module_type}_{self._module_id}_lick_tracker",
-            prototype=np.zeros(shape=1, dtype=np.uint64),
-            exist_ok=True,
-        )
-
-        # Precreates storage variables used to prevent excessive lick reporting
-        self._previous_readout_zero: bool = False
-
-    def __del__(self) -> None:
-        """Ensures the lick_tracker is properly cleaned up when the class is garbage-collected."""
-        self._lick_tracker.disconnect()
-        self._lick_tracker.destroy()
-
-    def initialize_remote_assets(self) -> None:
-        """Connects to the SharedMemoryArray used to communicate lick status to other processes."""
-        self._lick_tracker.connect()
-
-    def terminate_remote_assets(self) -> None:
-        """Disconnects from the lick-tracker SharedMemoryArray."""
-        self._lick_tracker.disconnect()  # Does not destroy the array to support start / stop cycling.
-
-    def process_received_data(self, message: ModuleData | ModuleState) -> None:
-        """Processes incoming data.
-
-        Lick data (code 51) comes in as a change in the voltage level detected by the sensor pin. This value is then
-        evaluated against the _lick_threshold, and if the value exceeds the threshold, a binary lick trigger is sent to
-        Unity via MQTT. Additionally, the method increments the total lick count stored in the _lick_tracker each time
-        an above-threshold voltage readout is received from the module.
-
-        Notes:
-            If the class runs in debug mode, this method sends all received lick sensor voltages to the
-            terminal via console. Make sure the console is enabled before calling this method.
-        """
-
-        # Currently, only code 51 messages will be passed to this method. From each, extracts the detected voltage
-        # level.
-        detected_voltage: np.uint16 = message.data_object  # type: ignore
-
-        # If the class is initialized in debug mode, prints each received voltage level to the terminal.
-        if self._debug:
-            console.echo(f"Lick ADC signal: {detected_voltage}")
-
-        # Since the sensor is pulled to 0 to indicate lack of tongue contact, a zero-readout necessarily means no
-        # lick. Sets zero-tracker to 1 to indicate that a zero-state has been encountered
-        if detected_voltage == 0:
-            self._previous_readout_zero = True
-            return
-
-        # If the voltage level exceeds the lick threshold and this is the first time the threshold is exceeded since
-        # the last zero-value, reports it to Unity via MQTT. Threshold is inclusive. This exploits the fact that every
-        # pair of licks has to be separated by a zero-value (lack of tongue contact). So, to properly report the licks,
-        # only does it once per encountering a zero-value.
-        if detected_voltage >= self._lick_threshold and self._previous_readout_zero:
-            # Increments the lick count and updates the tracker array with new data
-            count = self._lick_tracker.read_data(index=0, convert_output=False)
-            count += 1
-            self._lick_tracker.write_data(index=0, data=count)
-
-            # This disables further reports until the sensor sends a zero-value again
-            self._previous_readout_zero = False
-
-    def parse_mqtt_command(self, topic: str, payload: bytes | bytearray) -> None:
-        """Not used."""
-        return
-
-    def set_parameters(
-        self,
-        signal_threshold: np.uint16 = np.uint16(200),
-        delta_threshold: np.uint16 = np.uint16(180),
-        averaging_pool_size: np.uint8 = np.uint8(30),
-    ) -> None:
-        """Changes the PC-addressable runtime parameters of the LickModule instance.
-
-        Use this method to package and apply new PC-addressable parameters to the LickModule instance managed by this
-        Interface class.
-
-        Notes:
-            All threshold parameters are inclusive! If you need help determining appropriate threshold levels for
-            specific targeted voltages, use the get_adc_units_from_volts() method of the interface instance.
-
-        Args:
-            signal_threshold: The minimum voltage level, in raw analog units of 12-bit Analog-to-Digital-Converter
-                (ADC), that needs to be reported to the PC. Setting this threshold to a number above zero allows
-                high-pass filtering the incoming signals. Note, Signals below the threshold will be pulled to 0.
-            delta_threshold: The minimum value by which the signal has to change, relative to the previous check, for
-                the change to be reported to the PC. Note, if the change is 0, the signal will not be reported to the
-                PC, regardless of this parameter value.
-            averaging_pool_size: The number of analog pin readouts to average together when checking pin state. This
-                is used to smooth the recorded values to avoid communication line noise. Teensy microcontrollers have
-                built-in analog pin averaging, but we disable it by default and use this averaging method instead. It is
-                recommended to set this value between 15 and 30 readouts.
-        """
-        message = ModuleParameters(
-            module_type=self._module_type,
-            module_id=self._module_id,
-            return_code=np.uint8(0),  # Generally, return code is only helpful for debugging.
-            parameter_data=(signal_threshold, delta_threshold, averaging_pool_size),
-        )
-        self._input_queue.put(message)  # type: ignore
-
-    def check_state(self, repetition_delay: np.uint32 = np.uint32(0)) -> None:
-        """Returns the voltage signal detected by the analog pin monitored by the LickModule.
-
-        If there has been a significant change in the detected voltage level and the level is within the reporting
-        thresholds, reports the change to the PC. It is highly advised to issue this command to repeat (recur) at a
-        desired interval to continuously monitor the lick sensor state, rather than repeatedly calling it as a one-off
-        command for best runtime efficiency.
-
-        This command allows continuously monitoring the mouse interaction with the lickport tube. It is designed
-        to return the raw analog units, measured by a 3.3V ADC with 12-bit resolution. To avoid floating-point math, the
-        value is returned as an unsigned 16-bit integer.
-
-        Args:
-            repetition_delay: The time, in microseconds, to delay before repeating the command. If set to 0, the
-            command will only run once.
-        """
-        command: OneOffModuleCommand | RepeatedModuleCommand
-        if repetition_delay == 0:
-            command = OneOffModuleCommand(
-                module_type=self._module_type,
-                module_id=self._module_id,
-                return_code=np.uint8(0),
-                command=np.uint8(1),
-                noblock=np.bool(False),
-            )
-
-        else:
-            command = RepeatedModuleCommand(
-                module_type=self._module_type,
-                module_id=self._module_id,
-                return_code=np.uint8(0),
-                command=np.uint8(1),
-                noblock=np.bool(False),
-                cycle_delay=repetition_delay,
-            )
-        self._input_queue.put(command)  # type: ignore
-
-    def get_adc_units_from_volts(self, voltage: float) -> np.uint16:
-        """Converts the input voltage to raw analog units of 12-bit Analog-to-Digital-Converter (ADC).
-
-        Use this method to determine the appropriate raw analog units for the threshold arguments of the
-        set_parameters() method, based on the desired voltage thresholds.
-
-        Notes:
-            This method assumes a 3.3V ADC with 12-bit resolution.
-
-        Args:
-            voltage: The voltage to convert to raw analog units, in Volts.
-
-        Returns:
-            The raw analog units of 12-bit ADC for the input voltage.
-        """
-        return np.uint16(np.round(voltage / self._volt_per_adc_unit))
-
-    @property
-    def mqtt_topic(self) -> str:
-        """Returns the MQTT topic used to transfer lick events from the interface to Unity."""
-        return self._sensor_topic
-
-    @property
-    def volts_per_adc_unit(self) -> np.float64:
-        """Returns the conversion factor to translate the raw analog values recorded by the 12-bit ADC into voltage in
-        Volts.
-        """
-        return self._volt_per_adc_unit
-
-    @property
-    def lick_count(self) -> np.uint64:
-        """Returns the total number of licks detected by the module since runtime onset."""
-        return self._lick_tracker.read_data(index=0, convert_output=False)  # type: ignore
-
-    @property
-    def lick_threshold(self) -> np.uint16:
-        """Returns the voltage threshold, in raw ADC units of a 12-bit Analog-to-Digital voltage converter that is
-        interpreted as the mouse licking the sensor."""
-        return self._lick_threshold
-
-
-class TorqueInterface(ModuleInterface):
-    """Interfaces with TorqueModule instances running on Ataraxis MicroControllers.
-
-    TorqueModule interfaces with a differential torque sensor. The sensor uses differential coding in the millivolt
-    range to communicate torque in the CW and the CCW direction. To convert and amplify the output of the torque sensor,
-    it is wired to an AD620 microvolt amplifier instrument that converts the output signal into a single positive
-    vector and amplifies its strength to Volts range.
-
-    The TorqueModule further refines the sensor data by ensuring that CCW and CW torque signals behave identically.
-    Specifically, it adjusts the signal to scale from 0 to baseline proportionally to the detected torque, regardless
-    of torque direction.
-
-    Notes:
-        This interface receives torque as a positive uint16_t value from zero to at most 2046 raw analog units of 3.3v
-        12-bit ADC converter. The direction of the torque is reported by the event-code of the received message.
-
-    Args:
-        baseline_voltage: The voltage level, in raw analog units measured by 3.3v ADC at 12-bit resolution after the
-            AD620 amplifier, that corresponds to no (0) torque readout. Usually, for a 3.3v ADC, this would be around
-            2046 (the midpoint, ~1.65 V).
-        maximum_voltage: The voltage level, in raw analog units measured by 3.3v ADC at 12-bit resolution after the
-            AD620 amplifier, that corresponds to the absolute maximum torque detectable by the sensor. The best way
-            to get this value is to measure the positive voltage level after applying the maximum CW (positive) torque.
-            At most, this value can be 4095 (~3.3 V).
-        sensor_capacity: The maximum torque detectable by the sensor, in grams centimeter (g cm).
-        object_diameter: The diameter of the rotating object connected to the torque sensor, in centimeters. This is
-            used to calculate the force at the edge of the object associated with the measured torque at the sensor.
-        debug: A boolean flag that configures the interface to dump certain data received from the microcontroller into
-            the terminal. This is used during debugging and system calibration and should be disabled for most runtimes.
-
-    Attributes:
-        _newton_per_gram_centimeter: Stores the hardcoded conversion factor from gram centimeter to Newton centimeter.
-        _capacity_in_newtons_cm: The maximum torque detectable by the sensor in Newtons centimeter.
-        _torque_per_adc_unit: The conversion factor to translate raw analog 3.3v 12-bit ADC values to torque in Newtons
-            centimeter.
-        _force_per_adc_unit: The conversion factor to translate raw analog 3.3v 12-bit ADC values to force in Newtons.
-        _debug: Stores the debug flag.
-    """
-
-    def __init__(
-        self,
-        baseline_voltage: int = 2046,
-        maximum_voltage: int = 2750,
-        sensor_capacity: float = 720.0779,  # 10 oz in
-        object_diameter: float = 15.0333,
-        debug: bool = False,
-    ) -> None:
-        self._debug: bool = debug
-        # data_codes = {np.uint8(51), np.uint8(52)}  # kCCWTorque, kCWTorque
-
-        # If the interface runs in the debug mode, configures it to monitor and report detected torque values
-        data_codes: set[np.uint8] | None = None
-        if debug:
-            data_codes = {np.uint8(51), np.uint8(52)}
-
-        # Initializes the subclassed ModuleInterface using the input instance data. Type data is hardcoded.
-        super().__init__(
-            module_type=np.uint8(6),
-            module_id=np.uint8(1),
-            mqtt_communication=False,
-            data_codes=data_codes,
-            mqtt_command_topics=None,
-            error_codes=None,
-        )
-
-        # Hardcodes the conversion factor used to translate torque in g cm to N cm
-        self._newton_per_gram_centimeter: np.float64 = np.float64(0.00981)
-
-        # Determines the capacity of the torque sensor in Newtons centimeter.
-        self._capacity_in_newtons_cm: np.float64 = np.round(
-            a=np.float64(sensor_capacity) * self._newton_per_gram_centimeter,
-            decimals=8,
-        )
-
-        # Computes the conversion factor to translate the recorded raw analog readouts of the 3.3V 12-bit ADC to
-        # torque in Newton centimeter. Rounds to 12 decimal places for consistency and to ensure
-        # repeatability.
-        self._torque_per_adc_unit: np.float64 = np.round(
-            a=(self._capacity_in_newtons_cm / (maximum_voltage - baseline_voltage)),
-            decimals=8,
-        )
-
-        # Also computes the conversion factor to translate the recorded raw analog readouts of the 3.3V 12-bit ADC to
-        # force in Newtons.
-        self._force_per_adc_unit: np.float64 = np.round(
-            a=self._torque_per_adc_unit / (object_diameter / 2),
-            decimals=8,
-        )
-
-    def initialize_remote_assets(self) -> None:
-        """Not used."""
-        return
-
-    def terminate_remote_assets(self) -> None:
-        """Not used."""
-        return
-
-    def process_received_data(self, message: ModuleData | ModuleState) -> None:
-        """If the class is initialized in debug mode, prints the received torque data to the terminal via console.
-
-        In debug mode, this method parses incoming code 51 (CW torque) and code 52 (CCW torque) data and dumps it into
-         the terminal via console. If the class is not initialized in debug mode, this method does nothing.
-
-        Notes:
-            Make sure the console is enabled before calling this method.
-        """
-        # This is here to appease mypy, currently all message inputs are ModuleData messages
-        if isinstance(message, ModuleState):
-            return
-
-        # The torque direction is encoded via the message event code. CW torque (code 52) is interpreted as negative
-        # and CCW (code 51) as positive.
-        sign = 1 if message.event == np.uint8(51) else -1
-
-        # Translates the absolute torque into the CW / CCW vector and converts from raw ADC units to Newton centimeters
-        # using the precomputed conversion factor. Uses float64 and rounds to 8 decimal places for consistency and
-        # precision
-        signed_torque = np.round(
-            a=np.float64(message.data_object) * self._torque_per_adc_unit * sign,
-            decimals=8,
-        )
-
-        # Since this method is only called in the debug mode, always prints the data to the console
-        console.echo(message=f"Torque: {signed_torque} N cm, ADC: {np.int32(message.data_object) * sign}.")
-
-    def parse_mqtt_command(self, topic: str, payload: bytes | bytearray) -> None:
-        """Not used."""
-        return
-
-    def set_parameters(
-        self,
-        report_ccw: np.bool = np.bool(True),
-        report_cw: np.bool = np.bool(True),
-        signal_threshold: np.uint16 = np.uint16(100),
-        delta_threshold: np.uint16 = np.uint16(70),
-        averaging_pool_size: np.uint8 = np.uint8(10),
-    ) -> None:
-        """Changes the PC-addressable runtime parameters of the TorqueModule instance.
-
-        Use this method to package and apply new PC-addressable parameters to the TorqueModule instance managed by this
-        Interface class.
-
-        Notes:
-            All threshold parameters are inclusive! If you need help determining appropriate threshold levels for
-            specific targeted torque levels, use the get_adc_units_from_torque() method of the interface instance.
-
-        Args:
-            report_ccw: Determines whether the sensor should report torque in the CounterClockwise (CCW) direction.
-            report_cw: Determines whether the sensor should report torque in the Clockwise (CW) direction.
-            signal_threshold: The minimum torque level, in raw analog units of 12-bit Analog-to-Digital-Converter
-                (ADC), that needs to be reported to the PC. Setting this threshold to a number above zero allows
-                high-pass filtering the incoming signals. Note, Signals below the threshold will be pulled to 0.
-            delta_threshold: The minimum value by which the signal has to change, relative to the previous check, for
-                the change to be reported to the PC. Note, if the change is 0, the signal will not be reported to the
-                PC, regardless of this parameter value.
-            averaging_pool_size: The number of analog pin readouts to average together when checking pin state. This
-                is used to smooth the recorded values to avoid communication line noise. Teensy microcontrollers have
-                built-in analog pin averaging, but we disable it by default and use this averaging method instead. It is
-                recommended to set this value between 15 and 30 readouts.
-        """
-        message = ModuleParameters(
-            module_type=self._module_type,
-            module_id=self._module_id,
-            return_code=np.uint8(0),  # Generally, return code is only helpful for debugging.
-            parameter_data=(
-                report_ccw,
-                report_cw,
-                signal_threshold,
-                delta_threshold,
-                averaging_pool_size,
-            ),
-        )
-        self._input_queue.put(message)  # type: ignore
-
-    def check_state(self, repetition_delay: np.uint32 = np.uint32(0)) -> None:
-        """Returns the torque signal detected by the analog pin monitored by the TorqueModule.
-
-        If there has been a significant change in the detected signal (voltage) level and the level is within the
-        reporting thresholds, reports the change to the PC. It is highly advised to issue this command to repeat
-        (recur) at a desired interval to continuously monitor the lick sensor state, rather than repeatedly calling it
-        as a one-off command for best runtime efficiency.
-
-        This command allows continuously monitoring the CW and CCW torque experienced by the object connected to the
-        torque sensor. It is designed to return the raw analog units, measured by a 3.3V ADC with 12-bit resolution.
-        To avoid floating-point math, the value is returned as an unsigned 16-bit integer.
-
-        Notes:
-            Due to how the torque signal is measured and processed, the returned value will always be between 0 and
-            the baseline ADC value. For a 3.3V 12-bit ADC, this is between 0 and ~1.65 Volts.
-
-        Args:
-            repetition_delay: The time, in microseconds, to delay before repeating the command. If set to 0, the
-            command will only run once.
-        """
-        command: OneOffModuleCommand | RepeatedModuleCommand
-        if repetition_delay == 0:
-            command = OneOffModuleCommand(
-                module_type=self._module_type,
-                module_id=self._module_id,
-                return_code=np.uint8(0),
-                command=np.uint8(1),
-                noblock=np.bool(False),
-            )
-        else:
-            command = RepeatedModuleCommand(
-                module_type=self._module_type,
-                module_id=self._module_id,
-                return_code=np.uint8(0),
-                command=np.uint8(1),
-                noblock=np.bool(False),
-                cycle_delay=repetition_delay,
-            )
-        self._input_queue.put(command)  # type: ignore
-
-    def get_adc_units_from_torque(self, target_torque: float) -> np.uint16:
-        """Converts the input torque to raw analog units of 12-bit Analog-to-Digital-Converter (ADC).
-
-        Use this method to determine the appropriate raw analog units for the threshold arguments of the
-        set_parameters() method.
-
-        Notes:
-            This method assumes a 3.3V ADC with 12-bit resolution.
-
-        Args:
-            target_torque: The target torque in Newton centimeter, to convert to an ADC threshold.
-
-        Returns:
-            The raw analog units of 12-bit ADC for the input torque.
-        """
-        return np.uint16(np.round(target_torque / self._torque_per_adc_unit))
-
-    @property
-    def torque_per_adc_unit(self) -> np.float64:
-        """Returns the conversion factor to translate the raw analog values recorded by the 12-bit ADC into torque in
-        Newton centimeter.
-        """
-        return self._torque_per_adc_unit
-
-    @property
-    def force_per_adc_unit(self) -> np.float64:
-        """Returns the conversion factor to translate the raw analog values recorded by the 12-bit ADC into force in
-        Newtons.
-        """
-        return self._force_per_adc_unit
-
-
 class ScreenInterface(ModuleInterface):
     """Interfaces with ScreenModule instances running on Ataraxis MicroControllers.
 
@@ -1759,11 +1542,9 @@ class ScreenInterface(ModuleInterface):
 
     def initialize_remote_assets(self) -> None:
         """Not used."""
-        pass
 
     def terminate_remote_assets(self) -> None:
         """Not used."""
-        pass
 
     def process_received_data(self, message: ModuleData | ModuleState) -> None:
         """If the class runs in the debug mode, dumps the received data into the terminal via console class.
@@ -1775,9 +1556,9 @@ class ScreenInterface(ModuleInterface):
             method.
         """
         if message.event == 52:
-            console.echo(f"Screen toggle: HIGH")
+            console.echo("Screen toggle: HIGH")
         if message.event == 53:
-            console.echo(f"Screen toggle: LOW")
+            console.echo("Screen toggle: LOW")
 
     def parse_mqtt_command(self, topic: str, payload: bytes | bytearray) -> None:
         """Not used."""

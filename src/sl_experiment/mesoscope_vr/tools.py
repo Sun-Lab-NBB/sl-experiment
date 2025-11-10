@@ -1,6 +1,7 @@
 """This module provides additional tools and classes used by other modules of the mesoscope_vr package. Primarily, this
 includes various dataclasses specific to the Mesoscope-VR systems and utility functions used by other package modules.
-The contents of this module are not intended to be used outside the mesoscope_vr package."""
+The contents of this module are not intended to be used outside the mesoscope_vr package.
+"""
 
 import sys
 from pathlib import Path
@@ -37,10 +38,10 @@ def get_system_configuration() -> MesoscopeSystemConfiguration:
     system_configuration = get_system_configuration_data()
     if not isinstance(system_configuration, MesoscopeSystemConfiguration):
         message = (
-            f"Unable to instantiate the MesoscopeData class, as the local data acquisition system is not a "
-            f"Mesoscope-VR system. This either indicates a user error (calling incorrect Data class) or local data "
-            f"acquisition system misconfiguration. To reconfigured the data-acquisition system, use the "
-            f"sl-create-system-config' CLI command."
+            "Unable to instantiate the MesoscopeData class, as the local data acquisition system is not a "
+            "Mesoscope-VR system. This either indicates a user error (calling incorrect Data class) or local data "
+            "acquisition system misconfiguration. To reconfigured the data-acquisition system, use the "
+            "sl-create-system-config' CLI command."
         )
         console.error(message, error=ValueError)
     return system_configuration
@@ -84,17 +85,15 @@ class _VRPCPersistentData:
 
         # Resolves the session descriptor path based on the session type.
         if self.session_type == SessionTypes.LICK_TRAINING:
-            self.session_descriptor_path = self.persistent_data_path.joinpath(f"lick_training_session_descriptor.yaml")
+            self.session_descriptor_path = self.persistent_data_path.joinpath("lick_training_session_descriptor.yaml")
         elif self.session_type == SessionTypes.RUN_TRAINING:
-            self.session_descriptor_path = self.persistent_data_path.joinpath(f"run_training_session_descriptor.yaml")
+            self.session_descriptor_path = self.persistent_data_path.joinpath("run_training_session_descriptor.yaml")
         elif self.session_type == SessionTypes.MESOSCOPE_EXPERIMENT:
             self.session_descriptor_path = self.persistent_data_path.joinpath(
-                f"mesoscope_experiment_session_descriptor.yaml"
+                "mesoscope_experiment_session_descriptor.yaml"
             )
         elif self.session_type == SessionTypes.WINDOW_CHECKING:
-            self.session_descriptor_path = self.persistent_data_path.joinpath(
-                f"window_checking_session_descriptor.yaml"
-            )
+            self.session_descriptor_path = self.persistent_data_path.joinpath("window_checking_session_descriptor.yaml")
 
         else:  # Raises an error for unsupported session types
             message = (
@@ -316,7 +315,6 @@ class RuntimeControlUI:
 
     def start(self) -> None:
         """Starts the remote UI process."""
-
         # Prevents starting an already started instance
         if self._started:
             return
@@ -330,7 +328,6 @@ class RuntimeControlUI:
         This method should be called at the end of runtime to properly release all resources and terminate the
         remote UI process.
         """
-
         # Prevents shutting down an already terminated instance
         if not self._started:
             return
@@ -353,7 +350,6 @@ class RuntimeControlUI:
 
         This runs Qt6 in the main thread of the separate process, which is perfectly valid.
         """
-
         # Connects to the shared memory array from the remote process
         self._data_array.connect()
 
@@ -528,7 +524,6 @@ class _ControlUIWindow(QMainWindow):
 
     def _setup_ui(self) -> None:
         """Creates and arranges all UI elements optimized for Qt6 with proper scaling."""
-
         # Initializes the main widget container
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
@@ -717,13 +712,12 @@ class _ControlUIWindow(QMainWindow):
 
         This configured the UI to display properly, assuming the UI window uses the default resolution.
         """
-
-        self.setStyleSheet(f"""
-                    QMainWindow {{
+        self.setStyleSheet("""
+                    QMainWindow {
                         background-color: #ecf0f1;
-                    }}
+                    }
 
-                    QGroupBox {{
+                    QGroupBox {
                         font-weight: bold;
                         font-size: 14pt;
                         border: 2px solid #bdc3c7;
@@ -731,9 +725,9 @@ class _ControlUIWindow(QMainWindow):
                         margin: 25px 6px 6px 6px;
                         padding-top: 10px;
                         background-color: #ffffff;
-                    }}
+                    }
 
-                    QGroupBox::title {{
+                    QGroupBox::title {
                         subcontrol-origin: margin;
                         subcontrol-position: top center;
                         left: 0px;
@@ -742,9 +736,9 @@ class _ControlUIWindow(QMainWindow):
                         color: #2c3e50;
                         background-color: transparent;
                         border: none;
-                    }}
+                    }
 
-                    QPushButton {{
+                    QPushButton {
                         background-color: #ffffff;
                         border: 2px solid #bdc3c7;
                         border-radius: 6px;
@@ -753,103 +747,103 @@ class _ControlUIWindow(QMainWindow):
                         font-weight: 500;
                         color: #2c3e50;
                         min-height: 20px;
-                    }}
+                    }
 
-                    QPushButton:hover {{
+                    QPushButton:hover {
                         background-color: #f8f9fa;
                         border-color: #3498db;
                         color: #2980b9;
-                    }}
+                    }
 
-                    QPushButton:pressed {{
+                    QPushButton:pressed {
                         background-color: #e9ecef;
                         border-color: #2980b9;
-                    }}
+                    }
 
-                    QPushButton#exitButton {{
+                    QPushButton#exitButton {
                         background-color: #e74c3c;
                         color: white;
                         border-color: #c0392b;
                         font-weight: bold;
-                    }}
+                    }
 
-                    QPushButton#exitButton:hover {{
+                    QPushButton#exitButton:hover {
                         background-color: #c0392b;
                         border-color: #a93226;
-                    }}
+                    }
 
-                    QPushButton#pauseButton {{
+                    QPushButton#pauseButton {
                         background-color: #f39c12;
                         color: white;
                         border-color: #e67e22;
                         font-weight: bold;
-                    }}
+                    }
 
-                    QPushButton#pauseButton:hover {{
+                    QPushButton#pauseButton:hover {
                         background-color: #e67e22;
                         border-color: #d35400;
-                    }}
+                    }
 
-                    QPushButton#resumeButton {{
+                    QPushButton#resumeButton {
                         background-color: #27ae60;
                         color: white;
                         border-color: #229954;
                         font-weight: bold;
-                    }}
+                    }
 
-                    QPushButton#resumeButton:hover {{
+                    QPushButton#resumeButton:hover {
                         background-color: #229954;
                         border-color: #1e8449;
-                    }}
+                    }
 
-                    QPushButton#valveOpenButton {{
+                    QPushButton#valveOpenButton {
                         background-color: #27ae60;
                         color: white;
                         border-color: #229954;
                         font-weight: bold;
-                    }}
+                    }
 
-                    QPushButton#valveOpenButton:hover {{
+                    QPushButton#valveOpenButton:hover {
                         background-color: #229954;
                         border-color: #1e8449;
-                    }}
+                    }
 
-                    QPushButton#valveCloseButton {{
+                    QPushButton#valveCloseButton {
                         background-color: #e67e22;
                         color: white;
                         border-color: #d35400;
                         font-weight: bold;
-                    }}
+                    }
 
-                    QPushButton#valveCloseButton:hover {{
+                    QPushButton#valveCloseButton:hover {
                         background-color: #d35400;
                         border-color: #ba4a00;
-                    }}
+                    }
                     
-                    QPushButton#rewardButton {{
+                    QPushButton#rewardButton {
                         background-color: #3498db;
                         color: white;
                         border-color: #2980b9;
                         font-weight: bold;
-                    }}
+                    }
 
-                    QPushButton#rewardButton:hover {{
+                    QPushButton#rewardButton:hover {
                         background-color: #2980b9;
                         border-color: #21618c;
-                    }}
+                    }
 
-                    QLabel {{
+                    QLabel {
                         color: #2c3e50;
                         font-size: 12pt;
-                    }}
+                    }
                     
-                    QLabel#volumeLabel {{
+                    QLabel#volumeLabel {
                         color: #2c3e50;
                         font-size: 12pt;
                         font-weight: bold;
-                    }}
+                    }
     
-                    QDoubleSpinBox {{
+                    QDoubleSpinBox {
                         border: 2px solid #bdc3c7;
                         border-radius: 4px;
                         padding: 4px 8px;
@@ -858,13 +852,13 @@ class _ControlUIWindow(QMainWindow):
                         background-color: white;
                         color: #2c3e50;
                         min-height: 20px;
-                    }}
+                    }
     
-                    QDoubleSpinBox:focus {{
+                    QDoubleSpinBox:focus {
                         border-color: #3498db;
-                    }}
+                    }
     
-                    QDoubleSpinBox::up-button {{
+                    QDoubleSpinBox::up-button {
                         subcontrol-origin: border;
                         subcontrol-position: top right;
                         width: 20px;
@@ -872,27 +866,27 @@ class _ControlUIWindow(QMainWindow):
                         border: 1px solid #bdc3c7;
                         border-top-right-radius: 4px;
                         border-bottom: none;
-                    }}
+                    }
     
-                    QDoubleSpinBox::up-button:hover {{
+                    QDoubleSpinBox::up-button:hover {
                         background-color: #e9ecef;
                         border-color: #3498db;
-                    }}
+                    }
     
-                    QDoubleSpinBox::up-button:pressed {{
+                    QDoubleSpinBox::up-button:pressed {
                         background-color: #dee2e6;
-                    }}
+                    }
     
-                    QDoubleSpinBox::up-arrow {{
+                    QDoubleSpinBox::up-arrow {
                         image: none;
                         border-left: 4px solid transparent;
                         border-right: 4px solid transparent;
                         border-bottom: 6px solid #2c3e50;
                         width: 0px;
                         height: 0px;
-                    }}
+                    }
     
-                    QDoubleSpinBox::down-button {{
+                    QDoubleSpinBox::down-button {
                         subcontrol-origin: border;
                         subcontrol-position: bottom right;
                         width: 20px;
@@ -900,150 +894,150 @@ class _ControlUIWindow(QMainWindow):
                         border: 1px solid #bdc3c7;
                         border-bottom-right-radius: 4px;
                         border-top: none;
-                    }}
+                    }
     
-                    QDoubleSpinBox::down-button:hover {{
+                    QDoubleSpinBox::down-button:hover {
                         background-color: #e9ecef;
                         border-color: #3498db;
-                    }}
+                    }
     
-                    QDoubleSpinBox::down-button:pressed {{
+                    QDoubleSpinBox::down-button:pressed {
                         background-color: #dee2e6;
-                    }}
+                    }
     
-                    QDoubleSpinBox::down-arrow {{
+                    QDoubleSpinBox::down-arrow {
                         image: none;
                         border-left: 4px solid transparent;
                         border-right: 4px solid transparent;
                         border-top: 6px solid #2c3e50;
                         width: 0px;
                         height: 0px;
-                    }}
+                    }
     
-                    QSlider::groove:horizontal {{
+                    QSlider::groove:horizontal {
                         border: 1px solid #bdc3c7;
                         height: 8px;
                         background: #ecf0f1;
                         margin: 2px 0;
                         border-radius: 4px;
-                    }}
+                    }
     
-                    QSlider::handle:horizontal {{
+                    QSlider::handle:horizontal {
                         background: #3498db;
                         border: 2px solid #2980b9;
                         width: 20px;
                         margin: -6px 0;
                         border-radius: 10px;
-                    }}
+                    }
     
-                    QSlider::handle:horizontal:hover {{
+                    QSlider::handle:horizontal:hover {
                         background: #2980b9;
                         border-color: #21618c;
-                    }}
+                    }
     
-                    QSlider::handle:horizontal:pressed {{
+                    QSlider::handle:horizontal:pressed {
                         background: #21618c;
-                    }}
+                    }
     
-                    QSlider::sub-page:horizontal {{
+                    QSlider::sub-page:horizontal {
                         background: #3498db;
                         border: 1px solid #2980b9;
                         height: 8px;
                         border-radius: 4px;
-                    }}
+                    }
     
-                    QSlider::add-page:horizontal {{
+                    QSlider::add-page:horizontal {
                         background: #ecf0f1;
                         border: 1px solid #bdc3c7;
                         height: 8px;
                         border-radius: 4px;
-                    }}
+                    }
     
-                    QSlider::groove:vertical {{
+                    QSlider::groove:vertical {
                         border: 1px solid #bdc3c7;
                         width: 8px;
                         background: #ecf0f1;
                         margin: 0 2px;
                         border-radius: 4px;
-                    }}
+                    }
     
-                    QSlider::handle:vertical {{
+                    QSlider::handle:vertical {
                         background: #3498db;
                         border: 2px solid #2980b9;
                         height: 20px;
                         margin: 0 -6px;
                         border-radius: 10px;
-                    }}
+                    }
     
-                    QSlider::handle:vertical:hover {{
+                    QSlider::handle:vertical:hover {
                         background: #2980b9;
                         border-color: #21618c;
-                    }}
+                    }
     
-                    QSlider::handle:vertical:pressed {{
+                    QSlider::handle:vertical:pressed {
                         background: #21618c;
-                    }}
+                    }
     
-                    QSlider::sub-page:vertical {{
+                    QSlider::sub-page:vertical {
                         background: #ecf0f1;
                         border: 1px solid #bdc3c7;
                         width: 8px;
                         border-radius: 4px;
-                    }}
+                    }
     
-                    QSlider::add-page:vertical {{
+                    QSlider::add-page:vertical {
                         background: #3498db;
                         border: 1px solid #2980b9;
                         width: 8px;
                         border-radius: 4px;
-                    }}
+                    }
                     
-                    QPushButton#guidanceButton {{
+                    QPushButton#guidanceButton {
                     background-color: #9b59b6;
                     color: white;
                     border-color: #8e44ad;
                     font-weight: bold;
-                    }}
+                    }
                     
-                    QPushButton#guidanceButton:hover {{
+                    QPushButton#guidanceButton:hover {
                         background-color: #8e44ad;
                         border-color: #7d3c98;
-                    }}
+                    }
                     
-                    QPushButton#guidanceDisableButton {{
+                    QPushButton#guidanceDisableButton {
                         background-color: #95a5a6;
                         color: white;
                         border-color: #7f8c8d;
                         font-weight: bold;
-                    }}
+                    }
                     
-                    QPushButton#guidanceDisableButton:hover {{
+                    QPushButton#guidanceDisableButton:hover {
                         background-color: #7f8c8d;
                         border-color: #6c7b7d;
-                    }}
-                    QPushButton#hideRewardButton {{
+                    }
+                    QPushButton#hideRewardButton {
                         background-color: #e74c3c;
                         color: white;
                         border-color: #c0392b;
                         font-weight: bold;
-                    }}
+                    }
                     
-                    QPushButton#hideRewardButton:hover {{
+                    QPushButton#hideRewardButton:hover {
                         background-color: #c0392b;
                         border-color: #a93226;
-                    }}
+                    }
                     
-                    QPushButton#showRewardButton {{
+                    QPushButton#showRewardButton {
                         background-color: #27ae60;
                         color: white;
                         border-color: #229954;
                         font-weight: bold;
-                    }}
+                    }
                     
-                    QPushButton#showRewardButton:hover {{
+                    QPushButton#showRewardButton:hover {
                         background-color: #229954;
                         border-color: #1e8449;
-                    }}
+                    }
                 """)
 
     def _setup_monitoring(self) -> None:
