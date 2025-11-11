@@ -2064,7 +2064,7 @@ class _MesoscopeVRSystem:
 
         # Disables all sensor monitoring
         self._microcontrollers.wheel_encoder.disable_monitoring()
-        self._microcontrollers.disable_torque_monitoring()
+        self._microcontrollers.torque.disable_monitoring()
         self._microcontrollers.lick.disable_monitoring()
 
         # Sets system state to 0
@@ -2092,7 +2092,7 @@ class _MesoscopeVRSystem:
         self._microcontrollers.wheel_encoder.disable_monitoring()
 
         # Enables torque monitoring.
-        self._microcontrollers.enable_torque_monitoring()
+        self._microcontrollers.torque.enable_monitoring()
 
         # Sets system state to 1
         self._change_system_state(self._state_map["rest"])
@@ -2114,7 +2114,7 @@ class _MesoscopeVRSystem:
         self._microcontrollers.wheel_encoder.enable_monitoring()
 
         # Disables torque monitoring.
-        self._microcontrollers.disable_torque_monitoring()
+        self._microcontrollers.torque.disable_monitoring()
 
         # Activates VR screens.
         self._microcontrollers.enable_vr_screens()
@@ -2149,7 +2149,7 @@ class _MesoscopeVRSystem:
         self._microcontrollers.wheel_encoder.disable_monitoring()
 
         # Initiates torque monitoring
-        self._microcontrollers.enable_torque_monitoring()
+        self._microcontrollers.torque.enable_monitoring()
 
         # Initiates lick monitoring
         self._microcontrollers.lick.enable_monitoring()
@@ -2181,7 +2181,7 @@ class _MesoscopeVRSystem:
         self._microcontrollers.wheel_encoder.enable_monitoring()
 
         # Ensures torque monitoring is disabled
-        self._microcontrollers.disable_torque_monitoring()
+        self._microcontrollers.torque.disable_monitoring()
 
         # Initiates lick monitoring
         self._microcontrollers.lick.enable_monitoring()

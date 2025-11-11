@@ -35,8 +35,9 @@ class EncoderInterface(ModuleInterface):
     Args:
         encoder_ppr: The resolution of the module's quadrature encoder, in Pulses Per Revolution (PPR).
         wheel_diameter: The diameter of the running wheel attached to the encoder, in centimeters.
-        cm_per_unity_unit: The length of each Virtual Reality environment distance unit (Unity unit) in centimeters.
-        polling_frequency: The frequency, in microseconds, at which to check the encoder's state.
+        cm_per_unity_unit: The length of one Virtual Reality environment distance unit (Unity unit) in centimeters.
+        polling_frequency: The frequency, in microseconds, at which to check the encoder's state when monitoring the
+            encoder.
 
     Attributes:
         _motion_topic: The MQTT topic used to transfer the collected motion data to the Virtual Reality environment
@@ -145,17 +146,11 @@ class EncoderInterface(ModuleInterface):
         # Translates the absolute motion into the CW / CCW vector and converts from raw pulse count to Unity units
         # using the precomputed conversion factor. Uses float64 and rounds to 8 decimal places for consistency and
         # precision.
-        unity_motion = np.round(
-            a=np.float64(message.data_object) * self._unity_unit_per_pulse * sign,
-            decimals=8,
-        )
+        unity_motion = message.data_object * self._unity_unit_per_pulse * sign
 
         # Converts the motion into centimeters. Does not include the sign, as this value is used to compute the absolute
         # traveled distance regardless of the traveled direction.
-        cm_motion = np.round(
-            a=np.float64(message.data_object) * self._cm_per_pulse,
-            decimals=8,
-        )
+        cm_motion = message.data_object * self._cm_per_pulse
 
         # Increments the total distance traveled by the animal.
         self._distance_tracker[0] += cm_motion
@@ -199,7 +194,7 @@ class EncoderInterface(ModuleInterface):
 
         Args:
             repetition_delay: The time, in microseconds, to wait between repeatedly checking the encoder's state or 0
-                to only check the encoder state once.
+                to only check the encoder's state once.
         """
         self.send_command(command=self._check_state, noblock=_FALSE, repetition_delay=repetition_delay)
 
@@ -254,7 +249,8 @@ class LickInterface(ModuleInterface):
     Args:
         lick_threshold: The threshold voltage, in raw analog units measured by a 3.3 Volt 12-bit
             Analog-to-Digital-Converter module, for interpreting the signal received from the sensor as a lick event.
-        polling_frequency: The frequency, in microseconds, at which to check the lick sensor's state.
+        polling_frequency: The frequency, in microseconds, at which to check the lick sensor's state when monitoring the
+            sensor.
 
     Attributes:
         _sensor_topic: The MQTT topic used to transfer the collected lick event data to the Virtual Reality environment
@@ -353,9 +349,9 @@ class LickInterface(ModuleInterface):
         """Sets the module's PC-addressable runtime parameters to the input values.
 
         Args:
-            signal_threshold: The minimum voltage level, in raw analog units of 12-bit Analog-to-Digital-Converter
-                (ADC), reported to the PC as a significant sensor interaction. Note; signals below the threshold are
-                pulled to 0.
+            signal_threshold: The minimum voltage level, in raw analog units of a 3.3 Volt 12-bit
+                Analog-to-Digital-Converter (ADC), reported to the PC as a significant sensor interaction. Note;
+                signals below the threshold are pulled to 0.
             delta_threshold: The minimum difference between two consecutive voltage level readouts for reporting the
                 new signal value to the PC.
             averaging_pool_size: The number of analog pin readouts to average together when checking the sensor's state.
@@ -380,7 +376,7 @@ class LickInterface(ModuleInterface):
 
         Args:
             repetition_delay: The time, in microseconds, to wait between repeatedly checking the lick sensor's state or
-                0 to only check the sensor state once.
+                0 to only check the sensor's state once.
         """
         self.send_command(command=self._check_state, noblock=_FALSE, repetition_delay=repetition_delay)
 
@@ -417,7 +413,8 @@ class TorqueInterface(ModuleInterface):
             Analog-to-Digital-Converter module, that corresponds to the absolute maximum torque detectable by the
             sensor.
         sensor_capacity: The maximum torque level, in grams centimeter (g cm) detectable by the sensor.
-        polling_frequency: The frequency, in microseconds, at which to check the torque sensor's state.
+        polling_frequency: The frequency, in microseconds, at which to check the torque sensor's state when monitoring
+            the sensor.
 
     Attributes:
         _polling_frequency: The frequency, in microseconds, at which to check the torque sensor's state when monitoring
@@ -425,19 +422,15 @@ class TorqueInterface(ModuleInterface):
         _torque_per_adc_unit: The conversion factor that translates the raw analog units of a 3.3 Volt 12-bit ADC to
             torque in Newtons centimeter.
         _check_state: The code for the CheckState module command.
-        _monitoring: Tracks whether the instance is currently configured to monitor the managed lick sensor's state.
+        _monitoring: Tracks whether the instance is currently configured to monitor the managed torque sensor's state.
     """
 
     def __init__(
-        self,
-        baseline_voltage: int,
-        maximum_voltage: int,
-        sensor_capacity: float,
-        polling_frequency: int
+        self, baseline_voltage: int, maximum_voltage: int, sensor_capacity: float, polling_frequency: int
     ) -> None:
         # data_codes = {np.uint8(51), np.uint8(52)}  # kCCWTorque, kCWTorque
 
-        # Initializes the subclassed ModuleInterface using the input instance data. Type data is hardcoded.
+        # Initializes the subclassed ModuleInterface using the input instance data.
         super().__init__(
             module_type=np.uint8(6),
             module_id=np.uint8(1),
@@ -449,7 +442,7 @@ class TorqueInterface(ModuleInterface):
         self._polling_frequency = np.uint32(polling_frequency)
 
         # Computes the conversion factor to translate the recorded raw analog readouts of the 3.3V 12-bit ADC to
-        # torque in Newton centimeter. Rounds to 12 decimal places for consistency and to ensure
+        # torque in Newton centimeter. Rounds to 8 decimal places for consistency and to ensure
         # repeatability. Uses a hardcoded conversion factor to translate sensor capacity from g cm to N cm.
         self._torque_per_adc_unit: np.float64 = np.round(
             a=(np.float64(sensor_capacity) * np.float64(0.00981) / (maximum_voltage - baseline_voltage)),
@@ -471,32 +464,8 @@ class TorqueInterface(ModuleInterface):
         return
 
     def process_received_data(self, message: ModuleData | ModuleState) -> None:
-        """If the class is initialized in debug mode, prints the received torque data to the terminal via console.
-
-        In debug mode, this method parses incoming code 51 (CW torque) and code 52 (CCW torque) data and dumps it into
-         the terminal via console. If the class is not initialized in debug mode, this method does nothing.
-
-        Notes:
-            Make sure the console is enabled before calling this method.
-        """
-        # This is here to appease mypy, currently all message inputs are ModuleData messages
-        if isinstance(message, ModuleState):
-            return
-
-        # The torque direction is encoded via the message event code. CW torque (code 52) is interpreted as negative
-        # and CCW (code 51) as positive.
-        sign = 1 if message.event == np.uint8(51) else -1
-
-        # Translates the absolute torque into the CW / CCW vector and converts from raw ADC units to Newton centimeters
-        # using the precomputed conversion factor. Uses float64 and rounds to 8 decimal places for consistency and
-        # precision
-        signed_torque = np.round(
-            a=np.float64(message.data_object) * self._torque_per_adc_unit * sign,
-            decimals=8,
-        )
-
-        # Since this method is only called in the debug mode, always prints the data to the console
-        console.echo(message=f"Torque: {signed_torque} N cm, ADC: {np.int32(message.data_object) * sign}.")
+        """Not used, as the module currently does not require real-time data processing."""
+        return
 
     def set_parameters(
         self,
@@ -506,87 +475,55 @@ class TorqueInterface(ModuleInterface):
         delta_threshold: np.uint16 = np.uint16(70),
         averaging_pool_size: np.uint8 = np.uint8(10),
     ) -> None:
-        """Changes the PC-addressable runtime parameters of the TorqueModule instance.
-
-        Use this method to package and apply new PC-addressable parameters to the TorqueModule instance managed by this
-        Interface class.
-
-        Notes:
-            All threshold parameters are inclusive! If you need help determining appropriate threshold levels for
-            specific targeted torque levels, use the get_adc_units_from_torque() method of the interface instance.
+        """Sets the module's PC-addressable runtime parameters to the input values.
 
         Args:
-            report_ccw: Determines whether the sensor should report torque in the CounterClockwise (CCW) direction.
-            report_cw: Determines whether the sensor should report torque in the Clockwise (CW) direction.
+            report_ccw: Determines whether the sensor should report torques in the counterclockwise (CCW; positive)
+                direction.
+            report_cw: Determines whether the sensor should report torque in the clockwise (CW; negative) direction.
             signal_threshold: The minimum torque level, in raw analog units of 12-bit Analog-to-Digital-Converter
-                (ADC), that needs to be reported to the PC. Setting this threshold to a number above zero allows
-                high-pass filtering the incoming signals. Note, Signals below the threshold will be pulled to 0.
-            delta_threshold: The minimum value by which the signal has to change, relative to the previous check, for
-                the change to be reported to the PC. Note, if the change is 0, the signal will not be reported to the
-                PC, regardless of this parameter value.
-            averaging_pool_size: The number of analog pin readouts to average together when checking pin state. This
-                is used to smooth the recorded values to avoid communication line noise. Teensy microcontrollers have
-                built-in analog pin averaging, but we disable it by default and use this averaging method instead. It is
-                recommended to set this value between 15 and 30 readouts.
+                (ADC), reported to the PC as a significant torque signal. Note; signals below the threshold are
+                pulled to 0.
+            delta_threshold: The minimum difference between two consecutive torque level readouts for reporting the
+                new signal value to the PC.
+            averaging_pool_size: The number of analog pin readouts to average together when checking the sensor's state.
         """
-        message = ModuleParameters(
-            module_type=self._module_type,
-            module_id=self._module_id,
-            return_code=np.uint8(0),  # Generally, return code is only helpful for debugging.
+        self.send_parameters(
             parameter_data=(
                 report_ccw,
                 report_cw,
                 signal_threshold,
                 delta_threshold,
                 averaging_pool_size,
-            ),
+            )
         )
-        self._input_queue.put(message)  # type: ignore
+
+    def enable_monitoring(self) -> None:
+        """Begins continuously monitoring the torque sensor's state.'"""
+        if not self._monitoring:
+            self.check_state(repetition_delay=self._polling_frequency)
+            self._monitoring = True
+
+    def disable_monitoring(self) -> None:
+        """Stops continuously monitoring the torque sensor's state."""
+        if self._monitoring:
+            self.reset_command_queue()
+            self._monitoring = False
 
     def check_state(self, repetition_delay: np.uint32 = np.uint32(0)) -> None:
-        """Returns the torque signal detected by the analog pin monitored by the TorqueModule.
-
-        If there has been a significant change in the detected signal (voltage) level and the level is within the
-        reporting thresholds, reports the change to the PC. It is highly advised to issue this command to repeat
-        (recur) at a desired interval to continuously monitor the lick sensor state, rather than repeatedly calling it
-        as a one-off command for best runtime efficiency.
-
-        This command allows continuously monitoring the CW and CCW torque experienced by the object connected to the
-        torque sensor. It is designed to return the raw analog units, measured by a 3.3V ADC with 12-bit resolution.
-        To avoid floating-point math, the value is returned as an unsigned 16-bit integer.
-
-        Notes:
-            Due to how the torque signal is measured and processed, the returned value will always be between 0 and
-            the baseline ADC value. For a 3.3V 12-bit ADC, this is between 0 and ~1.65 Volts.
+        """Checks the torque level detected by the sensor at regular intervals and, if necessary, notifies the
+        PC about significant changes.
 
         Args:
-            repetition_delay: The time, in microseconds, to delay before repeating the command. If set to 0, the
-            command will only run once.
+            repetition_delay: The time, in microseconds, to wait between repeatedly checking the torque sensor's state
+                or 0 to only check the sensor's state once.
         """
-        command: OneOffModuleCommand | RepeatedModuleCommand
-        if repetition_delay == 0:
-            command = OneOffModuleCommand(
-                module_type=self._module_type,
-                module_id=self._module_id,
-                return_code=np.uint8(0),
-                command=np.uint8(1),
-                noblock=np.bool(False),
-            )
-        else:
-            command = RepeatedModuleCommand(
-                module_type=self._module_type,
-                module_id=self._module_id,
-                return_code=np.uint8(0),
-                command=np.uint8(1),
-                noblock=np.bool(False),
-                cycle_delay=repetition_delay,
-            )
-        self._input_queue.put(command)  # type: ignore
+        self.send_command(command=self._check_state, noblock=_FALSE, repetition_delay=repetition_delay)
 
     @property
     def torque_per_adc_unit(self) -> np.float64:
-        """Returns the conversion factor to translate the raw analog values recorded by the 12-bit ADC into torque in
-        Newton centimeter.
+        """Returns the conversion factor that translates the raw analog values recorded by the 3.3 Volt 12-bit ADC into
+        torque in Newton centimeter.
         """
         return self._torque_per_adc_unit
 
@@ -594,94 +531,57 @@ class TorqueInterface(ModuleInterface):
 class TTLInterface(ModuleInterface):
     """Interfaces with TTLModule instances running on Ataraxis MicroControllers.
 
-    TTLModule facilitates exchanging Transistor-to-Transistor Logic (TTL) signals between various hardware systems, such
-    as microcontrollers, cameras, and recording devices. The module contains methods for both sending and receiving TTL
-    pulses, but each TTLModule instance can only perform one of these functions at a time.
-
-    Notes:
-        When the TTLModule is configured to output a signal, it will notify the PC about the initial signal state
-        (HIGH or LOW) after setup.
-
-    Args:
-        module_id: The unique byte-code identifier of the TTLModule instance. Since the mesoscope data acquisition
-            pipeline uses multiple TTL modules on some microcontrollers, each instance running on the same
-            microcontroller must have a unique identifier. The ID codes are not shared between AMC and other module
-            types.
-        report_pulses: A boolean flag that determines whether the class should report detecting HIGH signals to other
-            processes. This is intended exclusively for the mesoscope frame acquisition recorder to notify the central
-            process whether the mesoscope start trigger has been successfully received and processed by ScanImage
-            software.
-        debug: A boolean flag that configures the interface to dump certain data received from the microcontroller into
-            the terminal. This is used during debugging and system calibration and should be disabled for most runtimes.
-
     Attributes:
-        _report_pulses: Stores the report pulses flag.
-        _debug: Stores the debug flag.
-        _pulse_tracker: When the class is initialized with the report_pulses flag, it stores the SharedMemoryArray used
-            to track how many pulses the class has recorded since initialization.
+        _pulse_tracker: The SharedMemoryArray instance that transfers the TTL pulse data collected by the module from
+            the communication process to other runtime processes.
     """
 
-    def __init__(self, module_id: np.uint8, report_pulses: bool = False, debug: bool = False) -> None:
-        error_codes: set[np.uint8] = {np.uint8(51), np.uint8(54)}  # kOutputLocked, kInvalidPinMode
+    def __init__(self) -> None:
+        error_codes: set[np.uint8] = {np.uint8(53)}  # kInvalidPinMode
         # kInputOn, kInputOff, kOutputOn, kOutputOff
-        # data_codes = {np.uint8(52), np.uint8(53), np.uint8(55), np.uint8(56)}
+        # data_codes = {np.uint8(51), np.uint8(52), np.uint8(54), np.uint8(55)}
 
-        self._debug: bool = debug
-        self._report_pulses: bool = report_pulses
-
-        # If the interface does not need to do any real-time processing of incoming data (not in debug or pulse
-        # monitoring mode), so sets data_codes to None.
-        data_codes: set[np.uint8] | None = None
-        # If the interface runs in the debug mode, configures the interface to monitor all incoming data codes.
-        if debug:
-            data_codes = {np.uint8(52), np.uint8(53), np.uint8(55), np.uint8(56)}
-        # Alternatively, if the interface is configured to report pulses, adds the HIGH phase code to the list of
-        # monitored codes. We do not need to monitor other codes as pulse tracker simply counts how many pulses the
-        # class has encountered, which uses rising edge.
-        elif report_pulses:
-            data_codes = {np.uint8(52)}
+        # Statically configures the interface to report HIGH phases of incoming pulses to other processes.
+        data_codes = {np.uint8(52)}
 
         super().__init__(
             module_type=np.uint8(1),
-            module_id=module_id,
-            mqtt_communication=False,
+            module_id=np.uint8(1),
             data_codes=data_codes,
-            mqtt_command_topics=None,
             error_codes=error_codes,
         )
 
-        # Precreates a shared memory array used to track and share the number of pulses encountered by the class with
-        # other processes. Critically, for the class that monitors mesoscope frame timestamps, this is used to determine
-        # if the mesoscope trigger successfully starts frame acquisition.
-        self._pulse_tracker: SharedMemoryArray | None = None
-        if self._report_pulses:
-            self._pulse_tracker = SharedMemoryArray.create_array(
-                name=f"{self._module_type}_{self._module_id}_pulse_tracker",
-                prototype=np.zeros(shape=1, dtype=np.uint64),
-                exist_ok=True,
-            )
+        # Pre-creates a shared memory array used to track and share the number of pulses encountered by the instance
+        # with other processes.
+        self._pulse_tracker: SharedMemoryArray = SharedMemoryArray.create_array(
+            name=f"{self._module_type}_{self._module_id}_pulse_tracker",
+            prototype=np.zeros(shape=1, dtype=np.uint64),
+            exists_ok=True,
+        )
+
+        # Statically computes command code objects
+        self._send_pulse = np.uint8(1)
+        self._high = np.uint8(2)
+        self._low = np.uint8(3)
+        self._check_state = np.uint8(4)
 
     def __del__(self) -> None:
-        """Destroys the _pulse_tracker memory buffer and releases the resources reserved by the array during class
-        runtime.
-        """
-        if self._pulse_tracker is not None:
-            self._pulse_tracker.disconnect()
-            self._pulse_tracker.destroy()
+        """Ensures the instance's shared memory buffer is properly cleaned up when the instance is garbage-collected."""
+        self._pulse_tracker.disconnect()
+        self._pulse_tracker.destroy()
+
+    def initialize_local_assets(self) -> None:
+        """Connects to the instance's shared memory buffer and enables buffer cleanup at shutdown."""
+        self._pulse_tracker.connect()
+        self._pulse_tracker.enable_buffer_destruction()
 
     def initialize_remote_assets(self) -> None:
-        """If the class is instructed to report detected HIGH incoming pulses, connects to the _pulse_tracker
-        SharedMemoryArray.
-        """
-        if self._pulse_tracker is not None:
-            self._pulse_tracker.connect()
+        """Connects to the instance's shared memory buffer."""
+        self._pulse_tracker.connect()
 
     def terminate_remote_assets(self) -> None:
-        """If the class is instructed to report detected HIGH incoming pulses, disconnects from the _pulse_tracker
-        SharedMemoryArray.
-        """
-        if self._pulse_tracker is not None:
-            self._pulse_tracker.disconnect()
+        """Disconnects from the instance's shared memory buffer."""
+        self._pulse_tracker.disconnect()
 
     def process_received_data(self, message: ModuleData | ModuleState) -> None:
         """Processes incoming data when the class operates in debug or pulse reporting mode.
@@ -694,55 +594,32 @@ class TTLInterface(ModuleInterface):
             If the interface runs in debug mode, make sure the console is enabled, as it is used to print received
             data into the terminal.
         """
-        if self._debug:
-            if message.event == 52:
-                console.echo(f"TTLModule {self.module_id} detects HIGH signal")
-            if message.event == 53:
-                console.echo(f"TTLModule {self.module_id} detects LOW signal")
-            if message.event == 55:
-                console.echo(f"TTLModule {self.module_id} emits HIGH signal")
-            if message.event == 56:
-                console.echo(f"TTLModule {self.module_id} emits LOW signal")
-
-        # If the class is running in the pulse tracking mode, each time the class receives a HIGH edge message,
-        # increments the pulse tracker by one.
-        if self._pulse_tracker is not None and message.event == 52:
-            count = self._pulse_tracker.read_data(index=0, convert_output=False)
-            count += 1
-            self._pulse_tracker.write_data(index=0, data=count)
-
-    def parse_mqtt_command(self, topic: str, payload: bytes | bytearray) -> None:
-        """Not used."""
-        return
+        # Each time the module notifies the PC about detecting a HIGH TTL signal edge, increments the pulse tracker by
+        # one.
+        if message.event == 52:
+            self._pulse_tracker[0] += 1
 
     def set_parameters(
-        self, pulse_duration: np.uint32 = np.uint32(10000), averaging_pool_size: np.uint8 = np.uint8(0)
+        self,
+        pulse_duration: np.uint32 = np.uint32(10000),
+        averaging_pool_size: np.uint8 = np.uint8(0),
     ) -> None:
-        """Changes the PC-addressable runtime parameters of the TTLModule instance.
-
-        Use this method to package and apply new PC-addressable parameters to the TTLModule instance managed by
-        this Interface class.
+        """Sets the module's PC-addressable runtime parameters to the input values.
 
         Args:
             pulse_duration: The duration, in microseconds, of each emitted TTL pulse HIGH phase. This determines
                 how long the TTL pin stays ON when emitting a pulse.
             averaging_pool_size: The number of digital pin readouts to average together when checking pin state. This
-                is used during the execution of the check_state () command to debounce the pin readout and acts in
+                is used during the execution of the check_state() command to debounce the pin readout and acts in
                 addition to any built-in debouncing.
         """
-        message = ModuleParameters(
-            module_type=self._module_type,
-            module_id=self._module_id,
-            return_code=np.uint8(0),
-            parameter_data=(pulse_duration, averaging_pool_size),
-        )
-        self._input_queue.put(message)  # type: ignore
+        self.send_parameters(parameter_data=(pulse_duration, averaging_pool_size))
 
-    def send_pulse(self, repetition_delay: np.uint32 = np.uint32(0), noblock: bool = True) -> None:
+    def send_pulse(self, repetition_delay: np.uint32 = np.uint32(0), noblock: np.bool = np.bool(True)) -> None:
         """Triggers TTLModule to deliver a one-off or recurrent (repeating) digital TTL pulse.
 
-        This command is well-suited to carry out most forms of TTL communication, but it is adapted for comparatively
-        low-frequency communication at 10-200 Hz. This is in contrast to PWM outputs capable of mHz or even Khz pulse
+        This command is well-suited for most forms of TTL communication and is adapted for comparatively
+        low-frequency communication at 10-200 Hz, in contrast to PWM outputs capable of MHz or even kHz pulse
         oscillation frequencies.
 
         Args:
@@ -753,26 +630,7 @@ class TTLInterface(ModuleInterface):
                 the pulse or not. Blocking ensures precise pulse duration, non-blocking allows the microcontroller to
                 perform other operations while waiting, increasing its throughput.
         """
-        command: OneOffModuleCommand | RepeatedModuleCommand
-        if repetition_delay == 0:
-            command = OneOffModuleCommand(
-                module_type=self._module_type,
-                module_id=self._module_id,
-                return_code=np.uint8(0),
-                command=np.uint8(1),
-                noblock=np.bool(noblock),
-            )
-        else:
-            command = RepeatedModuleCommand(
-                module_type=self._module_type,
-                module_id=self._module_id,
-                return_code=np.uint8(0),
-                command=np.uint8(1),
-                noblock=np.bool(noblock),
-                cycle_delay=repetition_delay,
-            )
-
-        self._input_queue.put(command)  # type: ignore
+        self.send_command(command=self._send_pulse, noblock=noblock, repetition_delay=repetition_delay)
 
     def toggle(self, state: bool) -> None:
         """Triggers the TTLModule to continuously deliver a digital HIGH or LOW signal.
@@ -782,18 +640,10 @@ class TTLInterface(ModuleInterface):
         Args:
             state: The signal to output. Set to True for HIGH and False for LOW.
         """
-        command = OneOffModuleCommand(
-            module_type=self._module_type,
-            module_id=self._module_id,
-            return_code=np.uint8(0),
-            command=np.uint8(2 if state else 3),
-            noblock=np.bool(False),
-        )
-
-        self._input_queue.put(command)  # type: ignore
+        self.send_command(command=self._high if state else self._low, noblock=_FALSE, repetition_delay=_ZERO_UINT32)
 
     def check_state(self, repetition_delay: np.uint32 = np.uint32(0)) -> None:
-        """Checks the state of the TTL signal received by the TTLModule.
+        """Checks the state of the TTL signal received by the TTLModule at regular intervals.
 
         This command evaluates the state of the TTLModule's input pin and, if it is different from the previous state,
         reports it to the PC. This approach ensures that the module only reports signal level shifts (edges), preserving
@@ -803,39 +653,16 @@ class TTLInterface(ModuleInterface):
             repetition_delay: The time, in microseconds, to delay before repeating the command. If set to 0, the command
                 will only run once.
         """
-        command: OneOffModuleCommand | RepeatedModuleCommand
-        if repetition_delay == 0:
-            command = OneOffModuleCommand(
-                module_type=self._module_type,
-                module_id=self._module_id,
-                return_code=np.uint8(0),
-                command=np.uint8(4),
-                noblock=np.bool(False),
-            )
-        else:
-            command = RepeatedModuleCommand(
-                module_type=self._module_type,
-                module_id=self._module_id,
-                return_code=np.uint8(0),
-                command=np.uint8(4),
-                noblock=np.bool(False),
-                cycle_delay=repetition_delay,
-            )
-        self._input_queue.put(command)  # type: ignore
+        self.send_command(command=self._check_state, noblock=_FALSE, repetition_delay=repetition_delay)
 
     @property
     def pulse_count(self) -> np.uint64:
-        """Returns the total number of received TTL pulses recorded by the class since initialization."""
-        if self._pulse_tracker is not None:
-            return self._pulse_tracker.read_data(index=0, convert_output=False)  # type: ignore
-        return _ZERO_UINT64  # If the array does not exist, always returns 0
+        """Returns the total number of received TTL pulses recorded by the module since initialization."""
+        return self._pulse_tracker[0]
 
     def reset_pulse_count(self) -> None:
-        """Resets the tracked mesoscope pulse count to zero if the TTLInterface instance is used to monitor mesoscope
-        frame acquisition pulses.
-        """
-        if self._pulse_tracker is not None:
-            self._pulse_tracker.write_data(index=0, data=_ZERO_UINT64)
+        """Resets the tracked TTL pulse count to zero."""
+        self._pulse_tracker[0] = _ZERO_UINT64
 
 
 class BreakInterface(ModuleInterface):
