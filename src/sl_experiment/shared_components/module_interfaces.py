@@ -8,7 +8,7 @@ from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
-from ataraxis_time import PrecisionTimer
+from ataraxis_time import TimeUnits, PrecisionTimer, convert_time
 from scipy.optimize import curve_fit
 from ataraxis_base_utilities import console
 from ataraxis_data_structures import SharedMemoryArray
@@ -24,6 +24,14 @@ _ZERO_UINT64 = np.uint64(0)
 _ZERO_FLOAT64 = np.float64(0.0)
 _ZERO_UINT32 = np.uint32(0)
 _FALSE = np.bool(False)
+
+
+def _power_law_model(pulse_duration: Any, a: Any, b: Any, /) -> Any:
+    """Defines the power-law model used during valve calibration.
+
+    This model was empirically found to have the best fit for the water reward valve's performance data.
+    """
+    return a * np.power(pulse_duration, b)
 
 
 class EncoderInterface(ModuleInterface):
@@ -52,7 +60,6 @@ class EncoderInterface(ModuleInterface):
             the communication process to other runtime processes.
         _check_state: The code for the CheckState module command.
         _reset_encoder: The code for the ResetEncoder module command.
-        _get_ppr: The code for the GetPPR module command.
         _monitoring: Tracks whether the instance is currently configured to monitor the managed encoder's state.
     """
 
@@ -63,7 +70,7 @@ class EncoderInterface(ModuleInterface):
         cm_per_unity_unit: float,
         polling_frequency: int,
     ) -> None:
-        data_codes: set[np.uint8] = {np.uint8(51), np.uint8(52), np.uint8(53)}  # kRotatedCCW, kRotatedCW, kPPR
+        data_codes: set[np.uint8] = {np.uint8(51), np.uint8(52)}  # kRotatedCCW, kRotatedCW
 
         super().__init__(
             module_type=np.uint8(2),
@@ -91,7 +98,7 @@ class EncoderInterface(ModuleInterface):
         )
 
         # Saves the encoder's polling frequency in microseconds.
-        self._polling_frequency = np.uint32(polling_frequency)
+        self._polling_frequency: np.uint32 = np.uint32(polling_frequency)
 
         # Pre-creates a shared memory array used to track and share the absolute distance, in centimeters, traveled by
         # the animal since class initialization and the current absolute position of the animal in centimeters relative
@@ -103,9 +110,8 @@ class EncoderInterface(ModuleInterface):
         )
 
         # Statically computes command code objects
-        self._check_state = np.uint8(1)
-        self._reset_encoder = np.uint8(2)
-        self._get_ppr = np.uint8(3)
+        self._check_state: np.uint8 = np.uint8(1)
+        self._reset_encoder: np.uint8 = np.uint8(2)
 
         # Tracks the current encoder monitoring status
         self._monitoring: bool = False
@@ -132,13 +138,6 @@ class EncoderInterface(ModuleInterface):
         """Updates the distance data stored in the instance's shared memory buffer based on the messages received from
         the microcontroller.
         """
-        # If the incoming message is the PPR report, prints the data to the terminal via console.
-        if message.event == 53:
-            console.echo(f"Encoder ppr: {message.data_object}.")
-
-        # Otherwise, the message necessarily has to be reporting rotation in the CCW or CW direction
-        # (event code 51 or 52).
-
         # The rotation direction is encoded via the message event code. CW rotation (code 52) is interpreted as negative
         # and CCW (code 51) as positive.
         sign = 1 if message.event == np.uint8(51) else -1
@@ -175,42 +174,26 @@ class EncoderInterface(ModuleInterface):
         """
         self.send_parameters(parameter_data=(report_ccw, report_cw, delta_threshold))
 
-    def enable_monitoring(self) -> None:
-        """Begins continuously monitoring the direction and magnitude of the encoder's rotation.'"""
-        if not self._monitoring:
-            self.reset_pulse_count()
-            self.check_state(repetition_delay=self._polling_frequency)
-            self._monitoring = True
-
-    def disable_monitoring(self) -> None:
-        """Stops continuously monitoring the direction and magnitude of the encoder's rotation."""
-        if self._monitoring:
-            self.reset_command_queue()
-            self._monitoring = False
-
-    def check_state(self, repetition_delay: np.uint32) -> None:
-        """Checks the direction and magnitude of the encoder's rotation at regular intervals and, if necessary,
-        notifies the PC about significant changes.
+    def set_monitoring_state(self, state: bool) -> None:
+        """Configures the module to start or stop continuously monitoring the managed sensor's state.
 
         Args:
-            repetition_delay: The time, in microseconds, to wait between repeatedly checking the encoder's state or 0
-                to only check the encoder's state once.
+            state: Determines whether to start or stop monitoring the managed sensor's state.
         """
-        self.send_command(command=self._check_state, noblock=_FALSE, repetition_delay=repetition_delay)
+        # If the current monitoring state matches the desired state, aborts the runtime early.
+        if state == self._monitoring:
+            return
 
-    def reset_pulse_count(self) -> None:
-        """Resets the module's internal pulse tracker to 0."""
-        self.send_command(command=self._reset_encoder, noblock=_FALSE, repetition_delay=_ZERO_UINT32)
+        # Enables sensor monitoring
+        if state:
+            self.send_command(command=self._reset_encoder, noblock=_FALSE, repetition_delay=_ZERO_UINT32)
+            self.send_command(command=self._check_state, noblock=_FALSE, repetition_delay=self._polling_frequency)
+            self._monitoring = True
 
-    def get_ppr(self) -> None:
-        """Estimates the Pulse-per-Revolution (PPR) parameter of the managed encoder by using the index channel.
-
-        Notes:
-            Ensure that the evaluated encoder rotates at a slow and steady speed until the module completes the
-            command's execution. The motion direction is not relevant for this command, as long as the wheel makes the
-            full 360-degree revolution. The command requires ~11 full rotation cycles to complete.
-        """
-        self.send_command(command=self._get_ppr, noblock=_FALSE, repetition_delay=_ZERO_UINT32)
+        # Disables sensor monitoring
+        else:
+            self.reset_command_queue()
+            self._monitoring = False
 
     @property
     def mqtt_topic(self) -> str:
@@ -235,13 +218,13 @@ class EncoderInterface(ModuleInterface):
         return self._distance_tracker[0]
 
     def reset_distance_tracker(self) -> None:
-        """Resets the traveled distance array."""
+        """Resets the traveled distance trackers to zero."""
         self._distance_tracker[0] = _ZERO_FLOAT64
         self._distance_tracker[1] = _ZERO_FLOAT64
 
 
 class LickInterface(ModuleInterface):
-    """Interfaces with LickModule instances running on Ataraxis MicroControllers.
+    """Interfaces with LickModule instances running on the Sensor MicroController.
 
     Notes:
         Type code 4.
@@ -293,7 +276,7 @@ class LickInterface(ModuleInterface):
         self._previous_readout_zero: bool = False
 
         # Statically computes command code objects
-        self._check_state = np.uint8(1)
+        self._check_state: np.uint8 = np.uint8(1)
 
         # Tracks the current sensor monitoring status
         self._monitoring: bool = False
@@ -322,6 +305,7 @@ class LickInterface(ModuleInterface):
         """
         # Currently, only code 51 ModuleData messages are passed to this method. From each, extracts the detected
         # voltage level.
+        # noinspection PyTypeChecker
         detected_voltage: np.uint16 = message.data_object
 
         # Since the sensor is pulled to 0 to indicate the lack of tongue contact, a zero-readout necessarily means no
@@ -358,27 +342,25 @@ class LickInterface(ModuleInterface):
         """
         self.send_parameters(parameter_data=(signal_threshold, delta_threshold, averaging_pool_size))
 
-    def enable_monitoring(self) -> None:
-        """Begins continuously monitoring the lick sensor's state.'"""
-        if not self._monitoring:
-            self.check_state(repetition_delay=self._polling_frequency)
-            self._monitoring = True
-
-    def disable_monitoring(self) -> None:
-        """Stops continuously monitoring the lick sensor's state."""
-        if self._monitoring:
-            self.reset_command_queue()
-            self._monitoring = False
-
-    def check_state(self, repetition_delay: np.uint32) -> None:
-        """Checks the voltage level detected by the lick sensor at regular intervals and, if necessary, notifies the
-        PC about significant changes.
+    def set_monitoring_state(self, state: bool) -> None:
+        """Configures the module to start or stop continuously monitoring the managed sensor's state.
 
         Args:
-            repetition_delay: The time, in microseconds, to wait between repeatedly checking the lick sensor's state or
-                0 to only check the sensor's state once.
+            state: Determines whether to start or stop monitoring the managed sensor's state.
         """
-        self.send_command(command=self._check_state, noblock=_FALSE, repetition_delay=repetition_delay)
+        # If the current monitoring state matches the desired state, aborts the runtime early.
+        if state == self._monitoring:
+            return
+
+        # Enables sensor monitoring
+        if state:
+            self.send_command(command=self._check_state, noblock=_FALSE, repetition_delay=self._polling_frequency)
+            self._monitoring = True
+
+        # Disables sensor monitoring
+        else:
+            self.reset_command_queue()
+            self._monitoring = False
 
     @property
     def mqtt_topic(self) -> str:
@@ -401,7 +383,7 @@ class LickInterface(ModuleInterface):
 
 
 class TorqueInterface(ModuleInterface):
-    """Interfaces with TorqueModule instances running on Ataraxis MicroControllers.
+    """Interfaces with TorqueModule instances running on the Sensor MicroController.
 
     Notes:
         Type code 6.
@@ -428,8 +410,6 @@ class TorqueInterface(ModuleInterface):
     def __init__(
         self, baseline_voltage: int, maximum_voltage: int, sensor_capacity: float, polling_frequency: int
     ) -> None:
-        # data_codes = {np.uint8(51), np.uint8(52)}  # kCCWTorque, kCWTorque
-
         # Initializes the subclassed ModuleInterface using the input instance data.
         super().__init__(
             module_type=np.uint8(6),
@@ -439,7 +419,7 @@ class TorqueInterface(ModuleInterface):
         )
 
         # Caches the polling frequency to an instance attribute
-        self._polling_frequency = np.uint32(polling_frequency)
+        self._polling_frequency: np.uint32 = np.uint32(polling_frequency)
 
         # Computes the conversion factor to translate the recorded raw analog readouts of the 3.3V 12-bit ADC to
         # torque in Newton centimeter. Rounds to 8 decimal places for consistency and to ensure
@@ -450,7 +430,7 @@ class TorqueInterface(ModuleInterface):
         )
 
         # Statically computes command code objects
-        self._check_state = np.uint8(1)
+        self._check_state: np.uint8 = np.uint8(1)
 
         # Tracks the current sensor monitoring status
         self._monitoring: bool = False
@@ -469,11 +449,11 @@ class TorqueInterface(ModuleInterface):
 
     def set_parameters(
         self,
-        report_ccw: np.bool = np.bool(True),
-        report_cw: np.bool = np.bool(True),
-        signal_threshold: np.uint16 = np.uint16(100),
-        delta_threshold: np.uint16 = np.uint16(70),
-        averaging_pool_size: np.uint8 = np.uint8(10),
+        report_ccw: np.bool,
+        report_cw: np.bool,
+        signal_threshold: np.uint16,
+        delta_threshold: np.uint16,
+        averaging_pool_size: np.uint8,
     ) -> None:
         """Sets the module's PC-addressable runtime parameters to the input values.
 
@@ -498,27 +478,25 @@ class TorqueInterface(ModuleInterface):
             )
         )
 
-    def enable_monitoring(self) -> None:
-        """Begins continuously monitoring the torque sensor's state.'"""
-        if not self._monitoring:
-            self.check_state(repetition_delay=self._polling_frequency)
-            self._monitoring = True
-
-    def disable_monitoring(self) -> None:
-        """Stops continuously monitoring the torque sensor's state."""
-        if self._monitoring:
-            self.reset_command_queue()
-            self._monitoring = False
-
-    def check_state(self, repetition_delay: np.uint32 = np.uint32(0)) -> None:
-        """Checks the torque level detected by the sensor at regular intervals and, if necessary, notifies the
-        PC about significant changes.
+    def set_monitoring_state(self, state: bool) -> None:
+        """Configures the module to start or stop continuously monitoring the managed sensor's state.
 
         Args:
-            repetition_delay: The time, in microseconds, to wait between repeatedly checking the torque sensor's state
-                or 0 to only check the sensor's state once.
+            state: Determines whether to start or stop monitoring the managed sensor's state.
         """
-        self.send_command(command=self._check_state, noblock=_FALSE, repetition_delay=repetition_delay)
+        # If the current monitoring state matches the desired state, aborts the runtime early.
+        if state == self._monitoring:
+            return
+
+        # Enables sensor monitoring
+        if state:
+            self.send_command(command=self._check_state, noblock=_FALSE, repetition_delay=self._polling_frequency)
+            self._monitoring = True
+
+        # Disables sensor monitoring
+        else:
+            self.reset_command_queue()
+            self._monitoring = False
 
     @property
     def torque_per_adc_unit(self) -> np.float64:
@@ -529,20 +507,24 @@ class TorqueInterface(ModuleInterface):
 
 
 class TTLInterface(ModuleInterface):
-    """Interfaces with TTLModule instances running on Ataraxis MicroControllers.
+    """Interfaces with TTLModule instances running on the Sensor MicroController.
+
+    Args:
+        polling_frequency: The frequency, in microseconds, at which to check for incoming TTL signals when monitoring
+            the TTL sensor.
 
     Attributes:
+        _polling_frequency: The frequency, in microseconds, at which to check for incoming TTL signals when monitoring
+            the TTL sensor.
         _pulse_tracker: The SharedMemoryArray instance that transfers the TTL pulse data collected by the module from
             the communication process to other runtime processes.
+        _check_state: The code for the CheckState module command.
+        _monitoring: Tracks whether the instance is currently configured to monitor the incoming TTL signals.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, polling_frequency: int) -> None:
         error_codes: set[np.uint8] = {np.uint8(53)}  # kInvalidPinMode
-        # kInputOn, kInputOff, kOutputOn, kOutputOff
-        # data_codes = {np.uint8(51), np.uint8(52), np.uint8(54), np.uint8(55)}
-
-        # Statically configures the interface to report HIGH phases of incoming pulses to other processes.
-        data_codes = {np.uint8(52)}
+        data_codes: set[np.uint8] = {np.uint8(51)}  # kInputOn
 
         super().__init__(
             module_type=np.uint8(1),
@@ -551,7 +533,9 @@ class TTLInterface(ModuleInterface):
             error_codes=error_codes,
         )
 
-        # Pre-creates a shared memory array used to track and share the number of pulses encountered by the instance
+        self._polling_frequency: np.uint32 = np.uint32(polling_frequency)
+
+        # Pre-creates a SharedMemoryArray used to track and share the number of TTL pulses recorded by the instance
         # with other processes.
         self._pulse_tracker: SharedMemoryArray = SharedMemoryArray.create_array(
             name=f"{self._module_type}_{self._module_id}_pulse_tracker",
@@ -560,10 +544,13 @@ class TTLInterface(ModuleInterface):
         )
 
         # Statically computes command code objects
-        self._send_pulse = np.uint8(1)
-        self._high = np.uint8(2)
-        self._low = np.uint8(3)
-        self._check_state = np.uint8(4)
+        # Note, commands codes 1 through 3 are reserved for commands that output TTL signals. This module's
+        # functionality is currently NOT used by the Mesoscope-VR system, so these command codes are not stored here to
+        # avoid unnecessary clutter.
+        self._check_state: np.uint8 = np.uint8(4)
+
+        # Tracks the current sensor monitoring status
+        self._monitoring: bool = False
 
     def __del__(self) -> None:
         """Ensures the instance's shared memory buffer is properly cleaned up when the instance is garbage-collected."""
@@ -584,673 +571,392 @@ class TTLInterface(ModuleInterface):
         self._pulse_tracker.disconnect()
 
     def process_received_data(self, message: ModuleData | ModuleState) -> None:
-        """Processes incoming data when the class operates in debug or pulse reporting mode.
-
-        During debug runtimes, this method dumps all received data into the terminal via the console class. During
-        pulse reporting runtimes, the class increments the _pulse_tracker array each time it encounters a HIGH TTL
-        signal edge sent by the mesoscope to timestamp acquiring (scanning) a new frame.
-
-        Notes:
-            If the interface runs in debug mode, make sure the console is enabled, as it is used to print received
-            data into the terminal.
+        """Updates the TTL pulse count stored in the instance's shared memory buffer based on the messages received from
+        the microcontroller.
         """
-        # Each time the module notifies the PC about detecting a HIGH TTL signal edge, increments the pulse tracker by
-        # one.
-        if message.event == 52:
-            self._pulse_tracker[0] += 1
+        # Each time the module detects a HIGH TTL pulse edge, increments the pulse counter. With the current instance
+        # configuration, this method is ONLY called when the microcontroller sends a HIGH TTL pulse detection message
+        # to the PC.
+        self._pulse_tracker[0] += 1
 
     def set_parameters(
         self,
-        pulse_duration: np.uint32 = np.uint32(10000),
-        averaging_pool_size: np.uint8 = np.uint8(0),
+        averaging_pool_size: np.uint8,
     ) -> None:
         """Sets the module's PC-addressable runtime parameters to the input values.
 
         Args:
-            pulse_duration: The duration, in microseconds, of each emitted TTL pulse HIGH phase. This determines
-                how long the TTL pin stays ON when emitting a pulse.
-            averaging_pool_size: The number of digital pin readouts to average together when checking pin state. This
-                is used during the execution of the check_state() command to debounce the pin readout and acts in
-                addition to any built-in debouncing.
+            averaging_pool_size: The number of sensor readouts to average together when checking the incoming TTL
+                signal state.
         """
-        self.send_parameters(parameter_data=(pulse_duration, averaging_pool_size))
+        # Since the module is currently not used to deliver TTL pulses statically sets the pulse duration parameter
+        # to zero.
+        self.send_parameters(parameter_data=(_ZERO_UINT32, averaging_pool_size))
 
-    def send_pulse(self, repetition_delay: np.uint32 = np.uint32(0), noblock: np.bool = np.bool(True)) -> None:
-        """Triggers TTLModule to deliver a one-off or recurrent (repeating) digital TTL pulse.
-
-        This command is well-suited for most forms of TTL communication and is adapted for comparatively
-        low-frequency communication at 10-200 Hz, in contrast to PWM outputs capable of MHz or even kHz pulse
-        oscillation frequencies.
+    def set_monitoring_state(self, state: bool) -> None:
+        """Configures the module to start or stop continuously monitoring the managed sensor's state.
 
         Args:
-            repetition_delay: The time, in microseconds, to delay before repeating the command. If set to 0, the command
-                will only run once. The exact repetition delay will be further affected by other modules managed by the
-                same microcontroller and may not be perfectly accurate.
-            noblock: Determines whether the command should block the microcontroller while emitting the high phase of
-                the pulse or not. Blocking ensures precise pulse duration, non-blocking allows the microcontroller to
-                perform other operations while waiting, increasing its throughput.
+            state: Determines whether to start or stop monitoring the managed sensor's state.
         """
-        self.send_command(command=self._send_pulse, noblock=noblock, repetition_delay=repetition_delay)
+        # If the current monitoring state matches the desired state, aborts the runtime early.
+        if state == self._monitoring:
+            return
 
-    def toggle(self, state: bool) -> None:
-        """Triggers the TTLModule to continuously deliver a digital HIGH or LOW signal.
+        # Enables sensor monitoring
+        if state:
+            self.send_command(command=self._check_state, noblock=_FALSE, repetition_delay=self._polling_frequency)
+            self._monitoring = True
 
-        This command locks the TTLModule managed by this Interface into delivering the desired logical signal.
-
-        Args:
-            state: The signal to output. Set to True for HIGH and False for LOW.
-        """
-        self.send_command(command=self._high if state else self._low, noblock=_FALSE, repetition_delay=_ZERO_UINT32)
-
-    def check_state(self, repetition_delay: np.uint32 = np.uint32(0)) -> None:
-        """Checks the state of the TTL signal received by the TTLModule at regular intervals.
-
-        This command evaluates the state of the TTLModule's input pin and, if it is different from the previous state,
-        reports it to the PC. This approach ensures that the module only reports signal level shifts (edges), preserving
-        communication bandwidth.
-
-        Args:
-            repetition_delay: The time, in microseconds, to delay before repeating the command. If set to 0, the command
-                will only run once.
-        """
-        self.send_command(command=self._check_state, noblock=_FALSE, repetition_delay=repetition_delay)
+        # Disables sensor monitoring
+        else:
+            self.reset_command_queue()
+            self._monitoring = False
 
     @property
     def pulse_count(self) -> np.uint64:
-        """Returns the total number of received TTL pulses recorded by the module since initialization."""
+        """Returns the number of received TTL pulses recorded by the module since runtime onset."""
         return self._pulse_tracker[0]
 
     def reset_pulse_count(self) -> None:
-        """Resets the tracked TTL pulse count to zero."""
+        """Resets the TTL pulse tracker to zero."""
         self._pulse_tracker[0] = _ZERO_UINT64
 
 
-class BreakInterface(ModuleInterface):
-    """Interfaces with BreakModule instances running on Ataraxis MicroControllers.
-
-    BreakModule allows interfacing with a break to dynamically control the motion of break-coupled objects. The module
-    is designed to send PWM signals that trigger Field-Effect-Transistor (FET) gated relay hardware to deliver voltage
-    that variably engages the break. The module can be used to either fully engage or disengage the breaks or to output
-    a PWM signal to engage the break with the desired strength.
+class BrakeInterface(ModuleInterface):
+    """Interfaces with BrakeModule instances running on the Actor MicroController.
 
     Notes:
-        The break will notify the PC about its initial state (Engaged or Disengaged) after setup.
-
-        This class is explicitly designed to work with an 8-bit Pulse Width Modulation (PWM) resolution. Specifically,
-        it assumes that there are a total of 255 intervals covered by the whole PWM range when it calculates conversion
-        factors to go from PWM levels to torque and force.
+        Type code 3.
 
     Args:
-        minimum_break_strength: The minimum torque applied by the break in gram centimeter. This is the torque the
-            break delivers at minimum voltage (break is disabled).
-        maximum_break_strength: The maximum torque applied by the break in gram centimeter. This is the torque the
-            break delivers at maximum voltage (break is fully engaged).
-        object_diameter: The diameter of the rotating object connected to the break, in centimeters. This is used to
-            calculate the force at the end of the object associated with each torque level of the break.
-        debug: A boolean flag that configures the interface to dump certain data received from the microcontroller into
-            the terminal. This is used during debugging and system calibration and should be disabled for most runtimes.
+        minimum_brake_strength: The torque, in gram centimeter, applied by the brake when it is fully disengaged.
+        maximum_brake_strength: The torque, in gram centimeter, applied by the brake when it is maximally engaged.
 
     Attributes:
-        _newton_per_gram_centimeter: Conversion factor from torque force in g cm to torque force in N cm.
-        _minimum_break_strength: The minimum torque the break delivers at minimum voltage (break is disabled) in N cm.
-        _maximum_break_strength: The maximum torque the break delivers at maximum voltage (break is fully engaged)
-            in N cm.
-        _torque_per_pwm: Conversion factor from break pwm levels to breaking torque in N cm.
-        _force_per_pwm: Conversion factor from break pwm levels to breaking force in N at the edge of the object.
-        _debug: Stores the debug flag.
+        _minimum_brake_strength: The minimum torque, in N cm, the brake delivers at minimum voltage.
+        _maximum_brake_strength: The maximum torque, in N cm, the brake delivers at maximum voltage.
+        _engage: The code for the EnableBrake module command.
+        _disengage: The code for the DisableBrake module command.
+        _enabled: Tracks the current state of the managed brake.
     """
 
     def __init__(
         self,
-        minimum_break_strength: float = 43.2047,  # 0.6 oz in
-        maximum_break_strength: float = 1152.1246,  # 16 oz in
-        object_diameter: float = 15.0333,
-        debug: bool = False,
+        minimum_brake_strength: float,
+        maximum_brake_strength: float,
     ) -> None:
-        error_codes: set[np.uint8] = {np.uint8(51)}  # kOutputLocked
-        # data_codes = {np.uint8(52), np.uint8(53), np.uint8(54)}  # kEngaged, kDisengaged, kVariable
-
-        self._debug: bool = debug
-
-        # If the interface runs in the debug mode, configures the interface to monitor engaged and disengaged codes.
-        data_codes: set[np.uint8] | None = None
-        if debug:
-            data_codes = {np.uint8(52), np.uint8(53)}
-
         # Initializes the subclassed ModuleInterface using the input instance data. Type data is hardcoded.
         super().__init__(
             module_type=np.uint8(3),
             module_id=np.uint8(1),
-            mqtt_communication=False,
-            data_codes=data_codes,
-            mqtt_command_topics=None,
-            error_codes=error_codes,
+            data_codes=None,
+            error_codes=None,
         )
 
-        # Hardcodes the conversion factor used to translate torque force in g cm to N cm
-        self._newton_per_gram_centimeter: float = 0.00981
-
-        # Converts minimum and maximum break strength into Newton centimeter
-        self._minimum_break_strength: np.float64 = np.round(
-            a=minimum_break_strength * self._newton_per_gram_centimeter,
+        # Converts minimum and maximum brake strength into Newton centimeter. Uses the hardcoded conversion factor of
+        # 0.00981 to translate g cm to N cm.
+        self._minimum_brake_strength: np.float64 = np.round(
+            a=minimum_brake_strength * 0.00981,
             decimals=8,
         )
-        self._maximum_break_strength: np.float64 = np.round(
-            a=maximum_break_strength * self._newton_per_gram_centimeter,
+        self._maximum_brake_strength: np.float64 = np.round(
+            a=maximum_brake_strength * 0.00981,
             decimals=8,
         )
 
-        # Computes the conversion factor to translate break pwm levels into breaking torque in Newtons cm. Rounds
-        # to 12 decimal places for consistency and to ensure repeatability.
-        self._torque_per_pwm: np.float64 = np.round(
-            a=(self._maximum_break_strength - self._minimum_break_strength) / 255,
-            decimals=8,
-        )
+        # Statically computes command code objects
+        self._engage: np.uint8 = np.uint8(1)
+        self._disengage: np.uint8 = np.uint8(2)
 
-        # Also computes the conversion factor to translate break pwm levels into force in Newtons. To overcome the
-        # breaking torque, the object has to experience that much force applied to its edge.
-        self._force_per_pwm: np.float64 = np.round(
-            a=self._torque_per_pwm / (object_diameter / 2),
-            decimals=8,
-        )
+        # Tracks whether the managed brake is currently engaged. The brake starts in the normally engaged state, so it
+        # is ON at class initialization.
+        self._enabled: bool = True
 
     def initialize_remote_assets(self) -> None:
         """Not used."""
+        return
 
     def terminate_remote_assets(self) -> None:
         """Not used."""
         return
 
     def process_received_data(self, message: ModuleData | ModuleState) -> None:
-        """During debug runtime, dumps the data received from the module into the terminal.
-
-        Currently, this method only works with codes 52 (Engaged) and 53 (Disengaged).
-
-        Notes:
-            The method is not used during non-debug runtimes. If the interface runs in debug mode, make sure the
-            console is enabled, as it is used to print received data into the terminal.
-        """
-        # The method is ONLY called during debug runtime, so prints all received data via console.
-        if message.event == 52:
-            console.echo("Break is engaged")
-        if message.event == 53:
-            console.echo("Break is disengaged")
-
-    def parse_mqtt_command(self, topic: str, payload: bytes | bytearray) -> None:
-        """Not used."""
+        """Not used, as the module currently does not require any real-time data processing."""
         return
 
-    def set_parameters(self, breaking_strength: np.uint8 = np.uint8(255)) -> None:
-        """Changes the PC-addressable runtime parameters of the BreakModule instance.
-
-        Use this method to package and apply new PC-addressable parameters to the BreakModule instance managed by this
-        Interface class.
-
-        Notes:
-            Use set_breaking_power() command to apply the breaking-strength transmitted in this parameter message to the
-            break. Until the command is called, the new breaking_strength will not be applied to the break hardware.
+    def set_state(self, state: bool) -> None:
+        """Sets the brake to the desired state.
 
         Args:
-            breaking_strength: The Pulse-Width-Modulation (PWM) value to use when the BreakModule delivers adjustable
-                breaking power. Depending on this value, the breaking power can be adjusted from none (0) to maximum
-                (255). Use get_pwm_from_force() to translate the desired breaking torque into the required PWM value.
+            state: The desired state of the brake. True means the brake is engaged; False means the brake is disengaged.
         """
-        message = ModuleParameters(
-            module_type=self._module_type,
-            module_id=self._module_id,
-            return_code=np.uint8(0),  # Generally, return code is only helpful for debugging.
-            parameter_data=(breaking_strength,),
+        # If the requested state matches the current brake's state, aborts the runtime early.
+        if state == self._enabled:
+            return
+
+        self.send_command(
+            command=self._engage if state else self._disengage, noblock=_FALSE, repetition_delay=_ZERO_UINT32
         )
-        self._input_queue.put(message)  # type: ignore
-
-    def toggle(self, state: bool) -> None:
-        """Triggers the BreakModule to be permanently engaged at maximum strength or permanently disengaged.
-
-        This command locks the BreakModule managed by this Interface into the desired state.
-
-        Notes:
-            This command does NOT use the breaking_strength parameter and always uses either maximum or minimum breaking
-            power. To set the break to a specific torque level, set the level via the set_parameters() method and then
-            switch the break into the variable torque mode by using the set_breaking_power() method.
-
-        Args:
-            state: The desired state of the break. True means the break is engaged; False means the break is disengaged.
-        """
-        command = OneOffModuleCommand(
-            module_type=self._module_type,
-            module_id=self._module_id,
-            return_code=np.uint8(0),
-            command=np.uint8(1 if state else 2),
-            noblock=np.bool(False),
-        )
-        self._input_queue.put(command)  # type: ignore
-
-    def set_breaking_power(self) -> None:
-        """Triggers the BreakModule to engage with the strength (torque) defined by the breaking_strength runtime
-        parameter.
-
-        Unlike the toggle() method, this method allows precisely controlling the torque applied by the break. This
-        is achieved by pulsing the break control pin at the PWM level specified by breaking_strength runtime parameter
-        stored in BreakModule's memory (on the microcontroller).
-
-        Notes:
-            This command switches the break to run in the variable strength mode and applies the current value of the
-            breaking_strength parameter to the break, but it does not determine the breaking power. To adjust the power,
-            use the set_parameters() class method to issue an updated breaking_strength value. By default, the break
-            power is set to 50% (PWM value 128).
-        """
-        command = OneOffModuleCommand(
-            module_type=self._module_type,
-            module_id=self._module_id,
-            return_code=np.uint8(0),
-            command=np.uint8(3),
-            noblock=np.bool(False),
-        )
-        self._input_queue.put(command)  # type: ignore
-
-    def get_pwm_from_torque(self, target_torque_n_cm: float) -> np.uint8:
-        """Converts the desired breaking torque in Newtons centimeter to the required PWM value (0-255) to be delivered
-        to the break hardware by the BreakModule.
-
-        Use this method to convert the desired breaking torque into the PWM value that can be submitted to the
-        BreakModule via the set_parameters() class method.
-
-        Args:
-            target_torque_n_cm: Desired torque in Newtons centimeter at the edge of the object.
-
-        Returns:
-            The byte PWM value that would generate the desired amount of torque.
-
-        Raises:
-            ValueError: If the input force is not within the valid range for the BreakModule.
-        """
-        if self._maximum_break_strength < target_torque_n_cm or self._minimum_break_strength > target_torque_n_cm:
-            message = (
-                f"The requested torque {target_torque_n_cm} N cm is outside the valid range for the BreakModule "
-                f"{self._module_id}. Valid breaking torque range is from {self._minimum_break_strength} to "
-                f"{self._maximum_break_strength}."
-            )
-            console.error(message=message, error=ValueError)
-
-        # Calculates PWM using the pre-computed torque_per_pwm conversion factor
-        pwm_value = np.uint8(round((target_torque_n_cm - self._minimum_break_strength) / self._torque_per_pwm))
-
-        return pwm_value
+        self._enabled = state
 
     @property
-    def torque_per_pwm(self) -> np.float64:
-        """Returns the conversion factor to translate break pwm levels into breaking torque in Newton centimeters."""
-        return self._torque_per_pwm
+    def maximum_brake_strength(self) -> np.float64:
+        """Returns the torque, in Newton centimeters, produced by the brake when it is maximally engaged."""
+        return self._maximum_brake_strength
 
     @property
-    def force_per_pwm(self) -> np.float64:
-        """Returns the conversion factor to translate break pwm levels into breaking force in Newtons."""
-        return self._force_per_pwm
-
-    @property
-    def maximum_break_strength(self) -> np.float64:
-        """Returns the maximum torque of the break in Newton centimeters."""
-        return self._maximum_break_strength
-
-    @property
-    def minimum_break_strength(self) -> np.float64:
-        """Returns the minimum torque of the break in Newton centimeters."""
-        return self._minimum_break_strength
+    def minimum_brake_strength(self) -> np.float64:
+        """Returns the torque, in Newton centimeters, produced by the brake when it is fully disengaged."""
+        return self._minimum_brake_strength
 
 
 class ValveInterface(ModuleInterface):
-    """Interfaces with ValveModule instances running on Ataraxis MicroControllers.
-
-    ValveModule allows interfacing with a solenoid valve to controllably dispense precise volumes of fluid. The module
-    is designed to send digital signals that trigger Field-Effect-Transistor (FET) gated relay hardware to deliver
-    voltage that opens or closes the controlled valve. The module can be used to either permanently open or close the
-    valve or to cycle opening and closing in a way that ensures a specific amount of fluid passes through the
-    valve.
+    """Interfaces with ValveModule instances running on the Actor MicroController.
 
     Notes:
-        This interface comes pre-configured to receive valve pulse triggers from Unity via the "Gimbl/Reward/"
-        topic.
-
-        The valve will notify the PC about its initial state (Open or Closed) after setup.
-
-        Our valve is statically configured to deliver audible tones when it is pulsed. This is used exclusively by the
-        Pulse command, so the tone will not sound when the valve is activated during Calibration or Open commands. The
-        default pulse duration is 100 ms, and this is primarily used to provide the animal with an auditory cue for the
-        water reward.
+        Type code 5.
 
     Args:
-        valve_calibration_data: A tuple of tuples that contains the data required to map pulse duration to delivered
-            fluid volume. Each sub-tuple should contain the integer that specifies the pulse duration in microseconds
-            and a float that specifies the delivered fluid volume in microliters. If you do not know this data,
-            initialize the class using a placeholder calibration tuple and use the calibration() class method to
-            collect this data using the ValveModule.
-        debug: A boolean flag that configures the interface to dump certain data received from the microcontroller into
-            the terminal. This is used during debugging and system calibration and should be disabled for most runtimes.
+        valve_calibration_data: Maps the valve open durations to delivered fluid volumes.
 
     Attributes:
-        _scale_coefficient: Stores the scale coefficient derived from the calibration data. We use the power law to
-            fit the data, which results in better overall fit than using the linera equation.
-        _nonlinearity_exponent: The intercept of the valve calibration curve. This is used to account for the fact that
-            some valves may have a minimum open time or dispensed fluid volume, which is captured by the intercept.
-            This improves the precision of fluid-volume-to-valve-open-time conversions.
-        _calibration_cov: Stores the covariance matrix that describes the quality of fitting the calibration data using
-            the power law. This is used to determine how well the valve performance is approximated by the power law.
-        _reward_topic: Stores the topic used by Unity to issue reward commands to the module.
-        _debug: Stores the debug flag.
-        _valve_tracker: Stores the SharedMemoryArray that tracks the total volume of water dispensed by the valve
-            during runtime.
-        _previous_state: Tracks the previous valve state as Open (True) or Closed (False). This is used to accurately
-            track delivered water volumes each time the valve opens and closes.
-        _cycle_timer: A PrecisionTimer instance initialized in the Communication process to track how long the valve
-            stays open during cycling. This is used together with the _previous_state to determine the volume of water
-            delivered by the valve during runtime.
+        _calibration_count: The number of reward delivery cycles to use during calibration and referencing procedures.
+        _scale_coefficient: The scale coefficient derived from the fitting the power law model to the valve's
+            calibration data.
+        _nonlinearity_exponent: The intercept derived from the fitting the power law model to the valve's
+            calibration data.
+        _reward_topic: The MQTT topic used to transfer the reward delivery instructions from the Virtual Reality
+            environment manager to the interface.
+        _valve_tracker: The SharedMemoryArray instance that transfers the reward data collected by the module from
+            the communication process to other runtime processes.
+        _reward: The code for the Pulse module command.
+        _open: The code for the Open module command.
+        _close: The code for the Close module command.
+        _calibrate: The code for the Calibrate module command.
+        _tone: The code for the Tone module command.
+        _previous_module_state: Tracks the valve's state reported by the last received message sent from the
+            microcontroller.
+        _configured_valve_state: Tracks the current state of the valve (Open or Closed) set through this interface
+            instance.
+        _previous_volume: Tracks the volume of water the valve was instructed to dispense during the previous reward
+            delivery.
+        _previous_tone_duration: Tracks the tone duration used during the previous reward delivery or simulation.
+        _cycle_timer: A PrecisionTimer instance that tracks how long the valve stays open during reward delivery.
     """
 
     def __init__(
-        self, valve_calibration_data: tuple[tuple[int | float, int | float], ...], debug: bool = False
+        self,
+        valve_calibration_data: tuple[tuple[int | float, int | float], ...]
     ) -> None:
-        error_codes: set[np.uint8] = {np.uint8(51)}  # kOutputLocked
-        # kOpen, kClosed, kCalibrated, kToneOn, kToneOff, kTonePinNotSet
-        # data_codes = {np.uint8(52), np.uint8(53), np.uint8(54), np.uint8(55), np.uint8(56), np.uint8(57)}
-        data_codes = {np.uint8(52), np.uint8(53), np.uint8(54)}  # kOpen, kClosed, kCalibrated
-
-        self._debug: bool = debug
-
-        # If the interface runs in the debug mode, expands the list of processed data codes to include all codes used
-        # by the valve module.
-        if debug:
-            data_codes = {np.uint8(52), np.uint8(53), np.uint8(54)}
+        error_codes: set[np.uint8] = {np.uint8(56)}  # kInvalidToneConfiguration
+        data_codes: set[np.uint8] = {np.uint8(51), np.uint8(52), np.uint8(53)}  # kOpen, kClosed, kCalibrated
 
         super().__init__(
             module_type=np.uint8(5),
             module_id=np.uint8(1),
-            mqtt_communication=False,
             data_codes=data_codes,
-            mqtt_command_topics=None,
             error_codes=error_codes,
         )
+
+        # Statically sets the number of reward delivery cycles used during referencing and calibration procedures.
+        self._calibration_count = np.uint16(200)
 
         # Extracts pulse durations and fluid volumes into separate arrays
         pulse_durations: NDArray[np.float64] = np.array([x[0] for x in valve_calibration_data], dtype=np.float64)
         fluid_volumes: NDArray[np.float64] = np.array([x[1] for x in valve_calibration_data], dtype=np.float64)
 
-        # Defines the power-law model. Our calibration data suggests that the Valve performs in a non-linear fashion
-        # and is better calibrated using the power law, rather than a linear fit
-        def power_law_model(pulse_duration: Any, a: Any, b: Any, /) -> Any:
-            return a * np.power(pulse_duration, b)
-
-        # Fits the power-law model to the input calibration data and saves the fit parameters and covariance matrix to
-        # class attributes
+        # Fits the power-law model to the input calibration data and saves the fit parameters to instance attributes
         # noinspection PyTupleAssignmentBalance
-        params, fit_cov_matrix = curve_fit(f=power_law_model, xdata=pulse_durations, ydata=fluid_volumes)
-        scale_coefficient, nonlinearity_exponent = params
-        self._calibration_cov: NDArray[np.float64] = fit_cov_matrix
+        parameters, _ = curve_fit(f=_power_law_model, xdata=pulse_durations, ydata=fluid_volumes)
+        scale_coefficient, nonlinearity_exponent = parameters
         self._scale_coefficient: np.float64 = np.round(a=np.float64(scale_coefficient), decimals=8)
         self._nonlinearity_exponent: np.float64 = np.round(a=np.float64(nonlinearity_exponent), decimals=8)
 
-        # Stores the reward topic to make it accessible via property
+        # Stores the MQTT topic used to transfer reward delivery triggers from the Virtual Reality (VR) environment
+        # manager (Unity) to the interface.
         self._reward_topic: str = "Gimbl/Reward/"
 
-        # Precreates a shared memory array used to track and share valve state data. Index 0 tracks the total amount of
-        # water dispensed by the valve during runtime.
+        # Pre-creates a shared memory array used to track and share valve state data. Index 0 tracks the total amount of
+        # water dispensed by the valve during runtime. Index 1 tracks the current valve calibration state (0 -
+        # calibrating, 1 - calibrated).
         self._valve_tracker: SharedMemoryArray = SharedMemoryArray.create_array(
             name=f"{self._module_type}_{self._module_id}_valve_tracker",
-            prototype=np.zeros(shape=1, dtype=np.float64),
-            exist_ok=True,
+            prototype=np.zeros(shape=2, dtype=np.float64),
+            exists_ok=True,
         )
-        self._previous_state: bool = False
+
+        # Statically computes command code objects
+        self._reward: np.uint8 = np.uint8(1)
+        self._open: np.uint8 = np.uint8(2)
+        self._close: np.uint8 = np.uint8(3)
+        self._calibrate: np.uint8 = np.uint8(4)
+        self._tone: np.uint8 = np.uint8(5)
+
+        # Initializes additional trackers and runtime assets
+        self._previous_module_state: bool = False  # This is based on what the module is actually doing.
+        self._configured_valve_state: bool = False  # This is based on what the interface sets the module to do.
+        self._previous_volume: float = 0.0
+        self._previous_tone_duration: int = 0
         self._cycle_timer: PrecisionTimer | None = None
 
     def __del__(self) -> None:
-        """Ensures the reward_tracker is properly cleaned up when the class is garbage-collected."""
+        """Ensures the instance's shared memory buffer is properly cleaned up when the instance is garbage-collected."""
         self._valve_tracker.disconnect()
         self._valve_tracker.destroy()
 
+    def initialize_local_assets(self) -> None:
+        """Connects to the instance's shared memory buffer and enables buffer cleanup at shutdown."""
+        self._valve_tracker.connect()
+        self._valve_tracker.enable_buffer_destruction()
+
     def initialize_remote_assets(self) -> None:
-        """Connects to the reward tracker SharedMemoryArray and initializes the cycle PrecisionTimer from the
-        Communication process.
-        """
+        """Connects to the instance's shared memory buffer and initializes the cycle PrecisionTimer."""
         self._valve_tracker.connect()
         self._cycle_timer = PrecisionTimer("us")
 
     def terminate_remote_assets(self) -> None:
-        """Disconnects from the reward tracker SharedMemoryArray."""
+        """Disconnects from the instance's shared memory buffer."""
         self._valve_tracker.disconnect()
 
     def process_received_data(self, message: ModuleData | ModuleState) -> None:
-        """Processes incoming data.
-
-        Valve calibration events (code 54) are sent to the terminal via console regardless of the debug flag. If the
-        class was initialized in the debug mode, Valve opening (code 52) and closing (code 53) codes are also sent to
-        the terminal. Also, stores the total number of times the valve was opened under _reward_tracker index 0 and the
-        total volume of water delivered during runtime under _reward_tracker index 1.
-
-        Note:
-            Make sure the console is enabled before calling this method.
+        """Updates the reward data stored in the instance's shared memory buffer based on the messages received from
+        the microcontroller.
         """
-        if message.event == 52:
-            if self._debug:
-                console.echo("Valve Opened")
+        if message.event == 52 and not self._previous_module_state:
+            # Resets the cycle timer each time the valve transitions to an open state.
+            self._previous_module_state = True
+            self._cycle_timer.reset()
 
-            # Resets the cycle timer each time the valve transitions to open state.
-            if not self._previous_state:
-                self._previous_state = True
-                self._cycle_timer.reset()  # type: ignore
+        elif message.event == 53 and self._previous_module_state:
+            # Each time the valve transitions to a closed state, records the period of time the valve was open and uses
+            # it to estimate the volume of fluid delivered through the valve. Accumulates the total volume in the
+            # tracker array.
+            self._previous_module_state = False
+            open_duration = self._cycle_timer.elapsed
 
-        elif message.event == 53:
-            if self._debug:
-                console.echo("Valve Closed")
+            # Accumulates delivered water volumes into the tracker.
+            delivered_volume = self._scale_coefficient * np.power(open_duration, self._nonlinearity_exponent)
+            self._valve_tracker[0] += delivered_volume
 
-            # Each time the valve transitions to closed state, records the period of time the valve was open and uses it
-            # to estimate the volume of fluid delivered through the valve. Accumulates the total volume in the tracker
-            # array.
-            if self._previous_state:
-                self._previous_state = False
-                open_duration = self._cycle_timer.elapsed  # type: ignore
-
-                # Accumulates delivered water volumes into the tracker.
-                delivered_volume = np.float64(
-                    self._scale_coefficient * np.power(open_duration, self._nonlinearity_exponent)
-                )
-                previous_volume = np.float64(self._valve_tracker.read_data(index=0, convert_output=False))
-                new_volume = previous_volume + delivered_volume
-                # noinspection PyTypeChecker
-                self._valve_tracker.write_data(index=0, data=new_volume)
+        # When the valve reports the completion of a calibration cycle, sets the appropriate element of the tracker
+        # array to 1.
         elif message.event == 54:
-            console.echo("Valve Calibration: Complete")
+            self._valve_tracker[1] = 1
 
-    def parse_mqtt_command(self, topic: str, payload: bytes | bytearray) -> None:
-        """Not used."""
-        return
-
-    def set_parameters(
-        self,
-        pulse_duration: np.uint32 = np.uint32(35590),
-        calibration_delay: np.uint32 = np.uint32(200000),
-        calibration_count: np.uint16 = np.uint16(200),
-        tone_duration: np.uint32 = np.uint32(300000),
-    ) -> None:
-        """Changes the PC-addressable runtime parameters of the ValveModule instance.
-
-        Use this method to package and apply new PC-addressable parameters to the ValveModule instance managed by this
-        Interface class.
-
-        Note:
-            Default parameters are configured to support 'reference' calibration run. When calibrate() is called with
-            these default parameters, the Valve should deliver ~5 uL of water, which is the value used during Sun lab
-            experiments. If the reference calibration fails, you have to fully recalibrate the valve!
-
-        Args:
-            pulse_duration: The time, in microseconds, the valve stays open when it is pulsed (opened and closed). This
-                is used during the execution of the send_pulse() command to control the amount of dispensed fluid. Use
-                the get_duration_from_volume() method to convert the desired fluid volume into the pulse_duration value.
-            calibration_delay: The time, in microseconds, to wait between consecutive pulses during calibration.
-                Calibration works by repeatedly pulsing the valve the requested number of times. Delaying after closing
-                the valve (ending the pulse) ensures the valve hardware has enough time to respond to the inactivation
-                phase before starting the next calibration cycle.
-            calibration_count: The number of times to pulse the valve during calibration. A number between 10 and 100 is
-                enough for most use cases.
-            tone_duration: The time, in microseconds, to sound the audible tone when the valve is pulsed. This is only
-                used if the hardware ValveModule instance was provided with the TonePin argument at instantiation. If
-                your use case involves emitting tones, make sure this value is higher than the pulse_duration value.
-        """
-        message = ModuleParameters(
-            module_type=self._module_type,
-            module_id=self._module_id,
-            return_code=np.uint8(0),
-            parameter_data=(pulse_duration, calibration_delay, calibration_count, tone_duration),
-        )
-        self._input_queue.put(message)  # type: ignore
-
-    def send_pulse(self, repetition_delay: np.uint32 = np.uint32(0), noblock: bool = False) -> None:
-        """Triggers ValveModule to deliver a precise amount of fluid by cycling opening and closing the valve once or
-        repetitively (recurrently).
-
-        After calibration, this command allows delivering precise amounts of fluid with, depending on the used valve and
-        relay hardware microliter or nanoliter precision. This command is optimized to change valve states at a
-        comparatively low frequency in the 10-200 Hz range.
-
-        Notes:
-            To ensure the accuracy of fluid delivery, it is recommended to run the valve in the blocking mode
-            and, if possible, isolate it to a controller that is not busy with running other tasks.
-
-        Args:
-            repetition_delay: The time, in microseconds, to delay before repeating the command. If set to 0, the command
-                will only run once. The exact repetition delay will be further affected by other modules managed by the
-                same microcontroller and may not be perfectly accurate.
-            noblock: Determines whether the command should block the microcontroller while the valve is kept open.
-                Blocking ensures precise pulse duration and dispensed fluid volume. Non-blocking allows the
-                microcontroller to perform other operations while waiting, increasing its throughput.
-        """
-        command: OneOffModuleCommand | RepeatedModuleCommand
-        if repetition_delay == 0:
-            command = OneOffModuleCommand(
-                module_type=self._module_type,
-                module_id=self._module_id,
-                return_code=np.uint8(0),
-                command=np.uint8(1),
-                noblock=np.bool(noblock),
-            )
-        else:
-            command = RepeatedModuleCommand(
-                module_type=self._module_type,
-                module_id=self._module_id,
-                return_code=np.uint8(0),
-                command=np.uint8(1),
-                noblock=np.bool(noblock),
-                cycle_delay=repetition_delay,
-            )
-        self._input_queue.put(command)  # type: ignore
-
-    def toggle(self, state: bool) -> None:
-        """Triggers the ValveModule to be permanently open or closed.
-
-        This command locks the ValveModule managed by this Interface into the desired state.
+    def set_state(self, state: bool) -> None:
+        """Sets the managed valve to the desired state.
 
         Args:
             state: The desired state of the valve. True means the valve is open; False means the valve is closed.
         """
-        command = OneOffModuleCommand(
-            module_type=self._module_type,
-            module_id=self._module_id,
-            return_code=np.uint8(0),
-            command=np.uint8(2 if state else 3),
-            noblock=np.bool(False),
-        )
-        self._input_queue.put(command)  # type: ignore
+        # If the valve is already in the desired state, aborts the runtime early.
+        if state == self._configured_valve_state:
+            return
 
-    def calibrate(self) -> None:
-        """Triggers ValveModule to repeatedly pulse the valve using the duration defined by the pulse_duration runtime
-        parameter.
+        self.send_command(command=self._open if state else self._close, noblock=_FALSE, repetition_delay=_ZERO_UINT32)
+        self._configured_valve_state = state
 
-        This command is used to build the calibration map of the valve that matches pulse_duration to the volume of
-        fluid dispensed during the time the valve is open. To do so, the command repeatedly pulses the valve to dispense
-        a large volume of fluid which can be measured and averaged to get the volume of fluid delivered during each
-        pulse. The number of pulses carried out during this command is specified by the calibration_count parameter, and
-        the delay between pulses is specified by the calibration_delay parameter.
-
-        Notes:
-            When activated, this command will block in-place until the calibration cycle is completed. Currently, there
-            is no way to interrupt the command, and it may take a prolonged period of time (minutes) to complete.
-
-            This command does not set any of the parameters involved in the calibration process. Make sure the
-            parameters are submitted to the ValveModule's hardware memory via the set_parameters() class method before
-            running the calibration() command.
-        """
-        command = OneOffModuleCommand(
-            module_type=self._module_type,
-            module_id=self._module_id,
-            return_code=np.uint8(0),
-            command=np.uint8(4),
-            noblock=np.bool(False),
-        )
-        self._input_queue.put(command)  # type: ignore
-
-    def tone(self, repetition_delay: np.uint32 = np.uint32(0), noblock: bool = False) -> None:
-        """Triggers ValveModule to an audible tone without changing the state of the managed valve.
-
-        This command will only work for ValveModules connected to a piezoelectric buzzer and configured to interface
-        with the buzzer's trigger pin. It allows emitting tones without water rewards, which is primarily used during
-        training runtimes that pause delivering water when the animal is not consuming rewards.
-
-        Notes:
-            While enforcing auditory tone durations is not as important as enforcing valve open times, this command
-            runs in blocking mode by default to match the behavior of the tone-emitting valve pulse command.
+    def deliver_reward(self, volume: float = 5.0, tone_duration: int = 300) -> None:
+        """Opens the valve for the duration of time necessary to deliver the requested volume of water.
 
         Args:
-            repetition_delay: The time, in microseconds, to delay before repeating the command. If set to 0, the command
-                will only run once. The exact repetition delay will be further affected by other modules managed by the
-                same microcontroller and may not be perfectly accurate.
-            noblock: Determines whether the command should block the microcontroller while the tone is delivered.
-                Blocking ensures precise tone duration. Non-blocking allows the microcontroller to perform other
-                operations while waiting, increasing its throughput.
+            volume: The volume of water to deliver, in microliters.
+            tone_duration: The duration of the auditory tone, in milliseconds, to emit while delivering the water
+                reward.
         """
-        command: OneOffModuleCommand | RepeatedModuleCommand
-        if repetition_delay == 0:
-            command = OneOffModuleCommand(
-                module_type=self._module_type,
-                module_id=self._module_id,
-                return_code=np.uint8(0),
-                command=np.uint8(5),
-                noblock=np.bool(noblock),
+        # This ensures that the valve settings are only updated if volume, tone_duration, or both changed compared to
+        # the previous command runtime. This ensures that the valve settings are only updated when this is necessary,
+        # reducing communication overhead.
+        if volume != self._previous_volume or tone_duration != self._previous_tone_duration:
+            # Parameters are cached here to use the tone_duration before it is converted to microseconds.
+            self._previous_volume = volume
+            self._previous_tone_duration = tone_duration
+
+            tone_duration: np.uint32 = np.uint32(
+                round(
+                    convert_time(time=tone_duration, from_units=TimeUnits.MILLISECOND, to_units=TimeUnits.MICROSECOND)
+                )
             )
-        else:
-            command = RepeatedModuleCommand(
-                module_type=self._module_type,
-                module_id=self._module_id,
-                return_code=np.uint8(0),
-                command=np.uint8(5),
-                noblock=np.bool(noblock),
-                cycle_delay=repetition_delay,
+            pulse_duration: np.uint32 = self.get_duration_from_volume(target_volume=volume)
+            self.send_parameters(parameter_data=(pulse_duration, np.uint16(200), tone_duration))
+
+        self.send_command(command=self._reward, noblock=_FALSE, repetition_delay=_ZERO_UINT32)
+
+    def simulate_reward(self, tone_duration: int = 300) -> None:
+        """Simulates delivering water reward by emitting an audible 'reward' tone without opening the valve.
+
+        Args:
+            tone_duration: The duration of the auditory tone, in milliseconds, to emit while simulating the water
+                reward delivery.
+        """
+        # This ensures that the valve settings are only updated if tone_duration changed compared to the previous
+        # command runtime. This ensures that the valve settings are only updated when this is necessary, reducing
+        # communication overhead.
+        if tone_duration != self._previous_tone_duration:
+            # Parameters are cached here to use the tone_duration before it is converted to microseconds.
+            self._previous_tone_duration = tone_duration
+
+            # Maintains the same pulse duration.
+            pulse_duration: np.uint32 = self.get_duration_from_volume(target_volume=self._previous_volume)
+            tone_duration: np.uint32 = np.uint32(
+                round(
+                    convert_time(time=tone_duration, from_units=TimeUnits.MILLISECOND, to_units=TimeUnits.MICROSECOND)
+                )
             )
-        self._input_queue.put(command)  # type: ignore
+            self.send_parameters(parameter_data=(pulse_duration, np.uint16(200), tone_duration))
+
+        self.send_command(command=self._tone, noblock=_FALSE, repetition_delay=_ZERO_UINT32)
+
+    def reference_valve(self) -> None:
+        """Opens the valve 200 times for the duration necessary to deliver 5 microliters of water to verify the valve's
+        calibration.
+
+        Notes:
+            A well-calibrated valve is expected to deliver 1.0 milliliter of water during this procedure.
+        """
+
+        # Always uses the same configuration: 5.0 uL and 200 pulses.
+        self.send_parameters(
+            parameter_data=(self.get_duration_from_volume(target_volume=5.0), np.uint16(200), _ZERO_UINT32)
+        )
+        self.send_command(command=self._calibrate, noblock=_FALSE, repetition_delay=_ZERO_UINT32)
+        self._valve_tracker[1] = 0  # Indicates that the valve has entered the refencing (fancy calibration) cycle.
+
+    def calibrate_valve(self, pulse_duration: int = 15) -> None:
+        """Repeatedly opens the valve for the requested number of microseconds to determine the volume of fluid
+        dispensed through the valve during this period of time.
+
+        Args:
+            pulse_duration: The duration, in milliseconds, to keep the valve open at each calibration cycle.
+        """
+        self.send_parameters(parameter_data=(np.uint32(pulse_duration * 1000), np.uint16(200), _ZERO_UINT32))
+        self.send_command(command=self._calibrate, noblock=_FALSE, repetition_delay=_ZERO_UINT32)
+        self._valve_tracker[1] = 0  # Indicates that the valve has entered the calibration cycle.
 
     def get_duration_from_volume(self, target_volume: float) -> np.uint32:
-        """Converts the desired fluid volume in microliters to the valve pulse duration in microseconds that ValveModule
-        will use to deliver that fluid volume.
-
-        Use this method to convert the desired fluid volume into the pulse_duration value that can be submitted to the
-        ValveModule via the set_parameters() class method.
+        """Converts the input volume of water, in microliters, to the required period of time, in microseconds, the
+        managed valve must stay open to deliver the specified volume.
 
         Args:
-            target_volume: Desired fluid volume in microliters.
+            target_volume: The volume of water, in microliters, to deliver.
 
         Raises:
-            ValueError: If the desired fluid volume is too small to be reliably dispensed by the valve, based on its
+            ValueError: If the desired water volume is too small to be reliably dispensed by the valve, based on its
                 calibration data.
 
         Returns:
-            The microsecond pulse duration that would be used to deliver the specified volume.
+            The duration, in microseconds, the valve needs to stay open to deliver the specified volume.
         """
-        # Determines the minimum valid pulse duration. We hardcode this at 10 ms as this is the lower calibration
-        # boundary
+        # Determines the minimum valid pulse duration. This is hardcoded at 10 ms as this is the lower calibration
+        # boundary.
         min_pulse_duration = 10.0  # microseconds
         min_dispensed_volume = self._scale_coefficient * np.power(min_pulse_duration, self._nonlinearity_exponent)
 
         if target_volume < min_dispensed_volume:
             message = (
-                f"The requested volume {target_volume} uL is too small to be reliably dispensed by the ValveModule "
-                f"{self._module_id}. Specifically, the smallest volume of fluid the valve can reliably dispense is "
+                f"The requested water volume of {target_volume} uL is too small to be reliably dispensed by the "
+                f"ValveModule {self._module_id}. The smallest volume the valve can reliably dispense is "
                 f"{min_dispensed_volume} uL."
             )
             console.error(message=message, error=ValueError)
@@ -1262,176 +968,89 @@ class ValveInterface(ModuleInterface):
 
     @property
     def mqtt_topic(self) -> str:
-        """Returns the MQTT topic monitored by the module to receive reward commands from Unity."""
+        """Returns the MQTT topic used by the Virtual Reality environment manager (Unity) to send reward triggers to
+        the module.
+        """
         return self._reward_topic
 
     @property
     def scale_coefficient(self) -> np.float64:
-        """Returns the scaling coefficient (A) from the power‐law calibration.
-
-        In the calibration model, fluid_volume = A * (pulse_duration)^B, this coefficient
-        converts pulse duration (in microseconds) into the appropriate fluid volume (in microliters)
-        when used together with the nonlinearity exponent.
-        """
+        """Returns the scale coefficient (A) of the power‐law model fitted to the valve's calibration data."""
         return self._scale_coefficient
 
     @property
     def nonlinearity_exponent(self) -> np.float64:
-        """Returns the nonlinearity exponent (B) from the power‐law calibration.
-
-        In the calibration model, fluid_volume = A * (pulse_duration)^B, this exponent indicates
-        the degree of nonlinearity in how the dispensed volume scales with the valve’s pulse duration.
-        For example, an exponent of 1 would indicate a linear relationship.
-        """
+        """Returns the nonlinearity exponent (B) of the power‐law model fitted to the valve's calibration data."""
         return self._nonlinearity_exponent
 
     @property
-    def calibration_covariance(self) -> NDArray[np.float64]:
-        """Returns the 2x2 covariance matrix associated with the power‐law calibration fit.
-
-        The covariance matrix contains the estimated variances of the calibration parameters
-        on its diagonal (i.e., variance of the scale coefficient and the nonlinearity exponent)
-        and the covariances between these parameters in its off-diagonal elements.
-
-        This information can be used to assess the uncertainty in the calibration.
-
-        Returns:
-            A NumPy array (2x2) representing the covariance matrix.
-        """
-        return self._calibration_cov
-
-    @property
     def delivered_volume(self) -> np.float64:
-        """Returns the total volume of water, in microliters, delivered by the valve during the current runtime."""
-        return self._valve_tracker.read_data(index=0, convert_output=False)  # type: ignore
+        """Returns the total volume of water, in microliters, delivered by the valve since the runtime onset."""
+        return self._valve_tracker[0]
 
     @property
-    def valve_tracker(self) -> SharedMemoryArray:
-        """Returns the SharedMemoryArray that stores the total number of valve pulses and the total volume of water
-        delivered during the current runtime.
-
-        The number of valve pulses is stored under index 0, while the total delivered volume is stored under index 1.
-        Both values are stored as a float64 datatype. The total delivered volume is given in microliters.
-        """
-        return self._valve_tracker
+    def calibrating(self) -> bool:
+        """Returns True if the module is currently performing a valve calibration cycle and False otherwise."""
+        return False if self._valve_tracker[1] != 0 else True
 
 
 class ScreenInterface(ModuleInterface):
-    """Interfaces with ScreenModule instances running on Ataraxis MicroControllers.
-
-    ScreenModule is specifically designed to interface with the HDMI converter boards used in Sun lab's Virtual Reality
-    setup. The ScreenModule communicates with the boards to toggle the screen displays on and off, without interfering
-    with their setup on the host PC.
+    """Interfaces with ScreenModule instances running on the Actor MicroController.
 
     Notes:
-        Since the current VR setup uses three screens, this implementation of ScreenModule is designed to interface
-        with all three screens at the same time. In the future, the module may be refactored to allow addressing
-        individual screens.
+        Type code 7.
 
-        The physical wiring of the module also allows manual screen manipulation via the buttons on the control panel
-        if the ScreenModule is not actively delivering a toggle pulse. However, changing the state of the screen
-        manually is strongly discouraged, as it interferes with tracking the state of the screen via software.
-
-    Args:
-        initially_on: A boolean flag that communicates the initial state of the screen. This is used during log parsing
-            to deduce the state of the screen after each toggle pulse and assumes the screens are only manipulated via
-            this interface.
-        debug: A boolean flag that configures the interface to dump certain data received from the microcontroller into
-            the terminal. This is used during debugging and system calibration and should be disabled for most runtimes.
+        This interface expects that the managed screens are turned OFF when the interface is initialized.
 
     Attributes:
-        _initially_on: Stores the initial state of the screens.
-        _debug: Stores the debug flag.
+        _toggle: The code for the Toggle module command.
+        _enabled: Tracks the current state of the managed screens.
     """
 
-    def __init__(self, initially_on: bool, debug: bool = False) -> None:
-        error_codes: set[np.uint8] = {np.uint8(51)}  # kOutputLocked
-
-        self._debug: bool = debug
-        self._initially_on: bool = initially_on
-
-        # kOn, kOff
-        # data_codes = {np.uint8(52), np.uint8(53)}
-
-        # If the interface runs in the debug mode, configures the interface to monitor relay On / Off codes.
-        data_codes: set[np.uint8] | None = None
-        if debug:
-            data_codes = {np.uint8(52), np.uint8(53)}
-
+    def __init__(self) -> None:
         super().__init__(
             module_type=np.uint8(7),
             module_id=np.uint8(1),
-            mqtt_communication=False,
-            data_codes=data_codes,
-            mqtt_command_topics=None,
-            error_codes=error_codes,
+            data_codes=None,
+            error_codes=None,
         )
+
+        # Statically computes command code objects
+        self._toggle: np.uint8 = np.uint8(1)
+
+        # Tracks the state of the managed screens
+        self._enabled: bool = False
 
     def initialize_remote_assets(self) -> None:
         """Not used."""
+        return
 
     def terminate_remote_assets(self) -> None:
         """Not used."""
-
-    def process_received_data(self, message: ModuleData | ModuleState) -> None:
-        """If the class runs in the debug mode, dumps the received data into the terminal via console class.
-
-        This method is only used in the debug mode to print Screen toggle signal HIGH (On) and LOW (Off) phases.
-
-        Notes:
-            This method uses the console to print the data to the terminal. Make sure it is enabled before calling this
-            method.
-        """
-        if message.event == 52:
-            console.echo("Screen toggle: HIGH")
-        if message.event == 53:
-            console.echo("Screen toggle: LOW")
-
-    def parse_mqtt_command(self, topic: str, payload: bytes | bytearray) -> None:
-        """Not used."""
         return
 
-    def set_parameters(self, pulse_duration: np.uint32 = np.uint32(1000000)) -> None:
-        """Changes the PC-addressable runtime parameters of the ScreenModule instance.
+    def process_received_data(self, message: ModuleData | ModuleState) -> None:
+        """Not used, as the module currently does not require any real-time data processing."""
+        return
 
-        Use this method to package and apply new PC-addressable parameters to the ScreenModule instance managed by
-        this Interface class.
+    def set_parameters(self, pulse_duration: np.uint32) -> None:
+        """Sets the module's PC-addressable runtime parameters to the input values.
 
         Args:
-            pulse_duration: The duration, in microseconds, of each emitted screen toggle pulse HIGH phase. This is
-                equivalent to the duration of the control panel POWER button press. The main criterion for this
-                parameter is to be long enough for the converter board to register the press.
+            pulse_duration: The duration, in microseconds, of each emitted screen state toggle TTL pulse.
         """
-        message = ModuleParameters(
-            module_type=self._module_type,
-            module_id=self._module_id,
-            return_code=np.uint8(0),
-            parameter_data=(pulse_duration,),
-        )
-        self._input_queue.put(message)  # type: ignore
+        self.send_parameters(parameter_data=(pulse_duration,))
 
-    def toggle(self) -> None:
-        """Triggers the ScreenModule to briefly simulate pressing the POWER button of the scree control board.
+    def set_state(self, state: bool) -> None:
+        """Sets the screens to the desired power state.
 
-        This command is used to turn the connected display on or off. The new state of the display depends on the
-        current state of the display when the command is issued. Since the displays can also be controlled manually
-        (via the physical control board buttons), the state of the display can also be changed outside this interface,
-        although it is highly advised to NOT change screen states manually.
-
-        Notes:
-            It is highly recommended to use this command to manipulate display states, as it ensures that display state
-            changes are logged for further data analysis.
+        Args:
+            state: The desired screen power state. True means the screens are powered on; False means the screens are
+                powered off.
         """
-        command = OneOffModuleCommand(
-            module_type=self._module_type,
-            module_id=self._module_id,
-            return_code=np.uint8(0),
-            command=np.uint8(1),
-            noblock=np.bool(False),
-        )
-        self._input_queue.put(command)  # type: ignore
+        # Ends the runtime early if the desired state matches the current screen power state.
+        if state == self._enabled:
+            return
 
-    @property
-    def initially_on(self) -> bool:
-        """Returns True if the screens were initially ON when the module interface was initialized, False otherwise."""
-        return self._initially_on
+        self.send_command(command=self._toggle, noblock=_FALSE, repetition_delay=_ZERO_UINT32)
+        self._enabled = state

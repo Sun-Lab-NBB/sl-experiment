@@ -25,7 +25,7 @@ from .zaber_bindings import ZaberAxis, ZaberConnection
 from ..shared_components import (
     TTLInterface,
     LickInterface,
-    BreakInterface,
+    BrakeInterface,
     ValveInterface,
     ScreenInterface,
     TorqueInterface,
@@ -113,7 +113,7 @@ class ZaberMotors:
         # previous positions.
         self._previous_positions: None | ZaberPositions = None
         if zaber_positions_path.exists():
-            self._previous_positions = ZaberPositions.from_yaml(zaber_positions_path)  # type: ignore
+            self._previous_positions = ZaberPositions.from_yaml(zaber_positions_path)
         else:
             message = (
                 "No previous position data found when attempting to load Zaber motor positions used during a previous "
@@ -455,13 +455,7 @@ class MicroControllerInterfaces:
     Attributes:
         _started: Tracks whether the microcontroller communication processes are currently running.
         _system_configuration: Stores the configuration parameters of the Mesoscope-VR system.
-        _previous_volume: Tracks the volume of water dispensed during previous deliver_reward() calls.
-        _previous_tone_duration: Tracks the auditory tone duration during previous deliver_reward() or simulate_reward()
-            calls.
-        _screen_state: Tracks the current VR screen state.
-        _frame_monitoring: Tracks the current mesoscope frame monitoring state.
-        _break_state: Tracks the current break state.
-        wheel_break: The interface that controls the electromagnetic break attached to the running wheel.
+        brake: The interface that controls the electromagnetic brake attached to the running wheel.
         valve: The interface that controls the solenoid water valve that delivers water to the animal.
         screens: The interface that controls the power state of the VR display screens.
         _actor: The main interface for the 'Actor' Ataraxis Micro Controller (AMC) device.
@@ -483,7 +477,7 @@ class MicroControllerInterfaces:
 
         # Converts the sensor polling frequency from milliseconds to microseconds. This value is used below to
         # initialize sensor interfaces.
-        sensor_polling_delay: int = round(
+        _sensor_polling_delay: int = round(
             convert_time(
                 time=self._system_configuration.microcontrollers.sensor_polling_delay_ms,
                 from_units=TimeUnits.MILLISECOND,
@@ -491,32 +485,19 @@ class MicroControllerInterfaces:
             )
         )
 
-        # Initializes internal tracker variables
-        self._previous_volume: float = 0.0
-        self._previous_tone_duration: int = 0
-        self._screen_state: bool = False
-        self._frame_monitoring: bool = False
-        self._break_state: bool = True  # The break is normally engaged, so it starts engaged by default
-
         # ACTOR. Actor AMC controls the hardware that needs to be triggered by PC at irregular intervals. Most of such
-        # hardware is designed to produce some form of an output: deliver water reward, engage wheel breaks, issue a
+        # hardware is designed to produce some form of an output: deliver water reward, engage wheel brake, issue a
         # TTL trigger, etc.
 
         # Module interfaces:
-        self.wheel_break = BreakInterface(
-            minimum_break_strength=self._system_configuration.microcontrollers.minimum_break_strength_g_cm,
-            maximum_break_strength=self._system_configuration.microcontrollers.maximum_break_strength_g_cm,
-            object_diameter=self._system_configuration.microcontrollers.wheel_diameter_cm,
-            debug=self._system_configuration.microcontrollers.debug,
+        self.brake = BrakeInterface(
+            minimum_brake_strength=self._system_configuration.microcontrollers.minimum_brake_strength_g_cm,
+            maximum_brake_strength=self._system_configuration.microcontrollers.maximum_brake_strength_g_cm,
         )
         self.valve = ValveInterface(
-            valve_calibration_data=self._system_configuration.microcontrollers.valve_calibration_data,  # type: ignore
-            debug=self._system_configuration.microcontrollers.debug,
+            valve_calibration_data=self._system_configuration.microcontrollers.valve_calibration_data,
         )
-        self.screens = ScreenInterface(
-            initially_on=False,  # Initial Screen State is hardcoded
-            debug=self._system_configuration.microcontrollers.debug,
-        )
+        self.screens = ScreenInterface()
 
         # Main interface:
         self._actor: MicroControllerInterface = MicroControllerInterface(
@@ -524,7 +505,7 @@ class MicroControllerInterfaces:
             buffer_size=8192,
             port=self._system_configuration.microcontrollers.actor_port,
             data_logger=data_logger,
-            module_interfaces=(self.wheel_break, self.valve, self.screens),
+            module_interfaces=(self.brake, self.valve, self.screens),
         )
 
         # SENSOR. Sensor AMC controls the hardware that collects data at regular intervals. This includes lick sensors,
@@ -532,20 +513,16 @@ class MicroControllerInterfaces:
         # logic to maintain the necessary precision.
 
         # Module interfaces:
-        self.mesoscope_frame: TTLInterface = TTLInterface(
-            module_id=np.uint8(1),  # Hardcoded
-            report_pulses=True,  # Hardcoded
-            debug=self._system_configuration.microcontrollers.debug,
-        )
+        self.mesoscope_frame: TTLInterface = TTLInterface(polling_frequency=_sensor_polling_delay)
         self.lick: LickInterface = LickInterface(
             lick_threshold=self._system_configuration.microcontrollers.lick_threshold_adc,
-            polling_frequency=sensor_polling_delay,
+            polling_frequency=_sensor_polling_delay,
         )
         self.torque: TorqueInterface = TorqueInterface(
             baseline_voltage=self._system_configuration.microcontrollers.torque_baseline_voltage_adc,
             maximum_voltage=self._system_configuration.microcontrollers.torque_maximum_voltage_adc,
             sensor_capacity=self._system_configuration.microcontrollers.torque_sensor_capacity_g_cm,
-            polling_frequency=sensor_polling_delay,
+            polling_frequency=_sensor_polling_delay,
         )
 
         # Main interface:
@@ -591,7 +568,7 @@ class MicroControllerInterfaces:
 
         Notes:
             After calling this method, most hardware modules will be initialized to an idle state. The only exception to
-            this rule is the wheel break, which initializes to the 'engaged' state. Use other class methods to
+            this rule is the wheel brake, which initializes to the 'engaged' state. Use other class methods to
             switch individual hardware modules into the desired state.
 
             Since most modules initialize to an idle state, they will not be generating data. Therefore, it is safe
@@ -618,7 +595,7 @@ class MicroControllerInterfaces:
         )
 
         # Configures screen trigger pulse duration
-        screen_pulse_duration: float = convert_time(  # type: ignore
+        screen_pulse_duration: float = convert_time(
             time=self._system_configuration.microcontrollers.screen_trigger_pulse_duration_ms,
             from_units="ms",
             to_units="us",
@@ -626,7 +603,7 @@ class MicroControllerInterfaces:
         self.screens.set_parameters(pulse_duration=np.uint32(screen_pulse_duration))
 
         # Configures the water valve to deliver ~ 5 uL of water by default.
-        tone_duration: float = convert_time(  # type: ignore
+        tone_duration: float = convert_time(
             time=self._system_configuration.microcontrollers.auditory_tone_duration_ms, from_units="ms", to_units="us"
         )
         self.valve.set_parameters(
@@ -684,222 +661,6 @@ class MicroControllerInterfaces:
 
         message = "Ataraxis Micro Controller (AMC) Interfaces: Terminated."
         console.echo(message=message, level=LogLevel.SUCCESS)
-
-    def enable_break(self) -> None:
-        """Engages the wheel break at maximum strength, preventing the animal from running on the wheel."""
-        if not self._break_state:
-            self.wheel_break.toggle(state=True)
-            self._break_state = True
-
-    def disable_break(self) -> None:
-        """Disengages the wheel break, enabling the animal to run on the wheel."""
-        if self._break_state:
-            self.wheel_break.toggle(state=False)
-            self._break_state = False
-
-    def enable_vr_screens(self) -> None:
-        """Sets the VR screens to be ON."""
-        if not self._screen_state:  # If screens are OFF
-            self.screens.toggle()  # Sets them ON
-            self._screen_state = True
-
-    def disable_vr_screens(self) -> None:
-        """Sets the VR screens to be OFF."""
-        if self._screen_state:  # If screens are ON
-            self.screens.toggle()  # Sets them OFF
-            self._screen_state = False
-
-    def enable_mesoscope_frame_monitoring(self) -> None:
-        """Enables monitoring the TTL pulses sent by the mesoscope to communicate when it is scanning a frame at
-        ~ 1 kHZ rate.
-
-        The mesoscope sends the HIGH phase of the TTL pulse while it is scanning the frame, which produces a pulse of
-        ~100ms. This is followed by ~5ms LOW phase during which the Galvos are executing the flyback procedure. This
-        command checks the state of the TTL pin at the 1 kHZ rate, which is enough to accurately report both phases.
-        """
-        if not self._frame_monitoring:
-            self.mesoscope_frame.check_state(repetition_delay=np.uint32(self._sensor_polling_delay))
-            self._frame_monitoring = True
-
-    def disable_mesoscope_frame_monitoring(self) -> None:
-        """Stops monitoring the TTL pulses sent by the mesoscope to communicate when it is scanning a frame."""
-        if self._frame_monitoring:
-            self.mesoscope_frame.reset_command_queue()
-            self._frame_monitoring = False
-
-    def open_valve(self) -> None:
-        """Opens the water reward solenoid valve.
-
-        This method is primarily used to prime the water line with water before the first experiment or training session
-        of the day.
-        """
-        self.valve.toggle(state=True)
-
-    def close_valve(self) -> None:
-        """Closes the water reward solenoid valve."""
-        self.valve.toggle(state=False)
-
-    def deliver_reward(self, volume: float = 5.0, tone_duration: int = 300, ignore_parameters: bool = False) -> None:
-        """Pulses the water reward solenoid valve for the duration of time necessary to deliver the provided volume of
-        water.
-
-        This method assumes that the valve has been calibrated before calling this method. It uses the calibration data
-        provided at class instantiation to determine the period of time the valve should be kept open to deliver the
-        requested volume of water.
-
-        Args:
-            volume: The volume of water to deliver, in microliters.
-            tone_duration: The duration of the auditory tone, in milliseconds, to emit while delivering the water
-                reward.
-            ignore_parameters: Determines whether to ignore the volume and tone_duration arguments. Calling the method
-                with this argument ensures that the delivered reward always uses the same volume and tone_duration as
-                the previous reward command. Primarily, this argument is used when receiving reward commands from Unity.
-        """
-        # This ensures that the valve settings are only updated if volume, tone_duration, or both changed compared to
-        # the previous command runtime. This ensures that the valve settings are only updated when this is necessary,
-        # reducing communication overhead.
-        if not ignore_parameters and (volume != self._previous_volume or tone_duration != self._previous_tone_duration):
-            # Parameters are cached here to use the tone_duration before it is converted to microseconds.
-            self._previous_volume = volume
-            self._previous_tone_duration = tone_duration
-
-            # Note, calibration parameters are not used by the command below, but we explicitly set them here for
-            # consistency
-            tone_duration: float = convert_time(time=tone_duration, from_units="ms", to_units="us")  # type: ignore
-            self.valve.set_parameters(
-                pulse_duration=self.valve.get_duration_from_volume(volume),
-                calibration_delay=np.uint32(300000),  # Hardcoded for safety reasons!
-                calibration_count=np.uint16(self._system_configuration.microcontrollers.valve_calibration_pulse_count),
-                tone_duration=np.uint32(tone_duration),
-            )
-
-        self.valve.send_pulse(noblock=False)
-
-    def simulate_reward(self, tone_duration: int = 300) -> None:
-        """Simulates delivering water reward by emitting an audible 'reward' tone without triggering the valve.
-
-        This method is used during training when the animal refuses to consume water rewards. In this case, the water
-        rewards are not delivered, but the tones are still played to notify the animal it is performing the task as
-        required.
-
-        Args:
-            tone_duration: The duration of the auditory tone, in milliseconds, to emit while simulating the water
-                reward delivery.
-        """
-        # This ensures that the valve settings are only updated if tone_duration changed compared to the previous
-        # command runtime. This ensures that the valve settings are only updated when this is necessary, reducing
-        # communication overhead.
-        if tone_duration != self._previous_tone_duration:
-            # Parameters are cached here to use the tone_duration before it is converted to microseconds.
-            self._previous_tone_duration = tone_duration
-
-            # Note, calibration parameters are not used by the command below, but we explicitly set them here for
-            # consistency
-            tone_duration: float = convert_time(time=tone_duration, from_units="ms", to_units="us")  # type: ignore
-            self.valve.set_parameters(
-                pulse_duration=self.valve.get_duration_from_volume(self._previous_volume),
-                calibration_delay=np.uint32(300000),  # Hardcoded for safety reasons!
-                calibration_count=np.uint16(self._system_configuration.microcontrollers.valve_calibration_pulse_count),
-                tone_duration=np.uint32(tone_duration),
-            )
-
-        self.valve.tone()
-
-    def configure_reward_parameters(self, volume: float = 5.0, tone_duration: int = 300) -> None:
-        """Configures all future water rewards to use the provided volume and tone duration parameters.
-
-        Primarily, this function is used to reconfigure the system from GUI and trigger reward delivery from Unity.
-
-        Args:
-            volume: The volume of water to deliver, in microliters.
-            tone_duration: The duration of the auditory tone, in milliseconds, to emit while delivering the water
-                reward.
-        """
-        if volume != self._previous_volume or tone_duration != self._previous_tone_duration:
-            # Parameters are cached here to use the tone_duration before it is converted to microseconds.
-            self._previous_volume = volume
-            self._previous_tone_duration = tone_duration
-
-            # Note, calibration parameters are not used by the command below, but we explicitly set them here for
-            # consistency
-            tone_duration: float = convert_time(time=tone_duration, from_units="ms", to_units="us")  # type: ignore
-            self.valve.set_parameters(
-                pulse_duration=self.valve.get_duration_from_volume(volume),
-                calibration_delay=np.uint32(300000),  # Hardcoded for safety reasons!
-                calibration_count=np.uint16(self._system_configuration.microcontrollers.valve_calibration_pulse_count),
-                tone_duration=np.uint32(tone_duration),
-            )
-
-    def reference_valve(self) -> None:
-        """Runs the reference valve calibration procedure.
-
-        Reference calibration is functionally similar to the calibrate_valve() method runtime. It is, however, optimized
-        to deliver the overall volume of water recognizable for the human eye looking at the syringe holding the water
-        (water 'tank' used in our system). Additionally, this uses the 5 uL volume as the reference volume, which
-        matches the volume we use during experiments and training sessions.
-
-        The reference calibration HAS to be run with the water line being primed, deaerated, and the holding ('tank')
-        syringe filled exactly to the 5 mL mark. This procedure is designed to dispense 5 uL of water 200 times, which
-        should overall dispense ~ 1 ml of water.
-        """
-        tone_duration: float = convert_time(  # type: ignore
-            time=self._system_configuration.microcontrollers.auditory_tone_duration_ms, from_units="ms", to_units="us"
-        )
-        self.valve.set_parameters(
-            pulse_duration=np.uint32(self.valve.get_duration_from_volume(target_volume=5.0)),  # Hardcoded!
-            calibration_delay=np.uint32(300000),  # Hardcoded for safety reasons!
-            calibration_count=np.uint16(200),  # Hardcoded to work with the 5.0 uL volume to dispense 1 ml of water.
-            tone_duration=np.uint32(tone_duration),
-        )  # 5 ul x 200 times
-
-        self.valve.calibrate()
-
-    def calibrate_valve(self, pulse_duration: int = 15) -> None:
-        """Cycles solenoid valve opening and closing 500 times to determine the amount of water dispensed by the input
-        pulse_duration.
-
-        The valve is kept open for the specified number of milliseconds. Between pulses, the valve is kept closed for
-        300 ms. Due to our valve design, keeping the valve closed for less than 200-300 ms generates a large pressure
-        at the third (Normally Open) port, which puts unnecessary strain on the port plug and internal mechanism of the
-        valve.
-
-        Notes:
-            The calibration should be run with the following durations: 15 ms, 30 ms, 45 ms, and 60 ms. During testing,
-            we found that these values cover the water reward range from 2 uL to 10 uL, which is enough to cover most
-            training and experiment runtimes.
-
-            Make sure that the water line is primed, deaerated, and the holding ('tank') syringe filled exactly to the
-            5 mL mark at the beginning of each calibration cycle. Depending on the calibrated pulse_duration, you may
-            need to refill the syringe during the calibration runtime.
-
-        Args:
-            pulse_duration: The duration, in milliseconds, the valve is kept open at each calibration cycle
-        """
-        pulse_us = pulse_duration * 1000  # Converts milliseconds to microseconds
-        tone_duration: float = convert_time(  # type: ignore
-            time=self._system_configuration.microcontrollers.auditory_tone_duration_ms, from_units="ms", to_units="us"
-        )
-        self.valve.set_parameters(
-            pulse_duration=np.uint32(pulse_us),
-            calibration_delay=np.uint32(300000),
-            calibration_count=np.uint16(self._system_configuration.microcontrollers.valve_calibration_pulse_count),
-            tone_duration=np.uint32(tone_duration),
-        )
-        self.valve.calibrate()
-
-    def reset_mesoscope_frame_count(self) -> None:
-        """Resets the mesoscope frame counter to 0."""
-        self.mesoscope_frame.reset_pulse_count()
-
-    @property
-    def mesoscope_frame_count(self) -> np.uint64:
-        """Returns the total number of mesoscope frame acquisition pulses recorded since runtime onset."""
-        return self.mesoscope_frame.pulse_count
-
-    @property
-    def delivered_water_volume(self) -> np.float64:
-        """Returns the total volume of water, in microliters, dispensed by the valve since runtime onset."""
-        return self.valve.delivered_volume
 
 
 class VideoSystems:
