@@ -66,7 +66,7 @@ dependencies = [
     "pytz==2025.2",
     "importlib_metadata==8.7.0",
     "natsort-rs==0.1.15",
-    "sl-shared-assets==6.0.1rc1",
+    "sl-shared-assets==6.0.1rc3",
 ]
 
 [project.urls]
@@ -138,6 +138,14 @@ lint.select = ["ALL"]
 
 # General ignore directives
 lint.ignore = [
+    "W291",  # Conflicts with docstring formatting
+    "ANN401",  # While suboptimal, ANY is a helpful type when used with caution
+    "C901",  # Sometimes complex functions are necessary
+    "PLR0913",  # Sometimes complex functions are necessary
+    "PLR0912",  # Sometimes complex functions are necessary
+    "PLR0915",  # Sometimes complex type defenitions are necessary
+    "PLR0911", # Sometimes complex return graphs are necessary
+    "TID252", # Conflicts with the project's import management strategy
     "COM812", # Conflicts with the formatter
     "ISC001", # Conflicts with the formatter
     "PT001", # https://github.com/astral-sh/ruff/issues/8796#issuecomment-182590771

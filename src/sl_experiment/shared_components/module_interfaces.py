@@ -4,7 +4,6 @@ https://github.com/Sun-Lab-NBB/sl-micro-controllers.
 """
 
 import math
-from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
@@ -26,7 +25,9 @@ _ZERO_UINT32 = np.uint32(0)
 _FALSE = np.bool(False)
 
 
-def _power_law_model(pulse_duration: Any, a: Any, b: Any, /) -> Any:
+def _power_law_model(
+    pulse_duration: float | NDArray[np.floating], a: float, b: float, /
+) -> float | NDArray[np.floating]:
     """Defines the power-law model used during valve calibration.
 
     This model was empirically found to have the best fit for the water reward valve's performance data.
@@ -140,7 +141,8 @@ class EncoderInterface(ModuleInterface):
         """
         # The rotation direction is encoded via the message event code. CW rotation (code 52) is interpreted as negative
         # and CCW (code 51) as positive.
-        sign = 1 if message.event == np.uint8(51) else -1
+        _ccw_rotation_code = 51
+        sign = 1 if message.event == _ccw_rotation_code else -1
 
         # Translates the absolute motion into the CW / CCW vector and converts from raw pulse count to Unity units
         # using the precomputed conversion factor. Uses float64 and rounds to 8 decimal places for consistency and
@@ -174,7 +176,7 @@ class EncoderInterface(ModuleInterface):
         """
         self.send_parameters(parameter_data=(report_ccw, report_cw, delta_threshold))
 
-    def set_monitoring_state(self, state: bool) -> None:
+    def set_monitoring_state(self, *, state: bool) -> None:
         """Configures the module to start or stop continuously monitoring the managed sensor's state.
 
         Args:
@@ -328,7 +330,7 @@ class LickInterface(ModuleInterface):
         self,
         signal_threshold: np.uint16,
         delta_threshold: np.uint16,
-        averaging_pool_size: np.uint8,
+        average_pool_size: np.uint8,
     ) -> None:
         """Sets the module's PC-addressable runtime parameters to the input values.
 
@@ -338,11 +340,11 @@ class LickInterface(ModuleInterface):
                 signals below the threshold are pulled to 0.
             delta_threshold: The minimum difference between two consecutive voltage level readouts for reporting the
                 new signal value to the PC.
-            averaging_pool_size: The number of analog pin readouts to average together when checking the sensor's state.
+            average_pool_size: The number of analog pin readouts to average together when checking the sensor's state.
         """
-        self.send_parameters(parameter_data=(signal_threshold, delta_threshold, averaging_pool_size))
+        self.send_parameters(parameter_data=(signal_threshold, delta_threshold, average_pool_size))
 
-    def set_monitoring_state(self, state: bool) -> None:
+    def set_monitoring_state(self, *, state: bool) -> None:
         """Configures the module to start or stop continuously monitoring the managed sensor's state.
 
         Args:
@@ -443,7 +445,7 @@ class TorqueInterface(ModuleInterface):
         """Not used."""
         return
 
-    def process_received_data(self, message: ModuleData | ModuleState) -> None:
+    def process_received_data(self, _message: ModuleData | ModuleState) -> None:
         """Not used, as the module currently does not require real-time data processing."""
         return
 
@@ -478,7 +480,7 @@ class TorqueInterface(ModuleInterface):
             )
         )
 
-    def set_monitoring_state(self, state: bool) -> None:
+    def set_monitoring_state(self, *, state: bool) -> None:
         """Configures the module to start or stop continuously monitoring the managed sensor's state.
 
         Args:
@@ -574,10 +576,10 @@ class TTLInterface(ModuleInterface):
         """Updates the TTL pulse count stored in the instance's shared memory buffer based on the messages received from
         the microcontroller.
         """
-        # Each time the module detects a HIGH TTL pulse edge, increments the pulse counter. With the current instance
-        # configuration, this method is ONLY called when the microcontroller sends a HIGH TTL pulse detection message
-        # to the PC.
-        self._pulse_tracker[0] += 1
+        # Each time the module detects a HIGH TTL pulse edge, increments the pulse counter.
+        _ttl_on_code = 51
+        if message.event == _ttl_on_code:
+            self._pulse_tracker[0] += 1
 
     def set_parameters(
         self,
@@ -593,7 +595,7 @@ class TTLInterface(ModuleInterface):
         # to zero.
         self.send_parameters(parameter_data=(_ZERO_UINT32, averaging_pool_size))
 
-    def set_monitoring_state(self, state: bool) -> None:
+    def set_monitoring_state(self, *, state: bool) -> None:
         """Configures the module to start or stop continuously monitoring the managed sensor's state.
 
         Args:
@@ -681,11 +683,11 @@ class BrakeInterface(ModuleInterface):
         """Not used."""
         return
 
-    def process_received_data(self, message: ModuleData | ModuleState) -> None:
+    def process_received_data(self, _message: ModuleData | ModuleState) -> None:
         """Not used, as the module currently does not require any real-time data processing."""
         return
 
-    def set_state(self, state: bool) -> None:
+    def set_state(self, *, state: bool) -> None:
         """Sets the brake to the desired state.
 
         Args:
@@ -745,10 +747,7 @@ class ValveInterface(ModuleInterface):
         _cycle_timer: A PrecisionTimer instance that tracks how long the valve stays open during reward delivery.
     """
 
-    def __init__(
-        self,
-        valve_calibration_data: tuple[tuple[int | float, int | float], ...]
-    ) -> None:
+    def __init__(self, valve_calibration_data: tuple[tuple[int | float, int | float], ...]) -> None:
         error_codes: set[np.uint8] = {np.uint8(56)}  # kInvalidToneConfiguration
         data_codes: set[np.uint8] = {np.uint8(51), np.uint8(52), np.uint8(53)}  # kOpen, kClosed, kCalibrated
 
@@ -823,12 +822,16 @@ class ValveInterface(ModuleInterface):
         """Updates the reward data stored in the instance's shared memory buffer based on the messages received from
         the microcontroller.
         """
-        if message.event == 52 and not self._previous_module_state:
+        _valve_open_code = 51
+        _valve_closed_code = 52
+        _valve_calibrated_code = 53
+
+        if message.event == _valve_open_code and not self._previous_module_state:
             # Resets the cycle timer each time the valve transitions to an open state.
             self._previous_module_state = True
             self._cycle_timer.reset()
 
-        elif message.event == 53 and self._previous_module_state:
+        elif message.event == _valve_closed_code and self._previous_module_state:
             # Each time the valve transitions to a closed state, records the period of time the valve was open and uses
             # it to estimate the volume of fluid delivered through the valve. Accumulates the total volume in the
             # tracker array.
@@ -841,10 +844,10 @@ class ValveInterface(ModuleInterface):
 
         # When the valve reports the completion of a calibration cycle, sets the appropriate element of the tracker
         # array to 1.
-        elif message.event == 54:
+        elif message.event == _valve_calibrated_code:
             self._valve_tracker[1] = 1
 
-    def set_state(self, state: bool) -> None:
+    def set_state(self, *, state: bool) -> None:
         """Sets the managed valve to the desired state.
 
         Args:
@@ -915,7 +918,6 @@ class ValveInterface(ModuleInterface):
         Notes:
             A well-calibrated valve is expected to deliver 1.0 milliliter of water during this procedure.
         """
-
         # Always uses the same configuration: 5.0 uL and 200 pulses.
         self.send_parameters(
             parameter_data=(self.get_duration_from_volume(target_volume=5.0), self._calibration_count, _ZERO_UINT32)
@@ -975,12 +977,12 @@ class ValveInterface(ModuleInterface):
 
     @property
     def scale_coefficient(self) -> np.float64:
-        """Returns the scale coefficient (A) of the power‐law model fitted to the valve's calibration data."""
+        """Returns the scale coefficient (A) of the power-law model fitted to the valve's calibration data."""
         return self._scale_coefficient
 
     @property
     def nonlinearity_exponent(self) -> np.float64:
-        """Returns the nonlinearity exponent (B) of the power‐law model fitted to the valve's calibration data."""
+        """Returns the nonlinearity exponent (B) of the power-law model fitted to the valve's calibration data."""
         return self._nonlinearity_exponent
 
     @property
@@ -991,7 +993,7 @@ class ValveInterface(ModuleInterface):
     @property
     def calibrating(self) -> bool:
         """Returns True if the module is currently performing a valve calibration cycle and False otherwise."""
-        return False if self._valve_tracker[1] != 0 else True
+        return self._valve_tracker[1] == 0
 
 
 class ScreenInterface(ModuleInterface):
@@ -1029,7 +1031,7 @@ class ScreenInterface(ModuleInterface):
         """Not used."""
         return
 
-    def process_received_data(self, message: ModuleData | ModuleState) -> None:
+    def process_received_data(self, _message: ModuleData | ModuleState) -> None:
         """Not used, as the module currently does not require any real-time data processing."""
         return
 
@@ -1041,7 +1043,7 @@ class ScreenInterface(ModuleInterface):
         """
         self.send_parameters(parameter_data=(pulse_duration,))
 
-    def set_state(self, state: bool) -> None:
+    def set_state(self, *, state: bool) -> None:
         """Sets the screens to the desired power state.
 
         Args:
