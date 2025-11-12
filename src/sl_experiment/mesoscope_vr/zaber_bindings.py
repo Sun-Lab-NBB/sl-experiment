@@ -13,26 +13,35 @@ from ataraxis_base_utilities import console, LogLevel
 
 @dataclass
 class _ZaberAxisData:
-    """Stores the identification data about an axis of a Zaber device."""
+    """Stores the identification data for an axis of a Zaber device."""
     axis_id: int
+    """The unique motor type code of the axis."""
     axis_label: str
+    """THe user-assigned name of the axis."""
 
 
 @dataclass
 class _ZaberDeviceData:
     """Stores the identification data about a Zaber device."""
     device_number: int
+    """The positional index of the device in the daisy-chain of devices connected to the same serial port."""
     device_id: int
+    """The unique identifier code of the device."""
     label: str
+    """The user-assigned name of the device."""
     name: str
+    """The manufacturer-assigned name of the device."""
     axes: list[_ZaberAxisData] = field(default_factory=list)
+    """Stores _ZaberAxisData instances for each axis managed by this device."""
 
 
 @dataclass
 class _ZaberPortData:
     """Stores the identification data for all Zaber devices connected to a serial port."""
     port_name: str
+    """The name of the USB port."""
     devices: list[_ZaberDeviceData] = field(default_factory=list)
+    """Stores _ZaberDeviceData instances for each device connected to this port."""
 
     @property
     def has_devices(self) -> bool:
@@ -160,11 +169,7 @@ def discover_zaber_devices() -> None:
 
 
 class CRCCalculator:
-    """A CRC32-XFER checksum calculator that works with raw bytes or pythonic strings.
-
-    This utility class exposes methods that generate CRC checksum labels and bytes objects, which are primarily used by
-    Zaber binding classes to verify that Zaber devices have been configured to work with the binding interface exposed
-    by this library.
+    """Exposes methods for calculating CRC32-XFER checksums for ASCII strings.
 
     Attributes:
         _calculator: Stores the configured Calculator class object used to calculate the checksums.
