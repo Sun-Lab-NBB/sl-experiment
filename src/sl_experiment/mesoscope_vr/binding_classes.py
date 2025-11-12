@@ -1,11 +1,11 @@
 """This module binds low-level API classes for all Mesoscope-VR components (cameras, microcontrollers, Zaber motors).
-These bindings streamline the API used to interface with these components during experiment and training runtimes."""
+These bindings streamline the API used to interface with these components during experiment and training runtimes.
+"""
 
 from pathlib import Path
 
 import numpy as np
-from ataraxis_time import PrecisionTimer
-from sl_shared_assets import ZaberPositions
+from sl_shared_assets import ZaberPositions, MesoscopeMicroControllers
 from ataraxis_video_system import (
     VideoCodecs,
     VideoSystem,
@@ -17,7 +17,7 @@ from ataraxis_video_system import (
 )
 from ataraxis_base_utilities import LogLevel, console
 from ataraxis_data_structures import DataLogger
-from ataraxis_time.time_helpers import convert_time
+from ataraxis_time.time_helpers import TimeUnits, convert_time
 from ataraxis_communication_interface import MicroControllerInterface
 
 from .tools import get_system_configuration
@@ -25,7 +25,7 @@ from .zaber_bindings import ZaberAxis, ZaberConnection
 from ..shared_components import (
     TTLInterface,
     LickInterface,
-    BreakInterface,
+    BrakeInterface,
     ValveInterface,
     ScreenInterface,
     TorqueInterface,
@@ -113,7 +113,7 @@ class ZaberMotors:
         # previous positions.
         self._previous_positions: None | ZaberPositions = None
         if zaber_positions_path.exists():
-            self._previous_positions = ZaberPositions.from_yaml(zaber_positions_path)  # type: ignore
+            self._previous_positions = ZaberPositions.from_yaml(zaber_positions_path)
         else:
             message = (
                 "No previous position data found when attempting to load Zaber motor positions used during a previous "
@@ -137,7 +137,6 @@ class ZaberMotors:
             This method moves all Zaber axes in parallel to optimize runtime speed. This relies on the Mesoscope-VR
             system to be assembled in a way where it is safe to move all motors at the same time.
         """
-
         # Disables the safety motor lock before moving the motors.
         self.unpark_motors()
 
@@ -212,7 +211,6 @@ class ZaberMotors:
         Notes:
             This method moves all motor axes in parallel to optimize runtime speed.
         """
-
         # Disables the safety motor lock before moving the motors.
         self.unpark_motors()
 
@@ -241,7 +239,6 @@ class ZaberMotors:
             The motors are moved to the parking positions stored in the non-volatile memory of each motor controller.
             This method moves all motor axes in parallel to optimize runtime speed.
         """
-
         # Disables the safety motor lock before moving the motors.
         self.unpark_motors()
 
@@ -273,7 +270,6 @@ class ZaberMotors:
             Formerly, the only maintenance step was the calibration of the water-valve, so some low-level functions
             still reference it as 'valve-position' and 'calibrate-position'.
         """
-
         # Disables the safety motor lock before moving the motors.
         self.unpark_motors()
 
@@ -301,7 +297,6 @@ class ZaberMotors:
         Notes:
             This method moves all MOTOR axes in parallel to optimize runtime speed.
         """
-
         # Disables the safety motor lock before moving the motors.
         self.unpark_motors()
 
@@ -344,7 +339,6 @@ class ZaberMotors:
             identically to this command. However, to improve runtime safety and the clarity of the class API, it is
             highly encouraged to use this method to unmount the animal.
         """
-
         # Disables the safety motor lock before moving the motors.
         self.unpark_motors()
 
@@ -384,7 +378,6 @@ class ZaberMotors:
         Primarily, this method is used to issue commands to multiple motor groups and then block until all motors in
         all groups finish moving. This optimizes the overall time taken to move the motors.
         """
-
         # Waits for the motors to finish moving. Note, motor state polling includes the built-in delay mechanism to
         # prevent overwhelming the communication interface.
         while (
@@ -410,7 +403,8 @@ class ZaberMotors:
 
     def park_motors(self) -> None:
         """Parks all managed motor groups, preventing them from being moved via this library or Zaber GUI until
-        they are unparked via the unpark_motors() command."""
+        they are unparked via the unpark_motors() command.
+        """
         self._headbar_pitch.park()
         self._headbar_roll.park()
         self._headbar_z.park()
@@ -441,111 +435,75 @@ class ZaberMotors:
 
 
 class MicroControllerInterfaces:
-    """Interfaces with all Ataraxis Micro Controller (AMC) devices that control Mesoscope-VR system hardware and acquire
-    non-video behavior data.
-
-    This class interfaces with the three AMC controllers used during various runtimes: Actor, Sensor, and Encoder. The
-    class exposes methods to send commands to the hardware modules managed by these microcontrollers. In turn, these
-    modules control specific components of the Mesoscope-Vr system, such as rotary encoders, solenoid valves, and
-    conductive lick sensors.
+    """Interfaces with the Ataraxis Micro Controller (AMC) devices used in the Mesoscope-VR data acquisition system.
 
     Notes:
-        This class is primarily intended to be used internally by the _MesoscopeExperiment and _BehaviorTraining
-        classes. Our maintenance CLI (sl-maintain) is the only exception to this rule, as it directly uses this class to
-        facilitate Mesoscope-VR maintenance tasks.
+        This class interfaces with the three AMC controllers used in the system: Actor, Sensor, and Encoder.
 
-        Calling the initializer does not start the underlying processes. Use the start() method before issuing other
-        commands to properly initialize all remote processes. This design is intentional and is used during experiment
-        and training runtimes to parallelize data preprocessing for the previous session and runtime preparation for the
-        following session.
+        Calling the class initializer does not start the microcontroller communication processes.
+        Use the start() method before calling other instance methods.
+
+        The instance reserves 3 CPU cores for running the microcontroller communication processes.
 
     Args:
-        data_logger: The initialized DataLogger instance used to log the data generated by the managed microcontrollers.
-            For most runtimes, this argument is resolved by the _MesoscopeExperiment or _BehaviorTraining classes that
-            initialize this class.
+        data_logger: The DataLogger instance to use for logging the data generated by the managed microcontrollers
+            during runtime.
+        microcontroller_configuration: The MesoscopeMicroControllers instance that stores the configuration
+            parameters for the managed microcontrollers.
 
     Attributes:
-        _started: Tracks whether the VR system and experiment runtime are currently running.
-        _system_configuration: Stores the configuration parameters used by the Mesoscope-VR system.
-        _sensor_polling_delay: Stores the delay, in microseconds, between any two consecutive sensor readout polls. This
-            delay is the same for most sensor modules.
-        _previous_volume: Tracks the volume of water dispensed during previous deliver_reward() calls.
-        _previous_tone_duration: Tracks the auditory tone duration during previous deliver_reward() or simulate_reward()
-            calls.
-        _screen_state: Tracks the current VR screen state.
-        _frame_monitoring: Tracks the current mesoscope frame monitoring state.
-        _torque_monitoring: Tracks the current torque monitoring state.
-        _lick_monitoring: Tracks the current lick monitoring state.
-        _encoder_monitoring: Tracks the current encoder monitoring state.
-        _break_state: Tracks the current break state.
-        _delay_timer: Stores a millisecond-precise timer used by certain sequential command methods.
-        wheel_break: The interface that controls the electromagnetic break attached to the running wheel.
-        valve: The interface that controls the solenoid water valve that delivers water to the animal.
-        screens: The interface that controls the power state of the VR display screens.
+        _started: Tracks whether the microcontroller communication processes are currently running.
+        _configuration: Stores the managed microcontrollers' configuration parameters.
+        brake: The interface that controls the electromagnetic particle brake attached to the running wheel.
+        valve: The interface that controls the solenoid water valve.
+        screens: The interface that controls the power state of the Virtual Reality display screens.
         _actor: The main interface for the 'Actor' Ataraxis Micro Controller (AMC) device.
         mesoscope_frame: The interface that monitors frame acquisition timestamp signals sent by the mesoscope.
-        lick: The interface that monitors animal's interactions with the lick sensor (detects licks).
-        torque: The interface that monitors the torque applied by the animal to the running wheel.
+        lick: The interface that monitors animal's interactions with the lick sensor.
+        torque: The interface that monitors the torque applied by the animal to the running wheel when the brakes are
+            on.
         _sensor: The main interface for the 'Sensor' Ataraxis Micro Controller (AMC) device.
-        wheel_encoder: The interface that monitors the rotation of the running wheel and converts it into the distance
-            traveled by the animal.
+        wheel_encoder: The interface that monitors the distance traveled by the animal on the running wheel.
         _encoder: The main interface for the 'Encoder' Ataraxis Micro Controller (AMC) device.
     """
 
-    def __init__(self, data_logger: DataLogger) -> None:
-        # Initializes the start state tracker first
+    def __init__(self, data_logger: DataLogger, microcontroller_configuration: MesoscopeMicroControllers) -> None:
+        # Tracks whether the communication processes have been started.
         self._started: bool = False
 
-        # Retrieves the Mesoscope-VR system configuration parameters and saves them to class attribute to use them from
-        # class methods.
-        self._system_configuration = get_system_configuration()
+        # Caches the microcontroller configuration parameters to the instance attribute.
+        self._configuration: MesoscopeMicroControllers = microcontroller_configuration
 
-        # Converts the general sensor polling delay and stores it in class attribute. Unless other duration / delay
-        # parameters, this one is frequently queried by class methods, so it is beneficial to statically compute
-        # it once.
-        self._sensor_polling_delay: float = convert_time(  # type: ignore
-            time=self._system_configuration.microcontrollers.sensor_polling_delay_ms, from_units="ms", to_units="us"
+        # Converts the sensor polling frequency from milliseconds to microseconds. This value is used below to
+        # initialize most sensor interfaces.
+        _sensor_polling_delay: int = round(
+            convert_time(
+                time=self._configuration.sensor_polling_delay_ms,
+                from_units=TimeUnits.MILLISECOND,
+                to_units=TimeUnits.MICROSECOND,
+            )
         )
-
-        # Initializes internal tracker variables
-        self._previous_volume: float = 0.0
-        self._previous_tone_duration: int = 0
-        self._screen_state: bool = False
-        self._frame_monitoring: bool = False
-        self._torque_monitoring: bool = False
-        self._lick_monitoring: bool = False
-        self._encoder_monitoring: bool = False
-        self._break_state: bool = True  # The break is normally engaged, so it starts engaged by default
-
-        self._delay_timer = PrecisionTimer("ms")
 
         # ACTOR. Actor AMC controls the hardware that needs to be triggered by PC at irregular intervals. Most of such
-        # hardware is designed to produce some form of an output: deliver water reward, engage wheel breaks, issue a
-        # TTL trigger, etc.
+        # hardware is designed to produce some form of an output: deliver water reward, engage wheel brake, etc.
 
         # Module interfaces:
-        self.wheel_break = BreakInterface(
-            minimum_break_strength=self._system_configuration.microcontrollers.minimum_break_strength_g_cm,
-            maximum_break_strength=self._system_configuration.microcontrollers.maximum_break_strength_g_cm,
-            object_diameter=self._system_configuration.microcontrollers.wheel_diameter_cm,
-            debug=self._system_configuration.microcontrollers.debug,
+        self.brake = BrakeInterface(
+            minimum_brake_strength=self._configuration.minimum_brake_strength_g_cm,
+            maximum_brake_strength=self._configuration.maximum_brake_strength_g_cm,
         )
         self.valve = ValveInterface(
-            valve_calibration_data=self._system_configuration.microcontrollers.valve_calibration_data,  # type: ignore
-            debug=self._system_configuration.microcontrollers.debug,
+            valve_calibration_data=self._configuration.valve_calibration_data,
         )
-        self.screens = ScreenInterface(
-            initially_on=False,  # Initial Screen State is hardcoded
-            debug=self._system_configuration.microcontrollers.debug,
-        )
+        self.screens = ScreenInterface()
 
         # Main interface:
         self._actor: MicroControllerInterface = MicroControllerInterface(
-            controller_id=np.uint8(101),  # Hardcoded
-            microcontroller_serial_buffer_size=8192,  # Hardcoded
-            microcontroller_usb_port=self._system_configuration.microcontrollers.actor_port,
+            controller_id=np.uint8(101),
+            buffer_size=8192,
+            port=self._configuration.actor_port,
             data_logger=data_logger,
-            module_interfaces=(self.wheel_break, self.valve, self.screens),
+            module_interfaces=(self.brake, self.valve, self.screens),
         )
 
         # SENSOR. Sensor AMC controls the hardware that collects data at regular intervals. This includes lick sensors,
@@ -553,75 +511,57 @@ class MicroControllerInterfaces:
         # logic to maintain the necessary precision.
 
         # Module interfaces:
-        self.mesoscope_frame: TTLInterface = TTLInterface(
-            module_id=np.uint8(1),  # Hardcoded
-            report_pulses=True,  # Hardcoded
-            debug=self._system_configuration.microcontrollers.debug,
-        )
+        self.mesoscope_frame: TTLInterface = TTLInterface(polling_frequency=_sensor_polling_delay)
         self.lick: LickInterface = LickInterface(
-            lick_threshold=self._system_configuration.microcontrollers.lick_threshold_adc,
-            debug=self._system_configuration.microcontrollers.debug,
+            lick_threshold=self._configuration.lick_threshold_adc,
+            polling_frequency=_sensor_polling_delay,
         )
         self.torque: TorqueInterface = TorqueInterface(
-            baseline_voltage=self._system_configuration.microcontrollers.torque_baseline_voltage_adc,
-            maximum_voltage=self._system_configuration.microcontrollers.torque_maximum_voltage_adc,
-            sensor_capacity=self._system_configuration.microcontrollers.torque_sensor_capacity_g_cm,
-            object_diameter=self._system_configuration.microcontrollers.wheel_diameter_cm,
-            debug=self._system_configuration.microcontrollers.debug,
+            baseline_voltage=self._configuration.torque_baseline_voltage_adc,
+            maximum_voltage=self._configuration.torque_maximum_voltage_adc,
+            sensor_capacity=self._configuration.torque_sensor_capacity_g_cm,
+            polling_frequency=_sensor_polling_delay,
         )
 
         # Main interface:
         self._sensor: MicroControllerInterface = MicroControllerInterface(
-            controller_id=np.uint8(152),  # Hardcoded
-            microcontroller_serial_buffer_size=8192,  # Hardcoded
-            microcontroller_usb_port=self._system_configuration.microcontrollers.sensor_port,
+            controller_id=np.uint8(152),
+            buffer_size=8192,
+            port=self._configuration.sensor_port,
             data_logger=data_logger,
             module_interfaces=(self.mesoscope_frame, self.lick, self.torque),
         )
 
-        # ENCODER. Encoder AMC is specifically designed to interface with a rotary encoder connected to the running
-        # wheel. The encoder uses hardware interrupt logic to maintain high precision and, therefore, it is isolated
-        # to a separate microcontroller to ensure adequate throughput.
+        # ENCODER. Encoder AMC is specifically designed to interface with a quadrature encoder connected to the running
+        # wheel. The encoder uses hardware interrupt logic to maintain high precision and is isolated to a separate
+        # microcontroller to ensure the highest possible throughput and sensor resolution.
 
         # Module interfaces:
         self.wheel_encoder: EncoderInterface = EncoderInterface(
-            encoder_ppr=self._system_configuration.microcontrollers.wheel_encoder_ppr,
-            object_diameter=self._system_configuration.microcontrollers.wheel_diameter_cm,
-            cm_per_unity_unit=self._system_configuration.microcontrollers.cm_per_unity_unit,
-            debug=self._system_configuration.microcontrollers.debug,
+            encoder_ppr=self._configuration.wheel_encoder_ppr,
+            wheel_diameter=self._configuration.wheel_diameter_cm,
+            cm_per_unity_unit=self._configuration.cm_per_unity_unit,
+            polling_frequency=microcontroller_configuration.wheel_encoder_polling_delay_us,
         )
 
         # Main interface:
         self._encoder: MicroControllerInterface = MicroControllerInterface(
-            controller_id=np.uint8(203),  # Hardcoded
-            microcontroller_serial_buffer_size=8192,  # Hardcoded
-            microcontroller_usb_port=self._system_configuration.microcontrollers.encoder_port,
+            controller_id=np.uint8(203),
+            buffer_size=8192,
+            port=self._configuration.encoder_port,
             data_logger=data_logger,
             module_interfaces=(self.wheel_encoder,),
         )
 
     def __del__(self) -> None:
-        """Ensures that all hardware resources are released when the object is garbage-collected."""
+        """Ensures that all communication processes are terminated when the instance is garbage-collected."""
         self.stop()
 
     def start(self) -> None:
-        """Starts MicroController communication processes and configures all hardware modules to use the runtime
-        parameters loaded from the acquisition system configuration file.
-
-        This method sets up the necessary assets that enable MicroController-PC communication. Until this method is
-        called, all other class methods will not function correctly.
-
-        Notes:
-            After calling this method, most hardware modules will be initialized to an idle state. The only exception to
-            this rule is the wheel break, which initializes to the 'engaged' state. Use other class methods to
-            switch individual hardware modules into the desired state.
-
-            Since most modules initialize to an idle state, they will not be generating data. Therefore, it is safe
-            to call this method before enabling the DataLogger class. However, it is strongly advised to enable the
-            DataLogger as soon as possible to avoid data piling up in the buffer.
+        """Starts the communication processes for all managed microcontrollers and configures all interfaced hardware
+        modules to use the runtime parameters loaded from the acquisition system's configuration file.
         """
-
-        # Prevents executing this method if the MicroControllers are already running.
+        # Prevents executing this method if the microcontrollers are already running.
         if self._started:
             return
 
@@ -630,51 +570,43 @@ class MicroControllerInterfaces:
 
         # Starts all microcontroller interfaces
         self._actor.start()
-        self._actor.unlock_controller()  # Only Actor outputs data, so no need to unlock other controllers.
         self._sensor.start()
         self._encoder.start()
 
-        # Configures the encoder to only report forward motion (CW) if the motion exceeds ~ 1 mm of distance.
+        # Wheel Encoder
         self.wheel_encoder.set_parameters(
-            report_cw=self._system_configuration.microcontrollers.wheel_encoder_report_cw,
-            report_ccw=self._system_configuration.microcontrollers.wheel_encoder_report_ccw,
-            delta_threshold=self._system_configuration.microcontrollers.wheel_encoder_delta_threshold_pulse,
+            report_cw=np.bool(self._configuration.wheel_encoder_report_cw),
+            report_ccw=np.bool(self._configuration.wheel_encoder_report_ccw),
+            delta_threshold=np.uint32(self._configuration.wheel_encoder_delta_threshold_pulse),
         )
 
-        # Configures screen trigger pulse duration
-        screen_pulse_duration: float = convert_time(  # type: ignore
-            time=self._system_configuration.microcontrollers.screen_trigger_pulse_duration_ms,
+        # Screen Interface
+        screen_pulse_duration: np.float64 = convert_time(
+            time=self._configuration.screen_trigger_pulse_duration_ms,
             from_units="ms",
             to_units="us",
         )
-        self.screens.set_parameters(pulse_duration=np.uint32(screen_pulse_duration))
+        self.screens.set_parameters(pulse_duration=np.uint32(round(screen_pulse_duration)))
 
-        # Configures the water valve to deliver ~ 5 uL of water by default.
-        tone_duration: float = convert_time(  # type: ignore
-            time=self._system_configuration.microcontrollers.auditory_tone_duration_ms, from_units="ms", to_units="us"
-        )
-        self.valve.set_parameters(
-            pulse_duration=np.uint32(self.valve.get_duration_from_volume(5.0)),  # Hardcoded for calibration purposes
-            calibration_delay=np.uint32(300000),  # Hardcoded! Do not decrease unless you know what you are doing!
-            calibration_count=np.uint16(self._system_configuration.microcontrollers.valve_calibration_pulse_count),
-            tone_duration=np.uint32(tone_duration),
-        )
-
-        # Configures the lick sensor to filter out dry touches and only report significant changes in detected voltage
-        # (used as a proxy for detecting licks).
+        # Lick Sensor
         self.lick.set_parameters(
-            signal_threshold=np.uint16(self._system_configuration.microcontrollers.lick_signal_threshold_adc),
-            delta_threshold=np.uint16(self._system_configuration.microcontrollers.lick_delta_threshold_adc),
-            averaging_pool_size=np.uint8(self._system_configuration.microcontrollers.lick_averaging_pool_size),
+            signal_threshold=np.uint16(self._configuration.lick_signal_threshold_adc),
+            delta_threshold=np.uint16(self._configuration.lick_delta_threshold_adc),
+            average_pool_size=np.uint8(self._configuration.lick_averaging_pool_size),
         )
 
-        # Configures the torque sensor to filter out noise and sub-threshold 'slack' torque signals.
+        # Torque Sensor
         self.torque.set_parameters(
-            report_ccw=np.bool(self._system_configuration.microcontrollers.torque_report_ccw),
-            report_cw=np.bool(self._system_configuration.microcontrollers.torque_report_cw),
-            signal_threshold=np.uint16(self._system_configuration.microcontrollers.torque_signal_threshold_adc),
-            delta_threshold=np.uint16(self._system_configuration.microcontrollers.torque_delta_threshold_adc),
-            averaging_pool_size=np.uint8(self._system_configuration.microcontrollers.torque_averaging_pool_size),
+            report_ccw=np.bool(self._configuration.torque_report_ccw),
+            report_cw=np.bool(self._configuration.torque_report_cw),
+            signal_threshold=np.uint16(self._configuration.torque_signal_threshold_adc),
+            delta_threshold=np.uint16(self._configuration.torque_delta_threshold_adc),
+            averaging_pool_size=np.uint8(self._configuration.torque_averaging_pool_size),
+        )
+
+        # Mesoscope Frame TTL Recorder
+        self.mesoscope_frame.set_parameters(
+            averaging_pool_size=np.uint8(self._configuration.mesoscope_frame_averaging_pool_size)
         )
 
         # The setup procedure is complete.
@@ -684,14 +616,7 @@ class MicroControllerInterfaces:
         console.echo(message=message, level=LogLevel.SUCCESS)
 
     def stop(self) -> None:
-        """Stops all MicroController communication processes and releases all resources.
-
-        This method needs to be called at the end of each runtime to release the resources reserved by the start()
-        method. Until the stop() method is called, the DataLogger instance may receive data from running
-        MicroControllers, so calling this method also guarantees no MicroController data will be lost if the DataLogger
-        process is terminated.
-        """
-
+        """Stops all microcontroller communication processes and releases all reserved resources."""
         # Prevents stopping an already stopped VR process.
         if not self._started:
             return
@@ -702,310 +627,13 @@ class MicroControllerInterfaces:
         # Resets the _started tracker
         self._started = False
 
-        # Stops all microcontroller interfaces. This directly shuts down and resets all managed hardware modules.
+        # Stops all microcontroller interfaces. This also shuts down and resets all managed hardware modules.
         self._actor.stop()
         self._sensor.stop()
         self._encoder.stop()
 
         message = "Ataraxis Micro Controller (AMC) Interfaces: Terminated."
         console.echo(message=message, level=LogLevel.SUCCESS)
-
-    def enable_encoder_monitoring(self) -> None:
-        """Enables wheel encoder monitoring at a 2 kHz rate.
-
-        This means that, at most, the Encoder will send the data to the PC at the 2 kHz rate. The Encoder collects data
-        at the native rate supported by the microcontroller hardware, which likely exceeds the reporting rate.
-        """
-        if not self._encoder_monitoring:
-            self.wheel_encoder.reset_pulse_count()
-            self.wheel_encoder.check_state(
-                repetition_delay=np.uint32(self._system_configuration.microcontrollers.wheel_encoder_polling_delay_us)
-            )
-            self._encoder_monitoring = True
-
-    def disable_encoder_monitoring(self) -> None:
-        """Stops monitoring the wheel encoder."""
-        if self._encoder_monitoring:
-            self.wheel_encoder.reset_command_queue()
-            self._encoder_monitoring = False
-
-    def enable_break(self) -> None:
-        """Engages the wheel break at maximum strength, preventing the animal from running on the wheel."""
-        if not self._break_state:
-            self.wheel_break.toggle(state=True)
-            self._break_state = True
-
-    def disable_break(self) -> None:
-        """Disengages the wheel break, enabling the animal to run on the wheel."""
-        if self._break_state:
-            self.wheel_break.toggle(state=False)
-            self._break_state = False
-
-    def enable_vr_screens(self) -> None:
-        """Sets the VR screens to be ON."""
-        if not self._screen_state:  # If screens are OFF
-            self.screens.toggle()  # Sets them ON
-            self._screen_state = True
-
-    def disable_vr_screens(self) -> None:
-        """Sets the VR screens to be OFF."""
-        if self._screen_state:  # If screens are ON
-            self.screens.toggle()  # Sets them OFF
-            self._screen_state = False
-
-    def enable_mesoscope_frame_monitoring(self) -> None:
-        """Enables monitoring the TTL pulses sent by the mesoscope to communicate when it is scanning a frame at
-        ~ 1 kHZ rate.
-
-        The mesoscope sends the HIGH phase of the TTL pulse while it is scanning the frame, which produces a pulse of
-        ~100ms. This is followed by ~5ms LOW phase during which the Galvos are executing the flyback procedure. This
-        command checks the state of the TTL pin at the 1 kHZ rate, which is enough to accurately report both phases.
-        """
-        if not self._frame_monitoring:
-            self.mesoscope_frame.check_state(repetition_delay=np.uint32(self._sensor_polling_delay))
-            self._frame_monitoring = True
-
-    def disable_mesoscope_frame_monitoring(self) -> None:
-        """Stops monitoring the TTL pulses sent by the mesoscope to communicate when it is scanning a frame."""
-        if self._frame_monitoring:
-            self.mesoscope_frame.reset_command_queue()
-            self._frame_monitoring = False
-
-    def enable_lick_monitoring(self) -> None:
-        """Enables monitoring the state of the conductive lick sensor at ~ 1 kHZ rate.
-
-        The lick sensor measures the voltage across the lick sensor and reports surges in voltage to the PC as a
-        reliable proxy for tongue-to-sensor contact. Most lick events span at least 100 ms of time and, therefore, the
-        rate of 1 kHZ is adequate for resolving all expected single-lick events.
-        """
-        if not self._lick_monitoring:
-            self.lick.check_state(repetition_delay=np.uint32(self._sensor_polling_delay))
-            self._lick_monitoring = True
-
-    def disable_lick_monitoring(self) -> None:
-        """Stops monitoring the conductive lick sensor."""
-        if self._lick_monitoring:
-            self.lick.reset_command_queue()
-            self._lick_monitoring = False
-
-    def enable_torque_monitoring(self) -> None:
-        """Enables monitoring the torque sensor at ~ 1 kHZ rate.
-
-        The torque sensor detects CW and CCW torques applied by the animal to the wheel. Currently, we do not have a
-        way of reliably calibrating the sensor, so detected torque magnitudes are only approximate. However, the sensor
-        reliably distinguishes large torques from small torques and accurately tracks animal motion activity when the
-        wheel break is engaged.
-        """
-        if not self._torque_monitoring:
-            self.torque.check_state(repetition_delay=np.uint32(self._sensor_polling_delay))
-            self._torque_monitoring = True
-
-    def disable_torque_monitoring(self) -> None:
-        """Stops monitoring the torque sensor."""
-        if self._torque_monitoring:
-            self.torque.reset_command_queue()
-            self._torque_monitoring = False
-
-    def open_valve(self) -> None:
-        """Opens the water reward solenoid valve.
-
-        This method is primarily used to prime the water line with water before the first experiment or training session
-        of the day.
-        """
-        self.valve.toggle(state=True)
-
-    def close_valve(self) -> None:
-        """Closes the water reward solenoid valve."""
-        self.valve.toggle(state=False)
-
-    def deliver_reward(self, volume: float = 5.0, tone_duration: int = 300, ignore_parameters: bool = False) -> None:
-        """Pulses the water reward solenoid valve for the duration of time necessary to deliver the provided volume of
-        water.
-
-        This method assumes that the valve has been calibrated before calling this method. It uses the calibration data
-        provided at class instantiation to determine the period of time the valve should be kept open to deliver the
-        requested volume of water.
-
-        Args:
-            volume: The volume of water to deliver, in microliters.
-            tone_duration: The duration of the auditory tone, in milliseconds, to emit while delivering the water
-                reward.
-            ignore_parameters: Determines whether to ignore the volume and tone_duration arguments. Calling the method
-                with this argument ensures that the delivered reward always uses the same volume and tone_duration as
-                the previous reward command. Primarily, this argument is used when receiving reward commands from Unity.
-        """
-
-        # This ensures that the valve settings are only updated if volume, tone_duration, or both changed compared to
-        # the previous command runtime. This ensures that the valve settings are only updated when this is necessary,
-        # reducing communication overhead.
-        if not ignore_parameters and (volume != self._previous_volume or tone_duration != self._previous_tone_duration):
-            # Parameters are cached here to use the tone_duration before it is converted to microseconds.
-            self._previous_volume = volume
-            self._previous_tone_duration = tone_duration
-
-            # Note, calibration parameters are not used by the command below, but we explicitly set them here for
-            # consistency
-            tone_duration: float = convert_time(time=tone_duration, from_units="ms", to_units="us")  # type: ignore
-            self.valve.set_parameters(
-                pulse_duration=self.valve.get_duration_from_volume(volume),
-                calibration_delay=np.uint32(300000),  # Hardcoded for safety reasons!
-                calibration_count=np.uint16(self._system_configuration.microcontrollers.valve_calibration_pulse_count),
-                tone_duration=np.uint32(tone_duration),
-            )
-
-        self.valve.send_pulse(noblock=False)
-
-    def simulate_reward(self, tone_duration: int = 300) -> None:
-        """Simulates delivering water reward by emitting an audible 'reward' tone without triggering the valve.
-
-        This method is used during training when the animal refuses to consume water rewards. In this case, the water
-        rewards are not delivered, but the tones are still played to notify the animal it is performing the task as
-        required.
-
-        Args:
-            tone_duration: The duration of the auditory tone, in milliseconds, to emit while simulating the water
-                reward delivery.
-        """
-
-        # This ensures that the valve settings are only updated if tone_duration changed compared to the previous
-        # command runtime. This ensures that the valve settings are only updated when this is necessary, reducing
-        # communication overhead.
-        if tone_duration != self._previous_tone_duration:
-            # Parameters are cached here to use the tone_duration before it is converted to microseconds.
-            self._previous_tone_duration = tone_duration
-
-            # Note, calibration parameters are not used by the command below, but we explicitly set them here for
-            # consistency
-            tone_duration: float = convert_time(time=tone_duration, from_units="ms", to_units="us")  # type: ignore
-            self.valve.set_parameters(
-                pulse_duration=self.valve.get_duration_from_volume(self._previous_volume),
-                calibration_delay=np.uint32(300000),  # Hardcoded for safety reasons!
-                calibration_count=np.uint16(self._system_configuration.microcontrollers.valve_calibration_pulse_count),
-                tone_duration=np.uint32(tone_duration),
-            )
-
-        self.valve.tone()
-
-    def configure_reward_parameters(self, volume: float = 5.0, tone_duration: int = 300) -> None:
-        """Configures all future water rewards to use the provided volume and tone duration parameters.
-
-        Primarily, this function is used to reconfigure the system from GUI and trigger reward delivery from Unity.
-
-        Args:
-            volume: The volume of water to deliver, in microliters.
-            tone_duration: The duration of the auditory tone, in milliseconds, to emit while delivering the water
-                reward.
-        """
-        if volume != self._previous_volume or tone_duration != self._previous_tone_duration:
-            # Parameters are cached here to use the tone_duration before it is converted to microseconds.
-            self._previous_volume = volume
-            self._previous_tone_duration = tone_duration
-
-            # Note, calibration parameters are not used by the command below, but we explicitly set them here for
-            # consistency
-            tone_duration: float = convert_time(time=tone_duration, from_units="ms", to_units="us")  # type: ignore
-            self.valve.set_parameters(
-                pulse_duration=self.valve.get_duration_from_volume(volume),
-                calibration_delay=np.uint32(300000),  # Hardcoded for safety reasons!
-                calibration_count=np.uint16(self._system_configuration.microcontrollers.valve_calibration_pulse_count),
-                tone_duration=np.uint32(tone_duration),
-            )
-
-    def reference_valve(self) -> None:
-        """Runs the reference valve calibration procedure.
-
-        Reference calibration is functionally similar to the calibrate_valve() method runtime. It is, however, optimized
-        to deliver the overall volume of water recognizable for the human eye looking at the syringe holding the water
-        (water 'tank' used in our system). Additionally, this uses the 5 uL volume as the reference volume, which
-        matches the volume we use during experiments and training sessions.
-
-        The reference calibration HAS to be run with the water line being primed, deaerated, and the holding ('tank')
-        syringe filled exactly to the 5 mL mark. This procedure is designed to dispense 5 uL of water 200 times, which
-        should overall dispense ~ 1 ml of water.
-        """
-        tone_duration: float = convert_time(  # type: ignore
-            time=self._system_configuration.microcontrollers.auditory_tone_duration_ms, from_units="ms", to_units="us"
-        )
-        self.valve.set_parameters(
-            pulse_duration=np.uint32(self.valve.get_duration_from_volume(target_volume=5.0)),  # Hardcoded!
-            calibration_delay=np.uint32(300000),  # Hardcoded for safety reasons!
-            calibration_count=np.uint16(200),  # Hardcoded to work with the 5.0 uL volume to dispense 1 ml of water.
-            tone_duration=np.uint32(tone_duration),
-        )  # 5 ul x 200 times
-
-        self.valve.calibrate()
-
-    def calibrate_valve(self, pulse_duration: int = 15) -> None:
-        """Cycles solenoid valve opening and closing 500 times to determine the amount of water dispensed by the input
-        pulse_duration.
-
-        The valve is kept open for the specified number of milliseconds. Between pulses, the valve is kept closed for
-        300 ms. Due to our valve design, keeping the valve closed for less than 200-300 ms generates a large pressure
-        at the third (Normally Open) port, which puts unnecessary strain on the port plug and internal mechanism of the
-        valve.
-
-        Notes:
-            The calibration should be run with the following durations: 15 ms, 30 ms, 45 ms, and 60 ms. During testing,
-            we found that these values cover the water reward range from 2 uL to 10 uL, which is enough to cover most
-            training and experiment runtimes.
-
-            Make sure that the water line is primed, deaerated, and the holding ('tank') syringe filled exactly to the
-            5 mL mark at the beginning of each calibration cycle. Depending on the calibrated pulse_duration, you may
-            need to refill the syringe during the calibration runtime.
-
-        Args:
-            pulse_duration: The duration, in milliseconds, the valve is kept open at each calibration cycle
-        """
-        pulse_us = pulse_duration * 1000  # Converts milliseconds to microseconds
-        tone_duration: float = convert_time(  # type: ignore
-            time=self._system_configuration.microcontrollers.auditory_tone_duration_ms, from_units="ms", to_units="us"
-        )
-        self.valve.set_parameters(
-            pulse_duration=np.uint32(pulse_us),
-            calibration_delay=np.uint32(300000),
-            calibration_count=np.uint16(self._system_configuration.microcontrollers.valve_calibration_pulse_count),
-            tone_duration=np.uint32(tone_duration),
-        )
-        self.valve.calibrate()
-
-    def reset_mesoscope_frame_count(self) -> None:
-        """Resets the mesoscope frame counter to 0."""
-        self.mesoscope_frame.reset_pulse_count()
-
-    def reset_distance_tracker(self) -> None:
-        """Resets the total distance traveled by the animal since runtime onset and the current position of the animal
-        relative to runtime onset to 0.
-        """
-        self.wheel_encoder.reset_distance_tracker()
-
-    @property
-    def mesoscope_frame_count(self) -> np.uint64:
-        """Returns the total number of mesoscope frame acquisition pulses recorded since runtime onset."""
-        return self.mesoscope_frame.pulse_count
-
-    @property
-    def delivered_water_volume(self) -> np.float64:
-        """Returns the total volume of water, in microliters, dispensed by the valve since runtime onset."""
-        return self.valve.delivered_volume
-
-    @property
-    def lick_count(self) -> np.uint64:
-        """Returns the total number of licks recorded since runtime onset."""
-        return self.lick.lick_count
-
-    @property
-    def traveled_distance(self) -> np.float64:
-        """Returns the total distance, in centimeters, traveled by the animal since runtime onset.
-
-        This value does not account for the direction of travel and is a monotonically increasing count of traveled
-        centimeters.
-        """
-        return self.wheel_encoder.traveled_distance
-
-    @property
-    def position(self) -> np.float64:
-        """Returns the current absolute position of the animal, in Unity units, relative to runtime onset."""
-        return self.wheel_encoder.absolute_position
 
 
 class VideoSystems:
@@ -1158,7 +786,6 @@ class VideoSystems:
         This method sets up both the frame acquisition (producer) process and the frame saver (consumer) process.
         However, the consumer process will not save any frames until the save_face_camera_frames () method is called.
         """
-
         # Prevents executing this method if the face camera is already running
         if self._face_camera_started:
             return
@@ -1180,7 +807,6 @@ class VideoSystems:
         both cameras. However, the consumer processes will not save any frames until the save_body_camera_frames ()
         method is called.
         """
-
         # Prevents executing this method if the body cameras are already running
         if self._body_cameras_started:
             return
@@ -1198,7 +824,6 @@ class VideoSystems:
 
     def save_face_camera_frames(self) -> None:
         """Starts saving the frames acquired by the face camera as a video file."""
-
         # Starts frame saving process
         self._face_camera.start_frame_saving()
 
@@ -1207,7 +832,6 @@ class VideoSystems:
 
     def save_body_camera_frames(self) -> None:
         """Starts saving the frames acquired by the left and right body cameras as a video file."""
-
         # Starts frame saving process
         self._left_camera.start_frame_saving()
         self._right_camera.start_frame_saving()
@@ -1223,7 +847,6 @@ class VideoSystems:
         VideoSystems, so calling this method also guarantees no VideoSystem data will be lost if the DataLogger
         process is terminated. Similarly, this guarantees the integrity of the generated video files.
         """
-
         # Prevents executing this method if no cameras are running.
         if not self._face_camera_started and not self._body_cameras_started:
             return
@@ -1254,17 +877,20 @@ class VideoSystems:
     @property
     def face_camera_log_path(self) -> Path:
         """Returns the path to the compressed .npz archive that stores the data logged by the face camera during
-        runtime."""
+        runtime.
+        """
         return self._face_camera.log_path
 
     @property
     def left_camera_log_path(self) -> Path:
         """Returns the path to the compressed .npz archive that stores the data logged by the left body camera during
-        runtime."""
+        runtime.
+        """
         return self._left_camera.log_path
 
     @property
     def right_camera_log_path(self) -> Path:
         """Returns the path to the compressed .npz archive that stores the data logged by the right body camera during
-        runtime."""
+        runtime.
+        """
         return self._right_camera.log_path

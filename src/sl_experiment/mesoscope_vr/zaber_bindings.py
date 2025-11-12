@@ -1,6 +1,7 @@
 """This module provides interfaces for Zaber controllers and motors used in the Mesoscope-VR data acquisition system.
 Primarily, the module extends the bindings exposed by the ZaberMotion library to work with the specific requirements
-of the Sun lab data collection pipelines."""
+of the Sun lab data collection pipelines.
+"""
 
 from typing import Any
 from dataclasses import field, dataclass
@@ -439,7 +440,6 @@ class ZaberAxis:
 
     def __repr__(self) -> str:
         """Constructs and returns a string that represents the class instance."""
-
         # Generates class representation
         representation_string: str = (
             f"ZaberAxis(name={self._name}, units={self._units.unit_type}, inversion={self.inversion}, "
@@ -588,7 +588,6 @@ class ZaberAxis:
             that the motor will still be moving when this method returns. This feature is designed to support homing
             multiple axes in parallel.
         """
-
         # A parked motor cannot be homed until it is unparked. As a safety measure, this command does NOT automatically
         # override the parking state.
         if self.is_parked:
@@ -637,7 +636,6 @@ class ZaberAxis:
             native: A boolean flag that determines whether the input amount is given in metric displacement units of the
                 motor or in native motor units.
         """
-
         # If the motor is already executing a different command, it has to be stopped or allowed to finish the command
         # before executing a new command. This contradicts the default Zaber behavior of replacing the active motor
         # command, but this way of handling conflicting commands promotes safety and was therefore considered
@@ -875,7 +873,6 @@ class ZaberDevice:
 
     def __repr__(self) -> str:
         """Constructs and returns a string that represents the class."""
-
         # Constructs the class representation string
         representation_string = f"ZaberDevice(name='{self.name}', label={self.label})"
         return representation_string
@@ -976,7 +973,6 @@ class ZaberConnection:
 
     def __repr__(self) -> str:
         """Constructs and returns a string that represents the class."""
-
         # Constructs the class representation string
         repr_string = (
             f"ZaberConnection(port='{self._port}', device_count={self.device_count}, connected={self.is_connected})"
@@ -1003,7 +999,6 @@ class ZaberConnection:
         Raises:
             NoDeviceFoundException: If no compatible Zaber devices are discovered using the target serial port.
         """
-
         # If the connection is already established, prevents from attempting to re-establish the connection again.
         if self.is_connected:
             return
@@ -1047,7 +1042,6 @@ class ZaberConnection:
     @property
     def is_connected(self) -> bool:
         """Returns True if the class has established connection with the managed serial port."""
-
         # Actualizes the connection status and returns it to the caller
         if self._connection is not None and self._is_connected:
             try:

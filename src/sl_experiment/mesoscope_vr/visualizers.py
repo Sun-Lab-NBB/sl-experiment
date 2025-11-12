@@ -1,5 +1,6 @@
 """This module provides the Visualizer class, a major training and experiment runtime UI element used to provide
-real-time feedback on the animal's task performance and task parameters."""
+real-time feedback on the animal's task performance and task parameters.
+"""
 
 import numpy as np
 import matplotlib
@@ -57,7 +58,6 @@ def _plt_palette(color: str) -> tuple[float, float, float]:
     Raises:
         KeyError: If the provided color is not recognized.
     """
-
     try:
         return _palette_dict[color]
     except KeyError:
@@ -83,7 +83,6 @@ def _plt_line_styles(line_style: str) -> str:
     Raises:
         KeyError: If the provided line style is not recognized.
     """
-
     try:
         return str(_line_style_dict[line_style])
     except KeyError:
@@ -365,7 +364,6 @@ class BehaviorVisualizer:
             duration_threshold: The duration, in milliseconds, the animal has to maintain the above-threshold speed to
                 get water rewards.
         """
-
         # Does not do anything until the figure is opened (created)
         if not self._is_open:
             return
@@ -393,7 +391,6 @@ class BehaviorVisualizer:
 
     def close(self) -> None:
         """Closes the visualized figure and cleans up the resources used by the class during runtime."""
-
         if self._is_open and self._figure is not None:
             plt.close(self._figure)
             self._is_open = False
@@ -402,7 +399,6 @@ class BehaviorVisualizer:
         """Updates the visualization arrays with data sent from the central runtime class before re-rendering the
         managed plots.
         """
-
         # Rolls arrays by one position to the left, so the first element becomes the last
         self._valve_data = np.roll(self._valve_data, shift=-1)
         self._lick_data = np.roll(self._lick_data, shift=-1)

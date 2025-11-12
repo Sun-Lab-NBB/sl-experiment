@@ -1,5 +1,6 @@
 """This module provides click-based Command-Line Interface (CLI) scripts that allow accessing all user-facing features
-from this library through the terminal."""
+from this library through the terminal.
+"""
 
 from pathlib import Path
 
@@ -43,7 +44,6 @@ def generate_project_data_structure(project: str) -> None:
     that the local machine (PC) is the main PC of the data acquisition system and has a valid acquisition system
     configuration .yaml file.
     """
-
     # Queries the data acquisition configuration data. Specifically, this is used to get the path to the root
     # directory where all projects are stored on the local machine.
     system_configuration = get_system_configuration_data()
@@ -96,7 +96,6 @@ def generate_experiment_configuration_file(project: str, experiment: str, state_
     parameters and state transitions before running the experiment. In a sense, this command acts as an 'experiment
     template' generator.
     """
-
     # Resolves the acquisition system configuration. Uses the path to the local project directory and the project name
     # to determine where to save the experiment configuration file
     acquisition_system = get_system_configuration_data()
@@ -186,7 +185,8 @@ def list_devices(errors: bool) -> None:
 @click.command()
 def list_projects() -> None:
     """Lists the names of all projects that have been configured to work with the acquisition system managed by this
-    PC."""
+    PC.
+    """
     system_configuration = get_system_configuration_data()
     projects = [
         directory.stem for directory in system_configuration.paths.root_directory.iterdir() if directory.is_dir()
@@ -197,8 +197,8 @@ def list_projects() -> None:
         )
     else:
         console.echo(
-            f"The acquisition system managed by this PC does not contain any projects. To add a new project, use the "
-            f"'sl-create-project' CLI command exposed by this library.."
+            "The acquisition system managed by this PC does not contain any projects. To add a new project, use the "
+            "'sl-create-project' CLI command exposed by this library.."
         )
 
 
@@ -212,7 +212,8 @@ def list_projects() -> None:
 )
 def list_experiments(project: str) -> None:
     """Lists the names of all experiment configurations available on the local acquisition system PC for the target
-    project."""
+    project.
+    """
     experiments = get_project_experiments(project=project)
     if len(experiments) > 0:
         console.echo(
@@ -510,7 +511,6 @@ def run_training(
     on the treadmill. Over the course of training, the task requirements are adjusted to ensure the animal performs as
     many laps as possible during experiment sessions lasting ~60 minutes.
     """
-
     # Runs the training session.
     run_training_logic(
         experimenter=user,
@@ -656,7 +656,6 @@ def preprocess_session(session_path: Path) -> None:
     Preprocessing should be carried out immediately after data acquisition to optimize the acquired data for long-term
     storage and distribute it to the NAS and the BioHPC cluster for further processing and storage.
     """
-
     session_path = Path(session_path)  # Ensures the path is wrapped into a Path object instance.
 
     # Restores SessionData from the cache .yaml file.
