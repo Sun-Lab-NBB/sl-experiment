@@ -1,6 +1,4 @@
-"""This module provides interfaces for Zaber controllers and motors used in the Mesoscope-VR data acquisition system.
-Primarily, the module extends the bindings exposed by the ZaberMotion library to work with the specific requirements
-of the Sun lab data collection pipelines."""
+"""This module provides the interfaces for Zaber devices used in the Mesoscope-VR data acquisition system."""
 
 from typing import Any
 from dataclasses import field, dataclass
@@ -10,107 +8,128 @@ from tabulate import tabulate
 from zaber_motion import Tools, Units
 from ataraxis_time import PrecisionTimer
 from zaber_motion.ascii import Axis, Device, Connection, SettingConstants
-from ataraxis_base_utilities import console
+from ataraxis_base_utilities import console, LogLevel
 
 
-def _attempt_connection(port: str) -> dict[int, Any] | str:
-    """Checks the input USB port for Zaber devices (controllers) and parses ID information for any discovered device.
+@dataclass
+class _ZaberAxisData:
+    """Stores the identification data about an axis of a Zaber device."""
+    axis_id: int
+    axis_label: str
+
+
+@dataclass
+class _ZaberDeviceData:
+    """Stores the identification data about a Zaber device."""
+    device_number: int
+    device_id: int
+    label: str
+    name: str
+    axes: list[_ZaberAxisData] = field(default_factory=list)
+
+
+@dataclass
+class _ZaberPortData:
+    """Stores the identification data for all Zaber devices connected to a serial port."""
+    port_name: str
+    devices: list[_ZaberDeviceData] = field(default_factory=list)
+
+    @property
+    def has_devices(self) -> bool:
+        """Returns True if any devices are connected to this port."""
+        return len(self.devices) > 0
+
+
+def _attempt_connection(port: str) -> list[_ZaberDeviceData]:
+    """Checks the specified USB port for Zaber devices and parses identification data for any discovered device.
 
     Args:
-        port: The name of the USB port to scan for Zaber devices (eg: COM1, USB0, etc.).
+        port: The name of the USB port to scan for Zaber devices.
 
     Returns:
-        The dictionary with the ID information of the discovered device(s), if zaber devices were discovered. If zaber
-        devices were not found, returns the error message
+        A list of _ZaberDeviceData instances, one for each discovered device or an empty list if none are discovered.
     """
-    try:
-        # Uses 'with' to automatically close the connection at the end of the runtime. If the port is used by a Zaber
-        # device, this statement will open the connection. Otherwise, the statement will raise an exception
-        # handled below
-        with Connection.open_serial_port(port_name=port, direct=False) as connection:
-            # Detects all devices connected to the port
-            devices = connection.detect_devices()
+    # Uses 'with' to automatically close the connection at the end of the runtime. If the port is used by a Zaber
+    # device, this statement opens the connection. Otherwise, the statement raises an exception.
+    with Connection.open_serial_port(port_name=port, direct=False) as connection:
+        # Detects all devices connected to the port
+        devices = connection.detect_devices()
 
-            # If devices are detected, uses (embedded) dictionary comprehension to parse and save the ID information
-            # about the device and its axes to a dictionary
-            device_dict = {
-                num + 1: {
-                    "ID": device.device_id,
-                    "Label": device.label,
-                    "Name": device.name,
-                    "Axes": [
-                        {"Axis ID": axis_num, "Axis Label": device.get_axis(axis_number=axis_num).label or "Not Used"}
-                        for axis_num in range(1, device.axis_count + 1)
-                    ],
-                }
-                for num, device in enumerate(devices)
-            }
-            return device_dict
+        # Parses device information into _ZaberDeviceData instances
+        device_list = []
+        for num, device in enumerate(devices):
+            axes = [
+                _ZaberAxisData(
+                    axis_id=axis_num,
+                    axis_label=device.get_axis(axis_number=axis_num).label or "Not Used"
+                )
+                for axis_num in range(1, device.axis_count + 1)
+            ]
 
-    # If the port is not connectable via Zaber bindings, returns the formatted error message to the caller.
-    except Exception as e:
-        # Formats and returns the error message to be handled by the caller.
-        return f"Error connecting to port {port}: {e}"
+            device_info = _ZaberDeviceData(
+                device_number=num + 1,
+                device_id=device.device_id,
+                label=device.label,
+                name=device.name,
+                axes=axes
+            )
+            device_list.append(device_info)
+
+        return device_list
 
 
-def _scan_active_ports() -> tuple[dict[str, Any], tuple[str, ...]]:
-    """Scans all available Serial (USB) ports and, for each port, returns the ID data for each connected Zaber device.
-
-    This method is intended to be used during the initial device configuration and testing to quickly discover what
-    Zaber devices are available on the host-system. Additionally, it returns device configuration information, which is
-    helpful during debugging and calibration.
+def _scan_active_ports() -> list[_ZaberPortData]:
+    """Scans all available serial ports for Zaber devices and parses their identification data.
 
     Returns:
-        A tuple with two elements. The first element contains the dictionary that uses port names as keys and either
-        lists all discovered zaber devices alongside their ID information or 'None' if any given port does not have
-        discoverable Zaber devices. The second element is a tuple of error messages encountered during the scan.
+        A list of _ZaberPortData objects, one for each scanned port.
     """
-    # Precreates the dictionary to store discovered device ID dictionaries and a list to store scanning error messages
-    connected_dict = {}
-    error_messages = []
+    port_info_list = []
 
     # Gets the list of serial ports active for the current platform and scans each to determine if any zaber devices
-    # are connected to that port
+    # are connected to that port.
     for port in Tools.list_serial_ports():
-        result = _attempt_connection(port=port)
+        try:
+            devices = _attempt_connection(port=port)
+            port_info = _ZaberPortData(port_name=port, devices=devices)
+        except Exception as e:
+            # Logs connection errors at debug level and creates empty _ZaberPortData instances.
+            console.echo(f"Error connecting to port {port}: {e}.", level=LogLevel.DEBUG)
+            port_info = _ZaberPortData(port_name=port, devices=[])
 
-        # If a particular port did not return a dictionary, sets its ID block to 'No Devices' tag.
-        if isinstance(result, str):
-            connected_dict[port] = "No Devices"
+        port_info_list.append(port_info)
 
-            # Because of how _attempt_connection() works, if the result is not a dictionary, it is necessarily a string
-            # communicating the error message. Adds all received error messages to the error message list.
-            error_messages.append(result)
-        else:
-            # Otherwise, merges each returned dictionary into the overall dictionary.
-            connected_dict[port] = result  # type: ignore
-
-    # Casts the error message list into tuple before returning it to the caller.
-    return connected_dict, tuple(error_messages)
+    return port_info_list
 
 
-def _format_device_info(device_info: dict[str, Any]) -> str:
+def _format_device_info(port_info_list: list[_ZaberPortData]) -> str:
     """Formats the device and axis ID information discovered during port scanning as a table before displaying it to
      the user.
 
     Args:
-        device_info: The dictionary containing the device and axis ID information for each scanned port.
+        port_info_list: A list of _ZaberPortData instances containing device and axis information for each scanned port.
 
     Returns:
         A string containing the formatted device and axis ID information as a table.
     """
-    # Precreates the list used to generate the formatted table
+    # Pre-creates the list used to generate the formatted table
     table_data = []
 
-    # Loops over the dictionary and generates a nice-looking table using the dictionary data.
-    for port, devices in device_info.items():
-        if devices == "No Devices":
-            table_data.append([f"{port}", "No Devices", "", "", "", "", ""])
+    # Format the port scanning data as a table
+    for port_info in port_info_list:
+        if not port_info.has_devices:
+            table_data.append([port_info.port_name, "No Devices", "", "", "", "", ""])
         else:
-            for device_num, device in devices.items():
-                device_row = [f"{port}", f"{device_num}", f"{device['ID']}", f"{device['Label']}", f"{device['Name']}"]
-                for axis in device["Axes"]:
-                    axis_row = device_row + [f"{axis['Axis ID']}", f"{axis['Axis Label']}"]
+            for device in port_info.devices:
+                device_row = [
+                    port_info.port_name,
+                    str(device.device_number),
+                    str(device.device_id),
+                    device.label,
+                    device.name
+                ]
+                for axis in device.axes:
+                    axis_row = device_row + [str(axis.axis_id), axis.axis_label]
                     table_data.append(axis_row)
                     device_row = [""] * 5
         table_data.append([""] * 7)  # Adds an empty row to separate port sections
@@ -124,26 +143,20 @@ def _format_device_info(device_info: dict[str, Any]) -> str:
     )
 
 
-def discover_zaber_devices(silence_errors: bool = True) -> None:
+def discover_zaber_devices() -> None:
     """Scans all available serial ports and displays information about connected Zaber devices.
 
-    Args:
-        silence_errors: Determines whether to display encountered errors. By default, when the discovery process runs
-            into an error, it labels the error port as having no devices and suppresses the error. Enabling this flag
-            will also print encountered error messages, which may be desirable for debugging purposes.
+    Note:
+        Connection errors encountered during scanning are logged at DEBUG level and do not interrupt
+        the discovery process. Ports that cannot be connected are listed as having "No Devices".
     """
-    dictionary, errors = _scan_active_ports()  # Scans all active ports
-    formatted_info = _format_device_info(dictionary)  # Formats the information so that it displays nicely
+    port_info_list = _scan_active_ports()  # Scans all active ports
+    formatted_info = _format_device_info(port_info_list)  # Formats the information so that it displays nicely
 
-    # Prints the formatted table. Since we use external formatting (tabulate), we do not need a console here.
+    # Prints the formatted table. Since the data uses external formatting (tabulate), it does not need to be printed
+    # with the console.
     print("Device and Axis Information:")
     print(formatted_info)
-
-    # If errors were discovered, prints them to the terminal (one per each port)
-    if not silence_errors and errors:
-        print("\nErrors encountered during scan:")
-        for error in errors:
-            print(error)
 
 
 class CRCCalculator:
@@ -183,20 +196,6 @@ class CRCCalculator:
         """
         return self._calculator.checksum(data=bytes(string, "ASCII"))
 
-    def bytes_checksum(self, data: bytes) -> int:
-        """Calculates the CRC32-XFER checksum for the input bytes.
-
-        While the class is primarily designed for generating CRC-checksums for strings, this method can be used to
-        checksum any bytes-converted object.
-
-        Args:
-            data: The bytes-converted data to calculate the CRC checksum for.
-
-        Returns:
-            The integer CRC32-XFER checksum.
-        """
-        return self._calculator.checksum(data=data)
-
 
 @dataclass(frozen=True)
 class _ZaberSettings:
@@ -209,22 +208,10 @@ class _ZaberSettings:
         This class only lists the settings used by the classes of this module and does not cover all available Zaber
         settings.
     """
-
-    device_temperature: str = SettingConstants.SYSTEM_TEMPERATURE
-    """The temperature of the controller device CPU in degrees Celsius."""
-    axis_maximum_speed: str = SettingConstants.MAXSPEED
-    """The maximum speed (velocity) of the motor. During motion, the motor accelerates until it reaches the speed 
-    defined by this parameter.
-    """
-    axis_acceleration: str = SettingConstants.ACCEL
-    """The maximum rate at which the motor increases or decreases its speed during motion. This rate is used to 
-    transition between maximum speed and idleness."""
     axis_maximum_limit: str = SettingConstants.LIMIT_MAX
     """The maximum absolute position the motor is allowed to reach, relative to the home position."""
     axis_minimum_limit: str = SettingConstants.LIMIT_MIN
     """The minimum absolute position the motor is allowed to reach, relative to the home position."""
-    axis_temperature: str = SettingConstants.DRIVER_TEMPERATURE
-    """The temperature of the motor (driver) in degrees Celsius."""
     axis_inversion: str = SettingConstants.DRIVER_DIR
     """A boolean flag that determines whether the motor is inverted (True) or not (False). From the perspective of the 
     motor, this determines whether moving towards home constitutes 'negative' displacement (default) or 'positive' 
@@ -293,7 +280,7 @@ class _ZaberUnits:
     @property
     def displacement_units(self) -> Units:
         """Returns the Units class instance used to work with displacement (length) data."""
-        return self.zaber_units_conversion[self.unit_type]["length"]  # type: ignore
+        return self.zaber_units_conversion[self.unit_type]["length"]  
 
     @property
     def acceleration_units(self) -> Units:
@@ -301,7 +288,7 @@ class _ZaberUnits:
 
         Note, all acceleration units are given in units / seconds^2.
         """
-        return self.zaber_units_conversion[self.unit_type]["acceleration"]  # type: ignore
+        return self.zaber_units_conversion[self.unit_type]["acceleration"]  
 
     @property
     def velocity_units(self) -> Units:
@@ -309,7 +296,7 @@ class _ZaberUnits:
 
         Note, all velocity units are given in units / seconds.
         """
-        return self.zaber_units_conversion[self.unit_type]["velocity"]  # type: ignore
+        return self.zaber_units_conversion[self.unit_type]["velocity"]  
 
 
 class ZaberAxis:
