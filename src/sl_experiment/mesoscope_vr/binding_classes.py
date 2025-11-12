@@ -83,30 +83,30 @@ class ZaberMotors:
 
         # Initializes the connection classes first to ensure all classes exist in case the runtime encounters
         # an error during connection.
-        self._headbar: ZaberConnection = ZaberConnection(port=system_configuration.additional_firmware.headbar_port)
-        self._wheel: ZaberConnection = ZaberConnection(port=system_configuration.additional_firmware.wheel_port)
-        self._lickport: ZaberConnection = ZaberConnection(port=system_configuration.additional_firmware.lickport_port)
+        self._headbar: ZaberConnection = ZaberConnection(port=system_configuration.assets.headbar_port)
+        self._wheel: ZaberConnection = ZaberConnection(port=system_configuration.assets.wheel_port)
+        self._lickport: ZaberConnection = ZaberConnection(port=system_configuration.assets.lickport_port)
 
         # HeadBar controller (zaber). This is an assembly of 3 zaber controllers (devices) that allow moving the
         # headbar attached to the mouse's head in Z, Roll, and Pitch axes. Note, this assumes that the chaining
         # order of individual zaber devices is fixed and is always Z-Pitch-Roll.
         self._headbar.connect()
-        self._headbar_z: ZaberAxis = self._headbar.get_device(0).axis
-        self._headbar_pitch: ZaberAxis = self._headbar.get_device(1).axis
-        self._headbar_roll: ZaberAxis = self._headbar.get_device(2).axis
+        self._headbar_z: ZaberAxis = self._headbar.get_device(index=0).axis
+        self._headbar_pitch: ZaberAxis = self._headbar.get_device(index=1).axis
+        self._headbar_roll: ZaberAxis = self._headbar.get_device(index=2).axis
 
         # Lickport controller (zaber). This is an assembly of 3 zaber controllers (devices) that allow moving the
         # lick tube in Z, X, and Y axes. Note, this assumes that the chaining order of individual zaber devices is
         # fixed and is always Z-X-Y.
         self._lickport.connect()
-        self._lickport_z: ZaberAxis = self._lickport.get_device(0).axis
-        self._lickport_y: ZaberAxis = self._lickport.get_device(1).axis
-        self._lickport_x: ZaberAxis = self._lickport.get_device(2).axis
+        self._lickport_z: ZaberAxis = self._lickport.get_device(index=0).axis
+        self._lickport_y: ZaberAxis = self._lickport.get_device(index=1).axis
+        self._lickport_x: ZaberAxis = self._lickport.get_device(index=2).axis
 
         # Wheel controller (zaber). Currently, this assembly includes a single controller (device) that allows moving
         # the running wheel in the X axis.
         self._wheel.connect()
-        self._wheel_x: ZaberAxis = self._wheel.get_device(0).axis
+        self._wheel_x: ZaberAxis = self._wheel.get_device(index=0).axis
 
         # If the previous positions path points to an existing .yaml file, loads the data from the file into
         # _ZaberPositions instance. Otherwise, sets the previous_positions attribute to None to indicate there are no
@@ -145,53 +145,39 @@ class ZaberMotors:
         # the only difference between parking and mounting positions is that the mounting position is retracted further
         # away from the animal than the parking position.
         self._headbar_z.move(
-            amount=self._headbar_z.mount_position
+            position=self._headbar_z.mount_position
             if self._previous_positions is None
             else self._previous_positions.headbar_z,
-            absolute=True,
-            native=True,
         )
         self._headbar_pitch.move(
-            amount=self._headbar_pitch.mount_position
+            position=self._headbar_pitch.mount_position
             if self._previous_positions is None
             else self._previous_positions.headbar_pitch,
-            absolute=True,
-            native=True,
         )
         self._headbar_roll.move(
-            amount=self._headbar_roll.mount_position
+            position=self._headbar_roll.mount_position
             if self._previous_positions is None
             else self._previous_positions.headbar_roll,
-            absolute=True,
-            native=True,
         )
         self._wheel_x.move(
-            amount=self._wheel_x.mount_position
+            position=self._wheel_x.mount_position
             if self._previous_positions is None
             else self._previous_positions.wheel_x,
-            absolute=True,
-            native=True,
         )
         self._lickport_z.move(
-            amount=self._lickport_z.park_position
+            position=self._lickport_z.park_position
             if self._previous_positions is None
             else self._previous_positions.lickport_z,
-            absolute=True,
-            native=True,
         )
         self._lickport_x.move(
-            amount=self._lickport_x.park_position
+            position=self._lickport_x.park_position
             if self._previous_positions is None
             else self._previous_positions.lickport_x,
-            absolute=True,
-            native=True,
         )
         self._lickport_y.move(
-            amount=self._lickport_y.park_position
+            position=self._lickport_y.park_position
             if self._previous_positions is None
             else self._previous_positions.lickport_y,
-            absolute=True,
-            native=True,
         )
 
         # Waits for all motors to finish moving before returning to caller.
@@ -243,13 +229,13 @@ class ZaberMotors:
         self.unpark_motors()
 
         # Moves all Zaber motors to their parking positions
-        self._headbar_z.move(amount=self._headbar_z.park_position, absolute=True, native=True)
-        self._headbar_pitch.move(amount=self._headbar_pitch.park_position, absolute=True, native=True)
-        self._headbar_roll.move(amount=self._headbar_roll.park_position, absolute=True, native=True)
-        self._wheel_x.move(amount=self._wheel_x.park_position, absolute=True, native=True)
-        self._lickport_z.move(amount=self._lickport_z.park_position, absolute=True, native=True)
-        self._lickport_x.move(amount=self._lickport_x.park_position, absolute=True, native=True)
-        self._lickport_y.move(amount=self._lickport_y.park_position, absolute=True, native=True)
+        self._headbar_z.move(position=self._headbar_z.park_position)
+        self._headbar_pitch.move(position=self._headbar_pitch.park_position)
+        self._headbar_roll.move(position=self._headbar_roll.park_position)
+        self._wheel_x.move(position=self._wheel_x.park_position)
+        self._lickport_z.move(position=self._lickport_z.park_position)
+        self._lickport_x.move(position=self._lickport_x.park_position)
+        self._lickport_y.move(position=self._lickport_y.park_position)
 
         # Waits for all motors to finish moving before returning to caller.
         self.wait_until_idle()
@@ -274,13 +260,13 @@ class ZaberMotors:
         self.unpark_motors()
 
         # Moves all motors to their maintenance positions
-        self._headbar_z.move(amount=self._headbar_z.valve_position, absolute=True, native=True)
-        self._headbar_pitch.move(amount=self._headbar_pitch.valve_position, absolute=True, native=True)
-        self._headbar_roll.move(amount=self._headbar_roll.valve_position, absolute=True, native=True)
-        self._wheel_x.move(amount=self._wheel_x.valve_position, absolute=True, native=True)
-        self._lickport_z.move(amount=self._lickport_z.valve_position, absolute=True, native=True)
-        self._lickport_x.move(amount=self._lickport_x.valve_position, absolute=True, native=True)
-        self._lickport_y.move(amount=self._lickport_y.valve_position, absolute=True, native=True)
+        self._headbar_z.move(position=self._headbar_z.maintenance_position)
+        self._headbar_pitch.move(position=self._headbar_pitch.maintenance_position)
+        self._headbar_roll.move(position=self._headbar_roll.maintenance_position)
+        self._wheel_x.move(position=self._wheel_x.maintenance_position)
+        self._lickport_z.move(position=self._lickport_z.maintenance_position)
+        self._lickport_x.move(position=self._lickport_x.maintenance_position)
+        self._lickport_y.move(position=self._lickport_y.maintenance_position)
 
         # Waits for all motors to finish moving before returning to caller.
         self.wait_until_idle()
@@ -301,25 +287,25 @@ class ZaberMotors:
         self.unpark_motors()
 
         # Moves all lickport motors to the mount position
-        self._lickport_z.move(amount=self._lickport_z.mount_position, absolute=True, native=True)
-        self._lickport_x.move(amount=self._lickport_x.mount_position, absolute=True, native=True)
-        self._lickport_y.move(amount=self._lickport_y.mount_position, absolute=True, native=True)
+        self._lickport_z.move(position=self._lickport_z.mount_position)
+        self._lickport_x.move(position=self._lickport_x.mount_position)
+        self._lickport_y.move(position=self._lickport_y.mount_position)
 
         # If previous positions are not available, moves the rest of the motors to the default mounting positions
         if self._previous_positions is None:
-            self._headbar_z.move(amount=self._headbar_z.mount_position, absolute=True, native=True)
-            self._headbar_pitch.move(amount=self._headbar_pitch.mount_position, absolute=True, native=True)
-            self._headbar_roll.move(amount=self._headbar_roll.mount_position, absolute=True, native=True)
-            self._wheel_x.move(amount=self._wheel_x.mount_position, absolute=True, native=True)
+            self._headbar_z.move(position=self._headbar_z.mount_position)
+            self._headbar_pitch.move(position=self._headbar_pitch.mount_position)
+            self._headbar_roll.move(position=self._headbar_roll.mount_position)
+            self._wheel_x.move(position=self._wheel_x.mount_position)
 
         # If previous positions are available, restores other motors to the position used during the previous runtime.
         # This relies on the idea that mounting is primarily facilitated by moving the lickport away, while all mouse
         # positioning motors can be set to the parameters optimal for the mouse being mounted.
         else:
-            self._headbar_z.move(amount=self._previous_positions.headbar_z, absolute=True, native=True)
-            self._headbar_pitch.move(amount=self._previous_positions.headbar_pitch, absolute=True, native=True)
-            self._headbar_roll.move(amount=self._previous_positions.headbar_roll, absolute=True, native=True)
-            self._wheel_x.move(amount=self._previous_positions.wheel_x, absolute=True, native=True)
+            self._headbar_z.move(position=self._previous_positions.headbar_z)
+            self._headbar_pitch.move(position=self._previous_positions.headbar_pitch)
+            self._headbar_roll.move(position=self._previous_positions.headbar_roll)
+            self._wheel_x.move(position=self._previous_positions.wheel_x)
 
         # Waits for all motors to finish moving before returning to caller.
         self.wait_until_idle()
@@ -343,9 +329,9 @@ class ZaberMotors:
         self.unpark_motors()
 
         # Moves the lick-port back to the mount position, while keeping all other motors in their current positions.
-        self._lickport_y.move(amount=self._lickport_y.mount_position, absolute=True, native=True)
-        self._lickport_z.move(amount=self._lickport_z.mount_position, absolute=True, native=True)
-        self._lickport_x.move(amount=self._lickport_x.mount_position, absolute=True, native=True)
+        self._lickport_y.move(position=self._lickport_y.mount_position)
+        self._lickport_z.move(position=self._lickport_z.mount_position)
+        self._lickport_x.move(position=self._lickport_x.mount_position)
 
         # Waits for all motors to finish moving before returning to caller.
         self.wait_until_idle()
@@ -362,13 +348,13 @@ class ZaberMotors:
         generated snapshot. Primarily, this has to be done to support the Zaber motor shutdown sequence.
         """
         self._previous_positions = ZaberPositions(
-            headbar_z=int(self._headbar_z.get_position(native=True)),
-            headbar_pitch=int(self._headbar_pitch.get_position(native=True)),
-            headbar_roll=int(self._headbar_roll.get_position(native=True)),
-            wheel_x=int(self._wheel_x.get_position(native=True)),
-            lickport_z=int(self._lickport_z.get_position(native=True)),
-            lickport_x=int(self._lickport_x.get_position(native=True)),
-            lickport_y=int(self._lickport_y.get_position(native=True)),
+            headbar_z=int(self._headbar_z.get_position()),
+            headbar_pitch=int(self._headbar_pitch.get_position()),
+            headbar_roll=int(self._headbar_roll.get_position()),
+            wheel_x=int(self._wheel_x.get_position()),
+            lickport_z=int(self._lickport_z.get_position()),
+            lickport_x=int(self._lickport_x.get_position()),
+            lickport_y=int(self._lickport_y.get_position()),
         )
         return self._previous_positions
 

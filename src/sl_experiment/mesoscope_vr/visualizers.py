@@ -344,13 +344,13 @@ class BehaviorVisualizer:
         self._sample_data()
 
         # Updates the artists with new data
-        self._lick_line.set_data(self._timestamps, self._lick_data)  # type: ignore
-        self._valve_line.set_data(self._timestamps, self._valve_data)  # type: ignore
-        self._speed_line.set_data(self._timestamps, self._speed_data)  # type: ignore
+        self._lick_line.set_data(self._timestamps, self._lick_data)
+        self._valve_line.set_data(self._timestamps, self._valve_data)
+        self._speed_line.set_data(self._timestamps, self._speed_data)
 
         # Renders the changes
-        self._figure.canvas.draw()  # type: ignore
-        self._figure.canvas.flush_events()  # type: ignore
+        self._figure.canvas.draw()
+        self._figure.canvas.flush_events()
 
     def update_run_training_thresholds(self, speed_threshold: np.float64, duration_threshold: np.float64) -> None:
         """Updates the running speed and duration threshold lines to use the input anchor values.
@@ -372,22 +372,22 @@ class BehaviorVisualizer:
         duration_threshold /= 1000
 
         # Updates line position(s)
-        self._speed_threshold_line.set_ydata([speed_threshold, speed_threshold])  # type: ignore
-        self._duration_threshold_line.set_xdata([-duration_threshold, -duration_threshold])  # type: ignore
+        self._speed_threshold_line.set_ydata([speed_threshold, speed_threshold])
+        self._duration_threshold_line.set_xdata([-duration_threshold, -duration_threshold])
 
         # Updates text annotations with current threshold values
-        self._speed_threshold_text.set_text(f"Target speed: {speed_threshold:.2f} cm/s")  # type: ignore
-        self._duration_threshold_text.set_text(f"Target duration: {duration_threshold:.2f} s")  # type: ignore
+        self._speed_threshold_text.set_text(f"Target speed: {speed_threshold:.2f} cm/s")
+        self._duration_threshold_text.set_text(f"Target duration: {duration_threshold:.2f} s")
 
         # This ensures the visibility is only changed once during runtime
         if self._once:
-            self._speed_threshold_line.set_visible(True)  # type: ignore
-            self._duration_threshold_line.set_visible(True)  # type: ignore
+            self._speed_threshold_line.set_visible(True)
+            self._duration_threshold_line.set_visible(True)
             self._once = False
 
         # Renders the changes
-        self._figure.canvas.draw()  # type: ignore
-        self._figure.canvas.flush_events()  # type: ignore
+        self._figure.canvas.draw()
+        self._figure.canvas.flush_events()
 
     def close(self) -> None:
         """Closes the visualized figure and cleans up the resources used by the class during runtime."""

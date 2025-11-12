@@ -13,7 +13,7 @@ def get_version_data() -> tuple[str, str]:
     version.
     """
     # Determines the local Python version and the version of the sl-experiment library.
-    sl_experiment_version = _metadata("sl-experiment")["version"]  # type: ignore
+    sl_experiment_version = _metadata("sl-experiment")["version"]
     python_version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"  # Python version
     return python_version, sl_experiment_version
 

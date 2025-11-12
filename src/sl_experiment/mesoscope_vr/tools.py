@@ -1182,8 +1182,8 @@ class _ControlUIWindow(QMainWindow):
             self.guidance_btn.setObjectName("guidanceButton")
 
         # Refresh styles after object name change
-        self.guidance_btn.style().unpolish(self.guidance_btn)  # type: ignore
-        self.guidance_btn.style().polish(self.guidance_btn)  # type: ignore
+        self.guidance_btn.style().unpolish(self.guidance_btn)
+        self.guidance_btn.style().polish(self.guidance_btn)
         self.guidance_btn.update()  # Forces update to apply new styles
 
     def _toggle_guidance(self) -> None:
@@ -1206,8 +1206,8 @@ class _ControlUIWindow(QMainWindow):
             self.runtime_status_label.setStyleSheet("QLabel { color: #27ae60; font-weight: bold; }")
 
         # Refresh styles after object name change
-        self.pause_btn.style().unpolish(self.pause_btn)  # type: ignore
-        self.pause_btn.style().polish(self.pause_btn)  # type: ignore
+        self.pause_btn.style().unpolish(self.pause_btn)
+        self.pause_btn.style().polish(self.pause_btn)
         self.pause_btn.update()  # Forces update to apply new styles
 
     def _toggle_reward_visibility(self) -> None:
@@ -1223,8 +1223,8 @@ class _ControlUIWindow(QMainWindow):
             self.reward_visibility_btn.setObjectName("showRewardButton")
 
         # Refresh styles after object name change
-        self.reward_visibility_btn.style().unpolish(self.reward_visibility_btn)  # type: ignore
-        self.reward_visibility_btn.style().polish(self.reward_visibility_btn)  # type: ignore
+        self.reward_visibility_btn.style().unpolish(self.reward_visibility_btn)
+        self.reward_visibility_btn.style().polish(self.reward_visibility_btn)
         self.reward_visibility_btn.update()  # Forces update to apply new styles
 
 

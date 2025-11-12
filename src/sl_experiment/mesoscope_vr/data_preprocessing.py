@@ -171,7 +171,7 @@ def _process_stack(
 
         # Loops over each page in the stack and extracts the metadata associated with each frame
         for i, page in enumerate(stack.pages):
-            metadata = page.tags["ImageDescription"].value  # type: ignore
+            metadata = page.tags["ImageDescription"].value
 
             # The metadata is returned as a 'newline'-delimited string of key=value pairs. This preprocessing header
             # splits the string into separate key=value pairs. Then, each pair is further separated and processed as
@@ -448,7 +448,7 @@ def _process_invariant_metadata(file: Path, ops_path: Path, metadata_path: Path)
 
     # Also uses extracted metadata to generate the ops.json configuration file for scanImage processing.
     _generate_ops(
-        metadata=metadata,  # type: ignore
+        metadata=metadata,
         frame_data=frame_data,
         ops_path=ops_path,
     )
@@ -754,8 +754,8 @@ def _preprocess_mesoscope_directory(
             tiff_files.remove(file)
 
     # Converts to tuple for efficiency
-    tiff_files = tuple(tiff_files)  # type: ignore
-    frame_numbers = tuple(frame_numbers)  # type: ignore
+    tiff_files = tuple(tiff_files)
+    frame_numbers = tuple(frame_numbers)
 
     # Ends the runtime early if there are no valid TIFF files to process after filtering
     if len(tiff_files) == 0:
@@ -895,11 +895,11 @@ def _resolve_telomere_marker(session_data: SessionData) -> None:
     descriptor_path = Path(session_data.raw_data.session_descriptor_path)
     descriptor: RunTrainingDescriptor | LickTrainingDescriptor | MesoscopeExperimentDescriptor
     if session_data.session_type == SessionTypes.LICK_TRAINING:
-        descriptor = LickTrainingDescriptor.from_yaml(descriptor_path)  # type: ignore
+        descriptor = LickTrainingDescriptor.from_yaml(descriptor_path)
     elif session_data.session_type == SessionTypes.RUN_TRAINING:
-        descriptor = RunTrainingDescriptor.from_yaml(descriptor_path)  # type: ignore
+        descriptor = RunTrainingDescriptor.from_yaml(descriptor_path)
     elif session_data.session_type == SessionTypes.MESOSCOPE_EXPERIMENT:
-        descriptor = MesoscopeExperimentDescriptor.from_yaml(descriptor_path)  # type: ignore
+        descriptor = MesoscopeExperimentDescriptor.from_yaml(descriptor_path)
     else:
         # Aborts early (without creating the telomere.bin marker file) for any other session type. This statically
         # ignores the descriptor of the Window Checking sessions, as all window checking sessions are considered
@@ -939,15 +939,13 @@ def _preprocess_google_sheet_data(session_data: SessionData) -> None:
     descriptor: RunTrainingDescriptor | LickTrainingDescriptor | MesoscopeExperimentDescriptor
     quality: str | int = ""
     if session_data.session_type == SessionTypes.LICK_TRAINING:
-        descriptor = LickTrainingDescriptor.from_yaml(descriptor_path)  # type: ignore
+        descriptor = LickTrainingDescriptor.from_yaml(descriptor_path)
     elif session_data.session_type == SessionTypes.RUN_TRAINING:
-        descriptor = RunTrainingDescriptor.from_yaml(descriptor_path)  # type: ignore
+        descriptor = RunTrainingDescriptor.from_yaml(descriptor_path)
     elif session_data.session_type == SessionTypes.MESOSCOPE_EXPERIMENT:
-        descriptor = MesoscopeExperimentDescriptor.from_yaml(descriptor_path)  # type: ignore
+        descriptor = MesoscopeExperimentDescriptor.from_yaml(descriptor_path)
     elif session_data.session_type == SessionTypes.WINDOW_CHECKING:
-        window_descriptor: WindowCheckingDescriptor = WindowCheckingDescriptor.from_yaml(  # type: ignore
-            descriptor_path
-        )
+        window_descriptor: WindowCheckingDescriptor = WindowCheckingDescriptor.from_yaml(descriptor_path)
 
         # Ensures that the quality is always between 0 and 3 inclusive
         quality = int(np.clip(np.uint8(window_descriptor.surgery_quality), a_min=np.uint8(0), a_max=np.uint8(3)))
