@@ -879,7 +879,7 @@ class ValveInterface(ModuleInterface):
                 )
             )
             pulse_duration: np.uint32 = self.get_duration_from_volume(target_volume=volume)
-            self.send_parameters(parameter_data=(pulse_duration, np.uint16(200), tone_duration))
+            self.send_parameters(parameter_data=(pulse_duration, self._calibration_count, tone_duration))
 
         self.send_command(command=self._reward, noblock=_FALSE, repetition_delay=_ZERO_UINT32)
 
@@ -904,7 +904,7 @@ class ValveInterface(ModuleInterface):
                     convert_time(time=tone_duration, from_units=TimeUnits.MILLISECOND, to_units=TimeUnits.MICROSECOND)
                 )
             )
-            self.send_parameters(parameter_data=(pulse_duration, np.uint16(200), tone_duration))
+            self.send_parameters(parameter_data=(pulse_duration, self._calibration_count, tone_duration))
 
         self.send_command(command=self._tone, noblock=_FALSE, repetition_delay=_ZERO_UINT32)
 
@@ -918,19 +918,20 @@ class ValveInterface(ModuleInterface):
 
         # Always uses the same configuration: 5.0 uL and 200 pulses.
         self.send_parameters(
-            parameter_data=(self.get_duration_from_volume(target_volume=5.0), np.uint16(200), _ZERO_UINT32)
+            parameter_data=(self.get_duration_from_volume(target_volume=5.0), self._calibration_count, _ZERO_UINT32)
         )
         self.send_command(command=self._calibrate, noblock=_FALSE, repetition_delay=_ZERO_UINT32)
-        self._valve_tracker[1] = 0  # Indicates that the valve has entered the refencing (fancy calibration) cycle.
+        self._valve_tracker[1] = 0  # Indicates that the valve has entered the refencing cycle.
 
-    def calibrate_valve(self, pulse_duration: int = 15) -> None:
-        """Repeatedly opens the valve for the requested number of microseconds to determine the volume of fluid
+    def calibrate_valve(self, pulse_duration: int) -> None:
+        """Repeatedly opens the valve for the requested number of milliseconds to determine the volume of fluid
         dispensed through the valve during this period of time.
 
         Args:
             pulse_duration: The duration, in milliseconds, to keep the valve open at each calibration cycle.
         """
-        self.send_parameters(parameter_data=(np.uint32(pulse_duration * 1000), np.uint16(200), _ZERO_UINT32))
+        # Converts the pulse duration to microseconds before updating the valve's parameters.
+        self.send_parameters(parameter_data=(np.uint32(pulse_duration * 1000), self._calibration_count, _ZERO_UINT32))
         self.send_command(command=self._calibrate, noblock=_FALSE, repetition_delay=_ZERO_UINT32)
         self._valve_tracker[1] = 0  # Indicates that the valve has entered the calibration cycle.
 
@@ -950,8 +951,7 @@ class ValveInterface(ModuleInterface):
         """
         # Determines the minimum valid pulse duration. This is hardcoded at 10 ms as this is the lower calibration
         # boundary.
-        min_pulse_duration = 10.0  # microseconds
-        min_dispensed_volume = self._scale_coefficient * np.power(min_pulse_duration, self._nonlinearity_exponent)
+        min_dispensed_volume = self._scale_coefficient * np.power(10.0, self._nonlinearity_exponent)
 
         if target_volume < min_dispensed_volume:
             message = (
