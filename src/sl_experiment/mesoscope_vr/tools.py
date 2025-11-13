@@ -1,7 +1,4 @@
-"""This module provides additional tools and classes used by other modules of the mesoscope_vr package. Primarily, this
-includes various dataclasses specific to the Mesoscope-VR systems and utility functions used by other package modules.
-The contents of this module are not intended to be used outside the mesoscope_vr package.
-"""
+"""This module provides utility assets shared by other modules of the mesoscope_vr package."""
 
 import sys
 from pathlib import Path
@@ -30,54 +27,63 @@ from ataraxis_data_structures import SharedMemoryArray
 
 
 def get_system_configuration() -> MesoscopeSystemConfiguration:
-    """Verifies that the current data acquisition system is the Mesoscope-VR and returns its configuration data.
+    """Verifies that the host-machine belongs to the Mesoscope-VR data acquisition system and loads the
+    system configuration data as a MesoscopeSystemConfiguration instance.
+
+    Returns:
+        The data acquisition system configuration data as a MesoscopeSystemConfiguration instance.
 
     Raises:
-        ValueError: If the local data acquisition system is not a Mesoscope-VR system.
+        ValueError: If the host-machine does not belong to the Mesoscope-VR data acquisition system.
     """
     system_configuration = get_system_configuration_data()
     if not isinstance(system_configuration, MesoscopeSystemConfiguration):
         message = (
-            "Unable to instantiate the MesoscopeData class, as the local data acquisition system is not a "
-            "Mesoscope-VR system. This either indicates a user error (calling incorrect Data class) or local data "
-            "acquisition system misconfiguration. To reconfigured the data-acquisition system, use the "
-            "sl-create-system-config' CLI command."
+            f"Unable to resolve the configuration for the Mesoscope-VR data acquisition system, as the host-machine "
+            f"belongs to the {system_configuration.name} data acquisition system. Use the 'sl-configure system' CLI "
+            f"command to reconfigure the host-machine to belong the Mesoscope-VR data acquisition system."
         )
         console.error(message, error=ValueError)
+
+        # Fallback to appease mypy, should not be reachable
+        raise ValueError(message)  # pragma: no cover
     return system_configuration
+
+
+mesoscope_vr_sessions: tuple[str, str, str, str] = (
+    SessionTypes.LICK_TRAINING,
+    SessionTypes.RUN_TRAINING,
+    SessionTypes.MESOSCOPE_EXPERIMENT,
+    SessionTypes.WINDOW_CHECKING,
+)
+"""Defines the data acquisition session types supported by the Mesoscope-VR data acquisition system."""
 
 
 @dataclass()
 class _VRPCPersistentData:
-    """Stores the paths to the directories and files that make up the 'persistent_data' directory on the VRPC.
-
-    VRPC persistent data directory is used to preserve configuration data, such as the positions of Zaber motors and
-    Meososcope objective, so that they can be reused across sessions of the same animals. The data in this directory
-    is read at the beginning of each session and replaced at the end of each session.
+    """Defines the layout of the VRPC's 'persistent_data' directory, used to cache animal-specific runtime parameters
+    between data acquisition sessions.
     """
 
     session_type: str
-    """Stores the type of the Mesoscope-VR-compatible session for which this additional dataclass is instantiated. This 
-    is used to resolve the cached session_Descriptor instance, as different session types use different descriptor 
-    files."""
+    """The type of the data acquisition session for which this instance was initialized."""
     persistent_data_path: Path
-    """Stores the path to the project- and animal-specific 'persistent_data' directory relative to the VRPC root."""
+    """The path to the project- and animal-specific directory that stores the VRPC runtime parameters and data cached 
+    between data acquisition runtimes."""
     zaber_positions_path: Path = field(default_factory=Path, init=False)
-    """Stores the path to the Zaber motor positions snapshot generated at the end of the previous session runtime. This 
-    is used to automatically restore all Zaber motors to the same position across all sessions."""
+    """The path to the .YAML file that stores Zaber motor positions used during the previous session's runtime."""
     mesoscope_positions_path: Path = field(default_factory=Path, init=False)
-    """Stores the path to the Mesoscope positions snapshot generated at the end of the previous session runtime. This 
-    is used to help the user to (manually) restore the Mesoscope to the same position across all sessions."""
+    """The path to the .YAML file that stores the Mesoscope's imaging axis coordinates used during the previous 
+    session's runtime."""
     session_descriptor_path: Path = field(default_factory=Path, init=False)
-    """Stores the path to the session_descriptor.yaml file generated at the end of the previous session runtime. This 
-    is used to automatically restore session runtime parameters used during the previous session. Primarily, this is 
-    used during animal training."""
+    """The path to the .YAML file that stores the data acquisition session's task parameters used during the previous 
+    session's runtime."""
     window_screenshot_path: Path = field(default_factory=Path, init=False)
-    """Stores the path to the window_screenshot.png file. This is a screenshot of the red-dot alignment, the 
-    ScanImage acquisition parameters, and the state of the imaged ROIs from the previous session. The screenshots are 
-    used to restore the imaging parameters to the same state as used during the previous session."""
+    """The path to the .PNG file that stores the screenshot of the imaging window, the red-dot alignment state, and the 
+    Mesoscope's data-acquisition configuration used during the previous session's runtime."""
 
     def __post_init__(self) -> None:
+        """Resolves the managed directory layout, creating any missing directory components."""
         # Resolves paths that can be derived from the root path.
         self.zaber_positions_path = self.persistent_data_path.joinpath("zaber_positions.yaml")
         self.mesoscope_positions_path = self.persistent_data_path.joinpath("mesoscope_positions.yaml")
@@ -85,88 +91,69 @@ class _VRPCPersistentData:
 
         # Resolves the session descriptor path based on the session type.
         if self.session_type == SessionTypes.LICK_TRAINING:
-            self.session_descriptor_path = self.persistent_data_path.joinpath("lick_training_session_descriptor.yaml")
+            self.session_descriptor_path = self.persistent_data_path.joinpath("lick_training_descriptor.yaml")
         elif self.session_type == SessionTypes.RUN_TRAINING:
-            self.session_descriptor_path = self.persistent_data_path.joinpath("run_training_session_descriptor.yaml")
+            self.session_descriptor_path = self.persistent_data_path.joinpath("run_training_descriptor.yaml")
         elif self.session_type == SessionTypes.MESOSCOPE_EXPERIMENT:
-            self.session_descriptor_path = self.persistent_data_path.joinpath(
-                "mesoscope_experiment_session_descriptor.yaml"
-            )
+            self.session_descriptor_path = self.persistent_data_path.joinpath("mesoscope_experiment_descriptor.yaml")
         elif self.session_type == SessionTypes.WINDOW_CHECKING:
-            self.session_descriptor_path = self.persistent_data_path.joinpath("window_checking_session_descriptor.yaml")
+            self.session_descriptor_path = self.persistent_data_path.joinpath("window_checking_descriptor.yaml")
 
         else:  # Raises an error for unsupported session types
             message = (
-                f"Unsupported session type '{self.session_type}' encountered when initializing additional path "
-                f"dataclasses for the Mesoscope-VR data acquisition system. Supported session types are "
-                f"'lick training', 'run training', 'window checking' and 'mesoscope experiment'."
+                f"Unsupported session type '{self.session_type}' encountered when resolving the filesystem layout for "
+                f"the Mesoscope-VR data acquisition system. Currently, only the following data acquisition session "
+                f"types are supported: {','.join(mesoscope_vr_sessions)}."
             )
             console.error(message, error=ValueError)
 
-        # Ensures that the target persistent directory exists
+        # Ensures that the target persistent_data directory exists
         ensure_directory_exists(self.persistent_data_path)
 
 
 @dataclass()
 class _ScanImagePCData:
-    """Stores the paths to the directories and files that make up the 'meso_data' directory on the ScanImagePC.
-
-    During runtime, the ScanImagePC should organize all collected data under this root directory. During preprocessing,
-    the VRPC uses SMB to access the data in this directory and merge it into the 'raw_data' session directory. The root
-    ScanImagePC directory also includes the persistent_data directories for all animals and projects whose data is
-    acquired via the Mesoscope-VR system.
+    """Defines the layout of the ScanImagePC's 'meso_data' directory used to aggregate all Mesoscope-acquired data
+    during a data acquisition session's runtime.
     """
 
-    session_name: str
-    """Stores the name of the session for which this data management class is instantiated. This is used to rename the 
-    general mesoscope data directory on the ScanImagePC to include the session-specific name."""
+    session: str
+    """The unique identifier of the session for which this instance was initialized."""
     meso_data_path: Path
-    """Stores the path to the root ScanImagePC data directory, mounted to the VRPC filesystem via the SMB or equivalent 
-    protocol. All mesoscope-generated data is stored under this root directory before it is merged into the VRPC-managed
-    raw_data directory of each session."""
+    """The path to the root ScanImagePC data-output directory."""
     persistent_data_path: Path
-    """Stores the path to the project- and animal-specific 'persistent_data' directory relative to the ScanImagePC 
-    root directory ('meso-data' directory)."""
+    """The path to the project- and animal-specific directory that stores the ScanImagePC (Mesoscope) runtime parameters
+    and data cached between data acquisition runtimes."""
     mesoscope_data_path: Path = field(default_factory=Path, init=False)
-    """Stores the path to the 'default' mesoscope_data directory. All experiment sessions across all animals and 
-    projects use the same mesoscope_data directory to save the data generated by the mesoscope via ScanImage 
-    software. This simplifies ScanImagePC configuration process during runtime, as all data is always saved in the same
-    directory. During preprocessing, the data is moved from the default directory first into a session-specific 
-    ScanImagePC directory and then into the VRPC raw_data session directory."""
+    """The path to the directory used by the Mesoscope to save all acquired data during the acquisition session's 
+    runtime, which is shared by all data acquisition sessions."""
     session_specific_path: Path = field(default_factory=Path, init=False)
-    """Stores the path to the session-specific data directory. This directory is generated at the end of each experiment
-    runtime to prepare mesoscope data for being moved to the VRPC-managed raw_data directory and to reset the 'default' 
-    mesoscope_data directory for the next session's runtime."""
+    """The path to the session-specific directory where all Mesoscope-acquired data is moved at the end of each data 
+    acquisition session's runtime."""
     ubiquitin_path: Path = field(default_factory=Path, init=False)
-    """Stores the path to the 'ubiquitin.bin' file. This file is automatically generated inside the session-specific 
-    data directory after its contents are safely transferred to the VRPC as part of preprocessing. During redundant data
-    removal step of preprocessing, the VRPC searches for directories marked with ubiquitin.bin and deletes them from the
-    ScanImagePC filesystem."""
+    """The path to the 'ubiquitin.bin' file used to mark session-specific ScanImagePC directories for deletion once 
+    the data is safely transferred to the VRPC."""
     motion_estimator_path: Path = field(default_factory=Path, init=False)
-    """Stores the path to the 'reference' motion estimator file generated during the first experiment session of each 
-    animal. This file is kept on the ScanImagePC to image the same population of cells across all experiment 
-    sessions."""
+    """The path top the animal-specific reference .ME (motion estimator) file, used to align the Mesoscope's imaging 
+    field to the same view across all data acquisition sessions."""
     roi_path: Path = field(default_factory=Path, init=False)
-    """Stores the path to the 'reference' fov.roi file generated during the first experiment session of each animal. 
-    This file is kept on the ScanImagePC in addition to the motion estimator file. It contains the snapshot of the 
-    ROI used during imaging."""
+    """The path top the animal-specific reference .ROI (Region-of-Interest) file, used to restore the same imaging 
+    field across all data acquisition sessions."""
     kinase_path: Path = field(default_factory=Path, init=False)
-    """Stores the path to the 'kinase.bin' file. The MATLAB runtime function (setupAcquisition.m) that runs on the 
-    ScanImagePC uses the presence of the file as a signal that the VRPC is currently acquiring a session. In turn, this
-    locks the function into data acquisition mode until the kinase marker is removed by the VRPC."""
+    """The path to the 'kinase.bin' file used to lock the MATLAB's runtime function (setupAcquisition.m) into the data 
+    acquisition mode until the kinase marker is removed by the VRPC."""
     phosphatase_path: Path = field(default_factory=Path, init=False)
-    """Stores the path to the 'phosphatase.bin' file. This marker is used together with the 'kinase.bin' marker. The 
-    presence of the 'phosphatase.bin' file is used to disable the acquisition state lock and allows the MATLAB runtime 
-    function to end its runtime even if the acquisition has never been started. This is used to gracefully end runtimes
-    that encountered an error during the initialization process."""
+    """The path to the 'phosphatase.bin' file used to gracefully terminate the MATLAB's runtimes locked into the data 
+    acquisition mode by the presence of the 'kinase.bin' file."""
 
     def __post_init__(
         self,
     ) -> None:
+        """Resolves the managed directory layout, creating any missing directory components."""
         # Resolves additional paths using the input root paths
         self.motion_estimator_path = self.persistent_data_path.joinpath("MotionEstimator.me")
         self.roi_path = self.persistent_data_path.joinpath("fov.roi")
-        self.session_specific_path = self.meso_data_path.joinpath(self.session_name)
+        self.session_specific_path = self.meso_data_path.joinpath(self.session)
         self.ubiquitin_path = self.session_specific_path.joinpath("ubiquitin.bin")
         self.mesoscope_data_path = self.meso_data_path.joinpath("mesoscope_data")
         self.kinase_path = self.mesoscope_data_path.joinpath("kinase.bin")
@@ -190,9 +177,6 @@ class _VRPCDestinations:
     server_raw_data_path: Path
     """Stores the path to the session's raw_data directory on the BioHPC server, which is mounted to the VRPC via the 
     SMB or equivalent protocol."""
-    server_processed_data_path: Path
-    """Stores the path to the session's processed_data directory on the BioHPC server, which is mounted to the VRPC via 
-    the SMB or equivalent protocol."""
     telomere_path: Path = field(default_factory=Path, init=False)
     """Stores the path to the session's telomere.bin marker. This marker is generated as part of data preprocessing on 
     the VRPC and can be removed by the BioHPC server to notify the VRPC that the server received preprocessed in a 
@@ -207,7 +191,6 @@ class _VRPCDestinations:
         # Ensures all destination directories exist
         ensure_directory_exists(self.nas_raw_data_path)
         ensure_directory_exists(self.server_raw_data_path)
-        ensure_directory_exists(self.server_processed_data_path)
 
 
 class MesoscopeData:
@@ -242,12 +225,14 @@ class MesoscopeData:
         # noinspection PyArgumentList
         self.vrpc_persistent_data = _VRPCPersistentData(
             session_type=session_data.session_type,
-            persistent_data_path=system_configuration.filesystem.root_directory.joinpath(project, animal, "persistent_data"),
+            persistent_data_path=system_configuration.filesystem.root_directory.joinpath(
+                project, animal, "persistent_data"
+            ),
         )
 
         # noinspection PyArgumentList
         self.scanimagepc_data = _ScanImagePCData(
-            session_name=session,
+            session=session,
             meso_data_path=system_configuration.filesystem.mesoscope_directory,
             persistent_data_path=system_configuration.filesystem.mesoscope_directory.joinpath(
                 project, animal, "persistent_data"
@@ -256,12 +241,11 @@ class MesoscopeData:
 
         # noinspection PyArgumentList
         self.destinations = _VRPCDestinations(
-            nas_raw_data_path=system_configuration.filesystem.nas_directory.joinpath(project, animal, session, "raw_data"),
-            server_raw_data_path=system_configuration.filesystem.server_storage_directory.joinpath(
+            nas_raw_data_path=system_configuration.filesystem.nas_directory.joinpath(
                 project, animal, session, "raw_data"
             ),
-            server_processed_data_path=system_configuration.paths.server_working_directory.joinpath(
-                project, animal, session, "processed_data"
+            server_raw_data_path=system_configuration.filesystem.server_directory.joinpath(
+                project, animal, session, "raw_data"
             ),
         )
 
