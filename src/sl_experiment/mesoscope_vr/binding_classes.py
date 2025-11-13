@@ -5,13 +5,13 @@ Zaber motors).
 from pathlib import Path
 
 import numpy as np
-from sl_shared_assets import ZaberPositions, MesoscopeExternalAssets, MesoscopeMicroControllers, MesoscopeCameras
+from sl_shared_assets import ZaberPositions, MesoscopeCameras, MesoscopeExternalAssets, MesoscopeMicroControllers
 from ataraxis_video_system import (
     VideoSystem,
-    CameraInterfaces,
-    EncoderSpeedPresets,
     VideoEncoders,
+    CameraInterfaces,
     OutputPixelFormats,
+    EncoderSpeedPresets,
 )
 from ataraxis_base_utilities import LogLevel, console
 from ataraxis_data_structures import DataLogger
