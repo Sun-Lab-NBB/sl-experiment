@@ -920,7 +920,7 @@ class _MesoscopeVRSystem:
 
         # Begins acquiring and displaying frames with the all available cameras.
         self._cameras.start_face_camera()
-        self._cameras.start_body_cameras()
+        self._cameras.start_body_camera()
 
         # If necessary, carries out the Zaber motor setup and animal mounting sequence. Once this call returns, the
         # runtime assumes that the animal is mounted in the mesoscope enclosure.
