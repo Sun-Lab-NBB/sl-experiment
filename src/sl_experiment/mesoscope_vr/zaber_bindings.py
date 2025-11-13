@@ -396,15 +396,7 @@ class ZaberAxis:
         if self.is_parked or self.is_busy:
             return
 
-        # If the motor has already been homed, first moves it to the parking position. The reason behind this
-        # implementation instead of the default 'home' command is to handle a case unique to rotary axis that has been
-        # artificially limited to a certain motion range. For the Mesoscope-VR system, it is the headbar yaw axis,
-        # which can collide with a physical limiter if it is homed when it is 'below' home sensor.
-        if self.is_homed:
-            self._padded_method_call(self._motor.move_absolute, position=self._park_position, wait_until_idle=False)
-
-        # Moves the motor towards the home sensor until it triggers the limit switch. This is the default 'home' action
-        # intended to only be triggered from the default parking position.
+        # Moves the motor towards the home sensor until it triggers the limit switch.
         self._padded_method_call(self._motor.home, wait_until_idle=False)
 
     def move(self, position: int) -> None:
@@ -459,7 +451,7 @@ class ZaberAxis:
 
     def unpark(self) -> None:
         """Unparks a parked motor, which allows the motor to accept and execute motion commands."""
-        if self._motor.is_parked():
+        if self.is_parked:
             self._padded_method_call(self._motor.unpark)
 
     def shutdown(self) -> None:

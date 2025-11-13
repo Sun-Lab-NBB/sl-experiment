@@ -7,10 +7,11 @@ from importlib_metadata import metadata as _metadata
 
 
 def get_version_data() -> tuple[str, str]:
-    """Determines and returns the current Python and sl-experiment versions as a tuple of two strings.
+    """Determines and returns the current Python and sl-experiment versions.
 
-    The first element of the returned tuple is the Python version, and the second element is the sl-experiment
-    version.
+    Returns:
+        A tuple of two strings. The first string stores the Python version, and the second string stores the
+        sl-experiment version.
     """
     # Determines the local Python version and the version of the sl-experiment library.
     sl_experiment_version = _metadata("sl-experiment")["version"]
@@ -19,10 +20,10 @@ def get_version_data() -> tuple[str, str]:
 
 
 def get_animal_project(animal_id: str) -> tuple[str, ...]:
-    """Scans the local project directory and returns the names for all projects that use the target animal.
+    """Scans the local project directory and returns the names of all projects that use the target animal.
 
     Args:
-        animal_id: The unique identifier of the animal for which to discover the projects that use the animal.
+        animal_id: The unique identifier of the animal for which to discover the projects that use this animal.
 
     Returns:
         A tuple of project names that use the target animal.
@@ -37,7 +38,7 @@ def get_animal_project(animal_id: str) -> tuple[str, ...]:
 
 
 def get_project_experiments(project: str) -> tuple[str, ...]:
-    """Discovers the available configuration files for the target project.
+    """Discovers the available experiment configuration files for the target project.
 
     Args:
         project: The name of the project for which to discover the experiment configurations.
