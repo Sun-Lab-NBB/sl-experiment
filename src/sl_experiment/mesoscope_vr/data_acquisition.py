@@ -39,8 +39,8 @@ from .tools import MesoscopeData, RuntimeControlUI, CachedMotifDecomposer, get_s
 from .visualizers import BehaviorVisualizer
 from .binding_classes import ZaberMotors, VideoSystems, MicroControllerInterfaces
 from ..shared_components import (
-    WaterSheet,
-    SurgerySheet,
+    WaterLog,
+    SurgeryLog,
     BrakeInterface,
     ValveInterface,
     get_version_data,
@@ -2929,13 +2929,13 @@ def lick_training_logic(
         # Verifies that the Water Restriction log and the Surgery log Google Sheets are accessible. To do so,
         # instantiates both classes to run through the init checks. The classes are later re-instantiated during
         # session data preprocessing
-        _ = WaterSheet(
+        _ = WaterLog(
             animal_id=int(animal_id),
             session_date=session_data.session_name,
             credentials_path=system_configuration.paths.google_credentials_path,
             sheet_id=system_configuration.sheets.water_log_sheet_id,
         )
-        _ = SurgerySheet(
+        _ = SurgeryLog(
             project_name=project_name,
             animal_id=int(animal_id),
             credentials_path=system_configuration.paths.google_credentials_path,
@@ -3228,13 +3228,13 @@ def run_training_logic(
         # Verifies that the Water Restriction log and the Surgery log Google Sheets are accessible. To do so,
         # instantiates both classes to run through the init checks. The classes are later re-instantiated during
         # session data preprocessing
-        _ = WaterSheet(
+        _ = WaterLog(
             animal_id=int(animal_id),
             session_date=session_data.session_name,
             credentials_path=system_configuration.paths.google_credentials_path,
             sheet_id=system_configuration.sheets.water_log_sheet_id,
         )
-        _ = SurgerySheet(
+        _ = SurgeryLog(
             project_name=project_name,
             animal_id=int(animal_id),
             credentials_path=system_configuration.paths.google_credentials_path,
@@ -3559,13 +3559,13 @@ def experiment_logic(
         # Verifies that the Water Restriction log and the Surgery log Google Sheets are accessible. To do so,
         # instantiates both classes to run through the init checks. The classes are later re-instantiated during
         # session data preprocessing
-        _ = WaterSheet(
+        _ = WaterLog(
             animal_id=int(animal_id),
             session_date=session_data.session_name,
             credentials_path=system_configuration.paths.google_credentials_path,
             sheet_id=system_configuration.sheets.water_log_sheet_id,
         )
-        _ = SurgerySheet(
+        _ = SurgeryLog(
             project_name=project_name,
             animal_id=int(animal_id),
             credentials_path=system_configuration.paths.google_credentials_path,
@@ -3767,7 +3767,7 @@ def window_checking_logic(
     try:
         # Verifies that the Surgery log Google Sheet is accessible. To do so, instantiates its interface class to run
         # through the init checks. The class is later re-instantiated during session data preprocessing
-        _ = SurgerySheet(
+        _ = SurgeryLog(
             project_name=project_name,
             animal_id=int(animal_id),
             credentials_path=system_configuration.paths.google_credentials_path,

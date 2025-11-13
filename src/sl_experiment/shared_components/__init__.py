@@ -10,18 +10,18 @@ from .module_interfaces import (
     TorqueInterface,
     EncoderInterface,
 )
-from .google_sheet_tools import WaterSheet, SurgerySheet
+from .google_sheet_tools import WaterLog, SurgeryLog
 
 __all__ = [
     "BrakeInterface",
     "EncoderInterface",
     "LickInterface",
     "ScreenInterface",
-    "SurgerySheet",
+    "SurgeryLog",
     "TTLInterface",
     "TorqueInterface",
     "ValveInterface",
-    "WaterSheet",
+    "WaterLog",
     "get_animal_project",
     "get_project_experiments",
     "get_version_data",

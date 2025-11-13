@@ -40,7 +40,7 @@ from ataraxis_data_structures import compress_npy_logs
 from ataraxis_time.time_helpers import get_timestamp
 
 from .tools import MesoscopeData, get_system_configuration
-from ..shared_components import WaterSheet, SurgerySheet
+from ..shared_components import WaterLog, SurgeryLog
 
 
 def _delete_directory(directory_path: Path) -> None:
@@ -971,7 +971,7 @@ def _preprocess_google_sheet_data(session_data: SessionData) -> None:
         total_water = training_water + experimenter_water
 
         # Connects to the WR sheet and generates the new water restriction log entry
-        wr_sheet = WaterSheet(
+        wr_sheet = WaterLog(
             session_date=session_data.session_name,
             animal_id=animal_id,
             credentials_path=Path(system_configuration.paths.google_credentials_path),
@@ -979,7 +979,7 @@ def _preprocess_google_sheet_data(session_data: SessionData) -> None:
         )
 
         wr_sheet.update_water_log(
-            mouse_weight=descriptor.mouse_weight_g,
+            weight=descriptor.mouse_weight_g,
             water_ml=total_water,
             experimenter_id=descriptor.experimenter,
             session_type=session_data.session_type,
@@ -989,7 +989,7 @@ def _preprocess_google_sheet_data(session_data: SessionData) -> None:
         console.echo(message=message, level=LogLevel.SUCCESS)
 
     # Loads the surgery log Google Sheet file
-    sl_sheet = SurgerySheet(
+    sl_sheet = SurgeryLog(
         project_name=session_data.project_name,
         animal_id=animal_id,
         credentials_path=Path(system_configuration.paths.google_credentials_path),

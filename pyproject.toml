@@ -63,7 +63,6 @@ dependencies = [
     "google-api-python-client==2.187.0",
     "appdirs==1.4.4",
     "pyqt6==6.10.0",
-    "pytz==2025.2",
     "importlib_metadata==8.7.0",
     "natsort-rs==0.1.15",
     "sl-shared-assets==6.0.1rc3",
@@ -90,7 +89,6 @@ dev = [
     "types-appdirs>=1,<2",
     "google-api-python-client-stubs>=1,<2",
     "scipy-stubs>=1,<2",
-    "types-pytz>=2025,<2026",
     "types-tabulate>=0,<1",
     "types-tqdm>=4,<5",
 ]
