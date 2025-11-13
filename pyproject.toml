@@ -10,7 +10,7 @@ version = "4.0.0rc1"
 description = "Provides the assets for acquiring and preprocessing scientific data in the Sun (NeuroAI) lab."
 readme = "README.md"
 license = { file = "LICENSE" }
-requires-python = ">=3.13, <3.14"  # Limited to 3.13 until AXVS (genicam) supports 3.14+
+requires-python = ">=3.13, <3.14"  # Limited to 3.13 until numba supports 3.14+
 authors = [
     { name = "Ivan Kondratyev" },
     { name = "Kushaan Gupta" },
@@ -56,9 +56,9 @@ dependencies = [
     "ataraxis-data-structures==5.0.0",
     "ataraxis-transport-layer-pc==3.0.0",
     "ataraxis-communication-interface==4.0.1",
-    "ataraxis-video-system==2.0.0",
+    "ataraxis-video-system==2.1.0rc1",
     "tifffile==2025.10.16",
-    "imagecodecs==2025.8.2",
+    "imagecodecs==2025.11.11",
     "tqdm==4.67.1",
     "google-api-python-client==2.187.0",
     "appdirs==1.4.4",
