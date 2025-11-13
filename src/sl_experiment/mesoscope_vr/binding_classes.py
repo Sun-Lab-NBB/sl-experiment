@@ -1,11 +1,11 @@
-"""This module binds low-level API classes for all Mesoscope-VR components (cameras, microcontrollers, Zaber motors).
-These bindings streamline the API used to interface with these components during experiment and training runtimes.
+"""This module exposes the high-level bindings for all Mesoscope-VR system components (cameras, microcontrollers,
+Zaber motors).
 """
 
 from pathlib import Path
 
 import numpy as np
-from sl_shared_assets import ZaberPositions, MesoscopeMicroControllers
+from sl_shared_assets import ZaberPositions, MesoscopeExternalAssets, MesoscopeMicroControllers
 from ataraxis_video_system import (
     VideoCodecs,
     VideoSystem,
@@ -34,164 +34,119 @@ from ..shared_components import (
 
 
 class ZaberMotors:
-    """Interfaces with Zaber motors that control the position of the HeadBar, LickPort, and the running Wheel inside the
-    mesoscope cage.
-
-    This class abstracts working with Zaber motors that move the HeadBar in Z, Pitch, and Roll axes, the LickPort in
-    X, Y, and Z axes, and the Wheel in X axis. It is used by the major runtime classes, such as _MesoscopeExperiment,
-    to position various Mesoscope-VR components and the mouse in a way that promotes data acquisition and task
-    performance.
+    """Interfaces with Zaber controllers and motors used in the Mesoscope-VR data acquisition system.
 
     Notes:
-        The class is designed to transition the motors between a set of predefined states and should not be used
-        directly by the user. It does not contain the guards that notify users about risks associated with moving the
-        motors. Do not use any methods from this class unless you know what you are doing. It is possible to damage
-        the motors, the mesoscope, or harm the animal.
+        The class transitions the motors between a set of predefined states and should not be used directly by the user.
+        Improperly using this class can damage the Mesoscope-VR hardware or harm the animals participating in the data
+        acquisition sessions.
 
         To fine-tune the position of any Zaber motors in real time, use the main Zaber Launcher interface
         (https://software.zaber.com/zaber-launcher/download) installed on the VRPC.
 
-        Unless you know that the motors are homed and not parked, always call the prepare_motors() method before
-        calling any other methods. Otherwise, Zaber controllers will likely ignore the issued commands.
-
     Args:
-        zaber_positions_path: The path to the zaber_positions.yaml file that stores the motor positions saved during the
-            previous runtime.
+        zaber_positions: The ZaberPositions instance that stores the positions of Zaber motors used during a
+            previous runtime or None if there is no previous position data to use.
+        zaber_configuration: The MesoscopeExternalAssets instance that stores the configuration parameters for the
+            managed Zaber devices.
 
     Attributes:
-        _headbar: Stores the Connection class instance that manages the USB connection to a daisy-chain of Zaber
-            devices (controllers) that allow repositioning the headbar holder.
-        _headbar_z: The ZaberAxis class instance for the headbar z-axis motor.
-        _headbar_pitch: The ZaberAxis class instance for the headbar pitch-axis motor.
-        _headbar_roll: The ZaberAxis class instance for the headbar roll-axis motor.
-        _wheel: Stores the Connection class instance that manages the USB connection to a daisy-chain of Zaber
-            devices (controllers) that allow repositioning the running wheel.
-        _wheel_x: The ZaberAxis class instance for the running-wheel X-axis motor.
-        _lickport: Stores the Connection class instance that manages the USB connection to a daisy-chain of Zaber
-            devices (controllers) that allow repositioning the lickport.
-        _lickport_z: Stores the Axis (motor) class that controls the position of the lickport along the Z axis.
-        _lickport_x: Stores the Axis (motor) class that controls the position of the lickport along the X axis.
-        _lickport_y: Stores the Axis (motor) class that controls the position of the lickport along the Y axis.
-        _previous_positions: An instance of _ZaberPositions class that stores the positions of Zaber motors during a
-           previous runtime. If this data is not available, this attribute is set to None to indicate there are no
-           previous positions to use.
+        _headbar: The ZaberConnection instance that manages the headbar holder motor group.
+        _headbar_z: The ZaberAxis instance that interfaces with the headbar's z-axis motor.
+        _headbar_pitch: The ZaberAxis instance that interfaces with the headbar's pitch-axis motor.
+        _headbar_roll: The ZaberAxis instance that interfaces with the headbar's roll-axis motor.
+        _wheel: The ZaberConnection instance that manages the wheel motor group.
+        _wheel_x: The ZaberAxis instance that interfaces with the wheel's X-axis motor.
+        _lickport: The ZaberConnection instance that manages the lickport motor group.
+        _lickport_z: The ZaberAxis instance that interfaces with the lickport's Z-axis motor.
+        _lickport_x: The ZaberAxis instance that interfaces with the lickport's X-axis motor.
+        _lickport_y: The ZaberAxis instance that interfaces with the lickport's Y-axis motor.
+        _previous_positions: A ZaberPositions instance that stores the positions of Zaber motors used during a
+           previous runtime or None if there is no previous position data to use.
     """
 
-    def __init__(self, zaber_positions_path: Path) -> None:
-        # Retrieves the Mesoscope-VR system configuration parameters.
-        system_configuration = get_system_configuration()
+    def __init__(self, zaber_positions: ZaberPositions | None, zaber_configuration: MesoscopeExternalAssets) -> None:
+        # Initializes the ZaberConnection instances for all zaber controller groups.
+        self._headbar: ZaberConnection = ZaberConnection(port=zaber_configuration.headbar_port)
+        self._wheel: ZaberConnection = ZaberConnection(port=zaber_configuration.wheel_port)
+        self._lickport: ZaberConnection = ZaberConnection(port=zaber_configuration.lickport_port)
 
-        # Initializes the connection classes first to ensure all classes exist in case the runtime encounters
-        # an error during connection.
-        self._headbar: ZaberConnection = ZaberConnection(port=system_configuration.additional_firmware.headbar_port)
-        self._wheel: ZaberConnection = ZaberConnection(port=system_configuration.additional_firmware.wheel_port)
-        self._lickport: ZaberConnection = ZaberConnection(port=system_configuration.additional_firmware.lickport_port)
-
-        # HeadBar controller (zaber). This is an assembly of 3 zaber controllers (devices) that allow moving the
-        # headbar attached to the mouse's head in Z, Roll, and Pitch axes. Note, this assumes that the chaining
-        # order of individual zaber devices is fixed and is always Z-Pitch-Roll.
+        # HeadBar motor group. Assumes the following order of daisy-chaining the motors: Z-Pitch-Roll.
         self._headbar.connect()
-        self._headbar_z: ZaberAxis = self._headbar.get_device(0).axis
-        self._headbar_pitch: ZaberAxis = self._headbar.get_device(1).axis
-        self._headbar_roll: ZaberAxis = self._headbar.get_device(2).axis
+        self._headbar_z: ZaberAxis = self._headbar.get_device(index=0).axis
+        self._headbar_pitch: ZaberAxis = self._headbar.get_device(index=1).axis
+        self._headbar_roll: ZaberAxis = self._headbar.get_device(index=2).axis
 
-        # Lickport controller (zaber). This is an assembly of 3 zaber controllers (devices) that allow moving the
-        # lick tube in Z, X, and Y axes. Note, this assumes that the chaining order of individual zaber devices is
-        # fixed and is always Z-X-Y.
+        # LickPort motor group. Assumes the following order of daisy-chaining the motors: Z-Y-X.
         self._lickport.connect()
-        self._lickport_z: ZaberAxis = self._lickport.get_device(0).axis
-        self._lickport_y: ZaberAxis = self._lickport.get_device(1).axis
-        self._lickport_x: ZaberAxis = self._lickport.get_device(2).axis
+        self._lickport_z: ZaberAxis = self._lickport.get_device(index=0).axis
+        self._lickport_y: ZaberAxis = self._lickport.get_device(index=1).axis
+        self._lickport_x: ZaberAxis = self._lickport.get_device(index=2).axis
 
-        # Wheel controller (zaber). Currently, this assembly includes a single controller (device) that allows moving
-        # the running wheel in the X axis.
+        # Wheel motor group. Currently, this motor only uses the X-axis motor.
         self._wheel.connect()
-        self._wheel_x: ZaberAxis = self._wheel.get_device(0).axis
+        self._wheel_x: ZaberAxis = self._wheel.get_device(index=0).axis
 
-        # If the previous positions path points to an existing .yaml file, loads the data from the file into
-        # _ZaberPositions instance. Otherwise, sets the previous_positions attribute to None to indicate there are no
-        # previous positions.
-        self._previous_positions: None | ZaberPositions = None
-        if zaber_positions_path.exists():
-            self._previous_positions = ZaberPositions.from_yaml(zaber_positions_path)
-        else:
+        # If there is no previous zaber position data to use, displays a warning message to the user.
+        self._previous_positions: ZaberPositions | None = zaber_positions
+        if self._previous_positions is None:
             message = (
-                "No previous position data found when attempting to load Zaber motor positions used during a previous "
-                "runtime. Setting all Zaber motors to use the default positions cached in non-volatile memory of each "
-                "motor controller."
+                "No previous runtime position data provided when initializing the ZaberMotors instance for the current "
+                "runtime. Configuring all Zaber motors to use the default positions cached in the non-volatile memory "
+                "of each motor controller. Proceed with caution."
             )
             console.echo(message=message, level=LogLevel.ERROR)
 
     def restore_position(self) -> None:
-        """Restores the Zaber motor positions to the states recorded at the end of the previous runtime.
-
-        For most runtimes, this method is used to restore the motors to the state used during a previous experiment or
-        training session for each animal. Since all animals are slightly different, the optimal Zaber motor positions
-        will vary slightly for each animal.
+        """Restores the managed Zaber motors to the positions used during the previous runtime in parallel.
 
         Notes:
             If previous positions are not available, the method falls back to moving the motors to the general
             'mounting' positions saved in the non-volatile memory of each motor controller. These positions are designed
-            to work for most animals and provide an initial position for the animal to be mounted into the VR rig.
-
-            This method moves all Zaber axes in parallel to optimize runtime speed. This relies on the Mesoscope-VR
-            system to be assembled in a way where it is safe to move all motors at the same time.
+            to work for most animals and provide an initial position for the animal to be mounted into the Mesoscope-VR
+            enclosure.
         """
         # Disables the safety motor lock before moving the motors.
         self.unpark_motors()
 
         # If previous position data is available, restores all motors to the positions used during previous sessions.
-        # Otherwise, sets HeadBar and Wheel to mounting position and the LickPort to parking position. For LickPort,
-        # the only difference between parking and mounting positions is that the mounting position is retracted further
-        # away from the animal than the parking position.
+        # Otherwise, sets HeadBar and Wheel to the mounting position and the LickPort to the parking position. Note; the
+        # LickPort's parking position is closer to the animal than the mounting position, but still too far to be usable
+        # during runtime, requiring manual fine-tuning.
         self._headbar_z.move(
-            amount=self._headbar_z.mount_position
+            position=self._headbar_z.mount_position
             if self._previous_positions is None
             else self._previous_positions.headbar_z,
-            absolute=True,
-            native=True,
         )
         self._headbar_pitch.move(
-            amount=self._headbar_pitch.mount_position
+            position=self._headbar_pitch.mount_position
             if self._previous_positions is None
             else self._previous_positions.headbar_pitch,
-            absolute=True,
-            native=True,
         )
         self._headbar_roll.move(
-            amount=self._headbar_roll.mount_position
+            position=self._headbar_roll.mount_position
             if self._previous_positions is None
             else self._previous_positions.headbar_roll,
-            absolute=True,
-            native=True,
         )
         self._wheel_x.move(
-            amount=self._wheel_x.mount_position
+            position=self._wheel_x.mount_position
             if self._previous_positions is None
             else self._previous_positions.wheel_x,
-            absolute=True,
-            native=True,
         )
         self._lickport_z.move(
-            amount=self._lickport_z.park_position
+            position=self._lickport_z.park_position
             if self._previous_positions is None
             else self._previous_positions.lickport_z,
-            absolute=True,
-            native=True,
         )
         self._lickport_x.move(
-            amount=self._lickport_x.park_position
+            position=self._lickport_x.park_position
             if self._previous_positions is None
             else self._previous_positions.lickport_x,
-            absolute=True,
-            native=True,
         )
         self._lickport_y.move(
-            amount=self._lickport_y.park_position
+            position=self._lickport_y.park_position
             if self._previous_positions is None
             else self._previous_positions.lickport_y,
-            absolute=True,
-            native=True,
         )
 
         # Waits for all motors to finish moving before returning to caller.
@@ -201,20 +156,16 @@ class ZaberMotors:
         self.park_motors()
 
     def prepare_motors(self) -> None:
-        """Unparks and homes all motors.
-
-        This method should be used at the beginning of each runtime (experiment, training, etc.) to ensure all Zaber
-        motors can be moved (are not parked) and have a stable point of reference. The motors are left at their
-        respective homing positions at the end of this method's runtime, and it is assumed that a different class
-        method is called after this method to set the motors into the desired position.
+        """Homes the managed Zaber motors in parallel.
 
         Notes:
-            This method moves all motor axes in parallel to optimize runtime speed.
+            This method ensures that all motors have a stable reference point for executing all other methods exposed
+            by this instance and must be called before any other method in most use contexts.
         """
         # Disables the safety motor lock before moving the motors.
         self.unpark_motors()
 
-        # Homes all motors in-parallel.
+        # Homes all motors in parallel.
         self._headbar_z.home()
         self._headbar_pitch.home()
         self._headbar_roll.home()
@@ -230,26 +181,23 @@ class ZaberMotors:
         self.park_motors()
 
     def park_position(self) -> None:
-        """Moves all motors to their parking positions and parks (locks) them preventing future movements.
-
-        This method should be used at the end of each runtime (experiment, training, etc.) to ensure all Zaber motors
-        are positioned in a way that guarantees that they can be homed during the next runtime.
+        """Moves the managed Zaber motors to their parking positions in parallel.
 
         Notes:
-            The motors are moved to the parking positions stored in the non-volatile memory of each motor controller.
-            This method moves all motor axes in parallel to optimize runtime speed.
+            This method should be called as part of the runtime's shutdown sequence to optimally position the motors to
+            support homing during the next runtime.
         """
         # Disables the safety motor lock before moving the motors.
         self.unpark_motors()
 
         # Moves all Zaber motors to their parking positions
-        self._headbar_z.move(amount=self._headbar_z.park_position, absolute=True, native=True)
-        self._headbar_pitch.move(amount=self._headbar_pitch.park_position, absolute=True, native=True)
-        self._headbar_roll.move(amount=self._headbar_roll.park_position, absolute=True, native=True)
-        self._wheel_x.move(amount=self._wheel_x.park_position, absolute=True, native=True)
-        self._lickport_z.move(amount=self._lickport_z.park_position, absolute=True, native=True)
-        self._lickport_x.move(amount=self._lickport_x.park_position, absolute=True, native=True)
-        self._lickport_y.move(amount=self._lickport_y.park_position, absolute=True, native=True)
+        self._headbar_z.move(position=self._headbar_z.park_position)
+        self._headbar_pitch.move(position=self._headbar_pitch.park_position)
+        self._headbar_roll.move(position=self._headbar_roll.park_position)
+        self._wheel_x.move(position=self._wheel_x.park_position)
+        self._lickport_z.move(position=self._lickport_z.park_position)
+        self._lickport_x.move(position=self._lickport_x.park_position)
+        self._lickport_y.move(position=self._lickport_y.park_position)
 
         # Waits for all motors to finish moving before returning to caller.
         self.wait_until_idle()
@@ -258,29 +206,18 @@ class ZaberMotors:
         self.park_motors()
 
     def maintenance_position(self) -> None:
-        """Moves all motors to the Mesoscope-VR system maintenance position.
-
-        This position is stored in the non-volatile memory of each motor controller. Primarily, this position is used
-        during the water valve calibration and during running-wheel maintenance (cleaning, replacing surface material,
-        etc.).
-
-        Notes:
-            This method moves all motor axes in parallel to optimize runtime speed.
-
-            Formerly, the only maintenance step was the calibration of the water-valve, so some low-level functions
-            still reference it as 'valve-position' and 'calibrate-position'.
-        """
+        """Moves the managed Zaber motors to the Mesoscope-VR system maintenance position in parallel."""
         # Disables the safety motor lock before moving the motors.
         self.unpark_motors()
 
         # Moves all motors to their maintenance positions
-        self._headbar_z.move(amount=self._headbar_z.valve_position, absolute=True, native=True)
-        self._headbar_pitch.move(amount=self._headbar_pitch.valve_position, absolute=True, native=True)
-        self._headbar_roll.move(amount=self._headbar_roll.valve_position, absolute=True, native=True)
-        self._wheel_x.move(amount=self._wheel_x.valve_position, absolute=True, native=True)
-        self._lickport_z.move(amount=self._lickport_z.valve_position, absolute=True, native=True)
-        self._lickport_x.move(amount=self._lickport_x.valve_position, absolute=True, native=True)
-        self._lickport_y.move(amount=self._lickport_y.valve_position, absolute=True, native=True)
+        self._headbar_z.move(position=self._headbar_z.maintenance_position)
+        self._headbar_pitch.move(position=self._headbar_pitch.maintenance_position)
+        self._headbar_roll.move(position=self._headbar_roll.maintenance_position)
+        self._wheel_x.move(position=self._wheel_x.maintenance_position)
+        self._lickport_z.move(position=self._lickport_z.maintenance_position)
+        self._lickport_x.move(position=self._lickport_x.maintenance_position)
+        self._lickport_y.move(position=self._lickport_y.maintenance_position)
 
         # Waits for all motors to finish moving before returning to caller.
         self.wait_until_idle()
@@ -289,37 +226,33 @@ class ZaberMotors:
         self.park_motors()
 
     def mount_position(self) -> None:
-        """Moves all motors to the animal mounting position.
+        """Moves the managed Zaber motors to the animal mounting position in parallel.
 
-        This position is stored in the non-volatile memory of each motor controller. This position is used when the
-        animal is mounted into the VR rig to provide the experimenter with easy access to the head bar holder.
-
-        Notes:
-            This method moves all MOTOR axes in parallel to optimize runtime speed.
+        This motor positioning facilitates mounting the animal into the Mesoscope-VR system enclosure.
         """
         # Disables the safety motor lock before moving the motors.
         self.unpark_motors()
 
         # Moves all lickport motors to the mount position
-        self._lickport_z.move(amount=self._lickport_z.mount_position, absolute=True, native=True)
-        self._lickport_x.move(amount=self._lickport_x.mount_position, absolute=True, native=True)
-        self._lickport_y.move(amount=self._lickport_y.mount_position, absolute=True, native=True)
+        self._lickport_z.move(position=self._lickport_z.mount_position)
+        self._lickport_x.move(position=self._lickport_x.mount_position)
+        self._lickport_y.move(position=self._lickport_y.mount_position)
 
         # If previous positions are not available, moves the rest of the motors to the default mounting positions
         if self._previous_positions is None:
-            self._headbar_z.move(amount=self._headbar_z.mount_position, absolute=True, native=True)
-            self._headbar_pitch.move(amount=self._headbar_pitch.mount_position, absolute=True, native=True)
-            self._headbar_roll.move(amount=self._headbar_roll.mount_position, absolute=True, native=True)
-            self._wheel_x.move(amount=self._wheel_x.mount_position, absolute=True, native=True)
+            self._headbar_z.move(position=self._headbar_z.mount_position)
+            self._headbar_pitch.move(position=self._headbar_pitch.mount_position)
+            self._headbar_roll.move(position=self._headbar_roll.mount_position)
+            self._wheel_x.move(position=self._wheel_x.mount_position)
 
         # If previous positions are available, restores other motors to the position used during the previous runtime.
-        # This relies on the idea that mounting is primarily facilitated by moving the lickport away, while all mouse
-        # positioning motors can be set to the parameters optimal for the mouse being mounted.
+        # This relies on the idea that mounting is primarily facilitated by moving the lickport away, while all other
+        # motors can be set to the optimal runtime parameters for the animal being mounted.
         else:
-            self._headbar_z.move(amount=self._previous_positions.headbar_z, absolute=True, native=True)
-            self._headbar_pitch.move(amount=self._previous_positions.headbar_pitch, absolute=True, native=True)
-            self._headbar_roll.move(amount=self._previous_positions.headbar_roll, absolute=True, native=True)
-            self._wheel_x.move(amount=self._previous_positions.wheel_x, absolute=True, native=True)
+            self._headbar_z.move(position=self._previous_positions.headbar_z)
+            self._headbar_pitch.move(position=self._previous_positions.headbar_pitch)
+            self._headbar_roll.move(position=self._previous_positions.headbar_roll)
+            self._wheel_x.move(position=self._previous_positions.wheel_x)
 
         # Waits for all motors to finish moving before returning to caller.
         self.wait_until_idle()
@@ -328,24 +261,18 @@ class ZaberMotors:
         self.park_motors()
 
     def unmount_position(self) -> None:
-        """Moves the lick-port back to the mount position in all axes while keeping all other motors in their current
-        positions.
+        """Retracts the LickPort group motors back to the mount position, while maintaining the current position for all
+        other managed Zaber motors.
 
-        This command facilitates removing (unmounting) the animal from the VR rig while being safe to execute when the
-        mesoscope objective and other mesoscope-VR elements are positioned for imaging.
-
-        Notes:
-            Technically, calling the mount_position() method after generating a new ZaberMotors snapshot will behave
-            identically to this command. However, to improve runtime safety and the clarity of the class API, it is
-            highly encouraged to use this method to unmount the animal.
+        This motor positioning facilitates removing the animal from the Mesoscope-VR system enclosure.
         """
         # Disables the safety motor lock before moving the motors.
         self.unpark_motors()
 
         # Moves the lick-port back to the mount position, while keeping all other motors in their current positions.
-        self._lickport_y.move(amount=self._lickport_y.mount_position, absolute=True, native=True)
-        self._lickport_z.move(amount=self._lickport_z.mount_position, absolute=True, native=True)
-        self._lickport_x.move(amount=self._lickport_x.mount_position, absolute=True, native=True)
+        self._lickport_y.move(position=self._lickport_y.mount_position)
+        self._lickport_z.move(position=self._lickport_z.mount_position)
+        self._lickport_x.move(position=self._lickport_x.mount_position)
 
         # Waits for all motors to finish moving before returning to caller.
         self.wait_until_idle()
@@ -354,30 +281,22 @@ class ZaberMotors:
         self.park_motors()
 
     def generate_position_snapshot(self) -> ZaberPositions:
-        """Queries the current positions of all managed Zaber motors, packages the position data into a ZaberPositions
-        instance, and returns it to the caller.
-
-        This method is used by runtime classes to update the ZaberPositions instance cached on disk for each animal.
-        The method also updates the local ZaberPositions copy stored inside the class instance with the data from the
-        generated snapshot. Primarily, this has to be done to support the Zaber motor shutdown sequence.
+        """Queries the current positions of all managed Zaber motors and returns the data as a ZaberPositions
+        instance.
         """
         self._previous_positions = ZaberPositions(
-            headbar_z=int(self._headbar_z.get_position(native=True)),
-            headbar_pitch=int(self._headbar_pitch.get_position(native=True)),
-            headbar_roll=int(self._headbar_roll.get_position(native=True)),
-            wheel_x=int(self._wheel_x.get_position(native=True)),
-            lickport_z=int(self._lickport_z.get_position(native=True)),
-            lickport_x=int(self._lickport_x.get_position(native=True)),
-            lickport_y=int(self._lickport_y.get_position(native=True)),
+            headbar_z=int(self._headbar_z.get_position()),
+            headbar_pitch=int(self._headbar_pitch.get_position()),
+            headbar_roll=int(self._headbar_roll.get_position()),
+            wheel_x=int(self._wheel_x.get_position()),
+            lickport_z=int(self._lickport_z.get_position()),
+            lickport_x=int(self._lickport_x.get_position()),
+            lickport_y=int(self._lickport_y.get_position()),
         )
         return self._previous_positions
 
     def wait_until_idle(self) -> None:
-        """Blocks in-place while at least one motor in the managed motor group(s) is moving.
-
-        Primarily, this method is used to issue commands to multiple motor groups and then block until all motors in
-        all groups finish moving. This optimizes the overall time taken to move the motors.
-        """
+        """Blocks in-place while at least one motor in the managed motor groups is moving."""
         # Waits for the motors to finish moving. Note, motor state polling includes the built-in delay mechanism to
         # prevent overwhelming the communication interface.
         while (
@@ -392,18 +311,14 @@ class ZaberMotors:
             pass
 
     def disconnect(self) -> None:
-        """Disconnects from the communication port(s) of the managed motor groups.
-
-        This method should be called after the motors are parked (moved to their final parking position) to release
-        the connection resources. If this method is not called, the runtime will NOT be able to terminate.
-        """
+        """Shuts down all managed motors and disconnects from the motor groups."""
         self._headbar.disconnect()
         self._wheel.disconnect()
         self._lickport.disconnect()
 
     def park_motors(self) -> None:
-        """Parks all managed motor groups, preventing them from being moved via this library or Zaber GUI until
-        they are unparked via the unpark_motors() command.
+        """Parks all managed Zaber motors, preventing them from being moved via this library or Zaber GUI until
+        they are unparked.
         """
         self._headbar_pitch.park()
         self._headbar_roll.park()

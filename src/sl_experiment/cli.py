@@ -7,9 +7,12 @@ from pathlib import Path
 import click
 from sl_shared_assets import (
     SessionData,
+    MesoscopeExperimentState,
+    MesoscopeExperimentTrial,
+    MesoscopeExperimentConfiguration,
     get_system_configuration_data,
 )
-from ataraxis_base_utilities import console
+from ataraxis_base_utilities import LogLevel, console, ensure_directory_exists
 
 from .mesoscope_vr import (
     CRCCalculator,
@@ -47,7 +50,7 @@ def generate_project_data_structure(project: str) -> None:
     # Queries the data acquisition configuration data. Specifically, this is used to get the path to the root
     # directory where all projects are stored on the local machine.
     system_configuration = get_system_configuration_data()
-    project_path = system_configuration.paths.root_directory.joinpath(project, "configuration")
+    project_path = system_configuration.filesystem.root_directory.joinpath(project, "configuration")
 
     # Generates the initial project directory hierarchy
     ensure_directory_exists(project_path)
@@ -99,9 +102,9 @@ def generate_experiment_configuration_file(project: str, experiment: str, state_
     # Resolves the acquisition system configuration. Uses the path to the local project directory and the project name
     # to determine where to save the experiment configuration file
     acquisition_system = get_system_configuration_data()
-    file_path = acquisition_system.paths.root_directory.joinpath(project, "configuration", f"{experiment}.yaml")
+    file_path = acquisition_system.filesystem.root_directory.joinpath(project, "configuration", f"{experiment}.yaml")
 
-    if not acquisition_system.paths.root_directory.joinpath(project).exists():
+    if not acquisition_system.filesystem.root_directory.joinpath(project).exists():
         message = (
             f"Unable to generate the experiment {experiment} configuration file for the project {project}. "
             f"The target project does not exist on the local machine (PC). Use the "
@@ -114,7 +117,7 @@ def generate_experiment_configuration_file(project: str, experiment: str, state_
     # 'states' dictionary.
     states = {}
     for state in range(state_count):
-        states[f"state_{state + 1}"] = ExperimentState(
+        states[f"state_{state + 1}"] = MesoscopeExperimentState(
             experiment_state_code=state + 1,  # Assumes experiment state sequences are 1-based
             system_state_code=0,
             state_duration_s=60,
@@ -126,7 +129,7 @@ def generate_experiment_configuration_file(project: str, experiment: str, state_
     # Loops over the number of requested trial motifs and, for each, generates an ExperimentTrial instance.
     trials = {}
     for trial in range(trial_count):
-        trials[f"trial_type_{trial + 1}"] = ExperimentTrial(
+        trials[f"trial_type_{trial + 1}"] = MesoscopeExperimentTrial(
             cue_sequence=[1, 0, 2, 0, 3, 0, 4, 0],
             trial_length_cm=240,
             trial_reward_size_ul=5.0,
@@ -169,17 +172,9 @@ def calculate_crc(input_string: str) -> None:
 
 
 @click.command()
-@click.option(
-    "-e",
-    "--errors",
-    is_flag=True,
-    show_default=True,
-    default=False,
-    help="Determines whether to display errors encountered when connecting to evaluated serial ports.",
-)
-def list_devices(errors: bool) -> None:
+def list_devices() -> None:
     """Displays information about all Zaber devices available through USB ports of the host-system."""
-    discover_zaber_devices(silence_errors=not errors)
+    discover_zaber_devices()
 
 
 @click.command()
@@ -189,7 +184,7 @@ def list_projects() -> None:
     """
     system_configuration = get_system_configuration_data()
     projects = [
-        directory.stem for directory in system_configuration.paths.root_directory.iterdir() if directory.is_dir()
+        directory.stem for directory in system_configuration.filesystem.root_directory.iterdir() if directory.is_dir()
     ]
     if len(projects) > 0:
         console.echo(

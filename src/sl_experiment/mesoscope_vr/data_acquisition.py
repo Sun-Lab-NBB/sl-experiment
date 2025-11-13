@@ -1133,6 +1133,8 @@ class _MesoscopeVRSystem:
 
             # Default case: preprocesses the data. For experiment runtimes, this may take between 15 and 20 minutes.
             if answer.lower() == "yes":
+                # TODO Fix later
+                break
                 preprocess_session_data(session_data=self._session_data)
                 break
 
@@ -3833,6 +3835,9 @@ def window_checking_logic(
 
         # Stops the data logger
         logger.stop()
+
+        # TODO Fix later
+        return
 
         # Triggers preprocessing pipeline. In this case, since there is no data to preprocess, the pipeline primarily
         # just copies the session raw_data folder to the NAS and BioHPC server. Unlike other pipelines, window

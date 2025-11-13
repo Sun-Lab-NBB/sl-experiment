@@ -277,7 +277,7 @@ class SurgerySheet:
         self._sheet_id = sheet_id
 
         # Generates the credentials' object to access the target Google Sheet.
-        credentials = Credentials.from_service_account_file(  # type: ignore
+        credentials = Credentials.from_service_account_file(
             filename=str(credentials_path), scopes=("https://www.googleapis.com/auth/spreadsheets",)
         )
 
@@ -386,7 +386,7 @@ class SurgerySheet:
         )
 
         # Converts the data from dictionary format into a list of strings.
-        row_values = row_data.get("values")[0]  # type: ignore
+        row_values = row_data.get("values")[0]
 
         # Replaces empty cells and value placeholders ('n/a'', '--' or '---') with None.
         row_values = _replace_empty_values(row_values)
@@ -552,13 +552,13 @@ class SurgerySheet:
             spreadsheetId=self._sheet_id,
             range=f"'{self._project_name}'!{cell_range}",
             valueInputOption="USER_ENTERED",
-            body=body,  # type: ignore
+            body=body,
         ).execute()
 
         # Transforms the column letter and the row index to the format necessary to apply formatting to the newly
         # written value.
         col_index = 0
-        for char in quality_column.upper():  # type: ignore
+        for char in quality_column.upper():
             col_index = col_index * 26 + (ord(char) - ord("A") + 1)
         col_index -= 1  # Convert to 0-based index
         row_index_zero_based = row_number - 1
@@ -590,7 +590,7 @@ class SurgerySheet:
             ]
             self._service.spreadsheets().batchUpdate(
                 spreadsheetId=self._sheet_id,
-                body={"requests": requests},  # type: ignore
+                body={"requests": requests},
             ).execute()
 
     def _get_column_id(self, column_name: str) -> str | None:
@@ -671,7 +671,7 @@ class WaterSheet:
 
         # Generates the credentials' object to access the target Google Sheet. In contrast to surgery data, this object
         # requires write access.
-        credentials = Credentials.from_service_account_file(  # type: ignore
+        credentials = Credentials.from_service_account_file(
             filename=str(credentials_path), scopes=("https://www.googleapis.com/auth/spreadsheets",)
         )
 
@@ -902,7 +902,7 @@ class WaterSheet:
             spreadsheetId=self._sheet_id,
             range=f"'{self._animal_id}'!{cell_range}",
             valueInputOption="USER_ENTERED",
-            body=body,  # type: ignore
+            body=body,
         ).execute()
 
         # Transforms the column letter and the row index to the format necessary to apply formatting to the newly
@@ -931,5 +931,5 @@ class WaterSheet:
         ]
         self._service.spreadsheets().batchUpdate(
             spreadsheetId=self._sheet_id,
-            body={"requests": requests},  # type: ignore
+            body={"requests": requests},
         ).execute()
