@@ -25,6 +25,7 @@ from PyQt6.QtWidgets import (
 from sl_shared_assets import SessionData, SessionTypes, MesoscopeSystemConfiguration, get_system_configuration_data
 from ataraxis_base_utilities import console, ensure_directory_exists
 from ataraxis_data_structures import SharedMemoryArray
+from enum import IntEnum
 
 
 def get_system_configuration() -> MesoscopeSystemConfiguration:
@@ -58,6 +59,21 @@ mesoscope_vr_sessions: tuple[str, str, str, str] = (
     SessionTypes.WINDOW_CHECKING,
 )
 """Defines the data acquisition session types supported by the Mesoscope-VR data acquisition system."""
+
+
+class _DataArrayIndex(IntEnum):
+    """Defines the shared memory array indices for each runtime parameter addressable from the user-facing GUI."""
+    TERMINATION = 0
+    EXIT_SIGNAL = 1
+    REWARD_SIGNAL = 2
+    SPEED_MODIFIER = 3
+    DURATION_MODIFIER = 4
+    PAUSE_STATE = 5
+    OPEN_VALVE = 6
+    CLOSE_VALVE = 7
+    REWARD_VOLUME = 8
+    GUIDANCE_ENABLED = 9
+    SHOW_REWARD = 10
 
 
 @dataclass()
@@ -247,10 +263,10 @@ class RuntimeControlUI:
         # Defines the prototype array for the SharedMemoryArray initialization and sets the array elements to the
         # desired default state
         prototype = np.zeros(shape=11, dtype=np.uint32)
-        prototype[5] = 1  # Ensures all runtimes start in a paused state
-        prototype[9] = 0  # Initially disables guidance for all runtimes
-        prototype[10] = 0  # Defaults to not showing reward collision boundary
-        prototype[8] = 5  # Preconfigures reward delivery to use 5 uL rewards
+        prototype[_DataArrayIndex.PAUSE_STATE] = 1  # Ensures all runtimes start in a paused state
+        prototype[_DataArrayIndex.GUIDANCE_ENABLED] = 0  # Initially disables guidance for all runtimes
+        prototype[_DataArrayIndex.SHOW_REWARD] = 0  # Defaults to not showing reward collision boundary
+        prototype[_DataArrayIndex.REWARD_VOLUME] = 5  # Preconfigures reward delivery to use 5 uL rewards
 
         # Initializes the SharedMemoryArray instance
         self._data_array = SharedMemoryArray.create_array(
@@ -292,7 +308,7 @@ class RuntimeControlUI:
 
         # Shuts down the remote UI process.
         if self._ui_process.is_alive():
-            self._data_array[0] = 1  # Sends the termination signal to the remote process
+            self._data_array[_DataArrayIndex.TERMINATION] = 1  # Sends the termination signal to the remote process
             self._ui_process.terminate()
             self._ui_process.join(timeout=2.0)
 
@@ -341,7 +357,7 @@ class RuntimeControlUI:
         Args:
             paused: Determines whether the session is paused or running.
         """
-        self._data_array[5] = 1 if paused else 0
+        self._data_array[_DataArrayIndex.PAUSE_STATE] = 1 if paused else 0
 
     def set_guidance_state(self, *, enabled: bool) -> None:
         """Configures the GUI to reflect the data acquisition session's Virtual Reality task guidance state.
@@ -349,67 +365,67 @@ class RuntimeControlUI:
         Args:
             enabled: Determines whether the guidance mode is currently enabled.
         """
-        self._data_array[9] = 1 if enabled else 0
+        self._data_array[_DataArrayIndex.GUIDANCE_ENABLED] = 1 if enabled else 0
 
     @property
     def exit_signal(self) -> bool:
         """Returns True if the user has requested the system to abort the data acquisition session's runtime."""
-        exit_flag = bool(self._data_array[1])
-        self._data_array[1] = 0
+        exit_flag = bool(self._data_array[_DataArrayIndex.EXIT_SIGNAL])
+        self._data_array[_DataArrayIndex.EXIT_SIGNAL] = 0
         return exit_flag
 
     @property
     def reward_signal(self) -> bool:
         """Returns True if the user has requested the system to deliver a water reward."""
-        reward_flag = bool(self._data_array[2])
-        self._data_array[2] = 0
+        reward_flag = bool(self._data_array[_DataArrayIndex.REWARD_SIGNAL])
+        self._data_array[_DataArrayIndex.REWARD_SIGNAL] = 0
         return reward_flag
 
     @property
     def speed_modifier(self) -> int:
         """Returns the current user-defined running speed threshold modifier."""
-        return int(self._data_array[3])
+        return int(self._data_array[_DataArrayIndex.SPEED_MODIFIER])
 
     @property
     def duration_modifier(self) -> int:
         """Returns the current user-defined running epoch duration threshold modifier."""
-        return int(self._data_array[4])
+        return int(self._data_array[_DataArrayIndex.DURATION_MODIFIER])
 
     @property
     def pause_runtime(self) -> bool:
         """Returns True if the user has requested the system to pause the data acquisition session's runtime."""
-        return bool(self._data_array[5])
+        return bool(self._data_array[_DataArrayIndex.PAUSE_STATE])
 
     @property
     def open_valve(self) -> bool:
         """Returns True if the user has requested the system to open the water delivery valve."""
-        open_flag = bool(self._data_array[6])
-        self._data_array[6] = 0
+        open_flag = bool(self._data_array[_DataArrayIndex.OPEN_VALVE])
+        self._data_array[_DataArrayIndex.OPEN_VALVE] = 0
         return open_flag
 
     @property
     def close_valve(self) -> bool:
         """Returns True if the user has requested the system to close the water delivery valve."""
-        close_flag = bool(self._data_array[7])
-        self._data_array[7] = 0
+        close_flag = bool(self._data_array[_DataArrayIndex.CLOSE_VALVE])
+        self._data_array[_DataArrayIndex.CLOSE_VALVE] = 0
         return close_flag
 
     @property
     def reward_volume(self) -> int:
         """Returns the current user-defined volume of water dispensed by the valve when delivering water rewards."""
-        return int(self._data_array[8])
+        return int(self._data_array[_DataArrayIndex.REWARD_VOLUME])
 
     @property
     def enable_guidance(self) -> bool:
         """Returns True if the user has enabled the Virtual Reality task guidance mode."""
-        return bool(self._data_array[9])
+        return bool(self._data_array[_DataArrayIndex.GUIDANCE_ENABLED])
 
     @property
     def show_reward(self) -> bool:
         """Returns True if the user has enabled showing the Virtual Reality task guidance mode collision box to the
         animal.
         """
-        return bool(self._data_array[10])
+        return bool(self._data_array[_DataArrayIndex.SHOW_REWARD])
 
 
 class _ControlUIWindow(QMainWindow):
@@ -420,8 +436,6 @@ class _ControlUIWindow(QMainWindow):
         _data_array: The SharedMemoryArray instance used to bidirectionally transfer the data between the UI process
             and other runtime processes.
         _is_paused: Tracks whether the runtime is paused.
-        _speed_modifier: The user-defined running speed threshold modifier.
-        _duration_modifier: The user-defined running epoch duration threshold modifier.
         _guidance_enabled: Tracks whether the Virtual Reality task guidance mode is enabled.
         _show_reward: Tracks whether the Virtual Reality guidance mode collision box is visible to the animal.
     """
@@ -432,10 +446,8 @@ class _ControlUIWindow(QMainWindow):
         # Defines internal attributes.
         self._data_array: SharedMemoryArray = data_array
         self._is_paused: bool = True
-        self._speed_modifier: int = 0
-        self._duration_modifier: int = 0
         self._guidance_enabled: bool = False
-        self._show_reward: bool = True
+        self._show_reward: bool = False
 
         # Configures the window title
         self.setWindowTitle("Mesoscope-VR Control Panel")
@@ -604,7 +616,7 @@ class _ControlUIWindow(QMainWindow):
         speed_layout.addWidget(speed_status_label)
         self.speed_spinbox = QDoubleSpinBox()
         self.speed_spinbox.setRange(-1000, 1000)  # Factoring in the step of 0.01, this allows -20 to +20 cm/s
-        self.speed_spinbox.setValue(self._speed_modifier)  # Default value
+        self.speed_spinbox.setValue(0)  # Default value
         self.speed_spinbox.setDecimals(0)  # Integer precision
         self.speed_spinbox.setToolTip("Sets the running speed threshold modifier value.")
         self.speed_spinbox.setMinimumHeight(30)
@@ -623,7 +635,7 @@ class _ControlUIWindow(QMainWindow):
         duration_layout.addWidget(duration_status_label)
         self.duration_spinbox = QDoubleSpinBox()
         self.duration_spinbox.setRange(-1000, 1000)  # Factoring in the step of 0.01, this allows -20 to +20 s
-        self.duration_spinbox.setValue(self._duration_modifier)  # Default value
+        self.duration_spinbox.setValue(0)  # Default value
         self.duration_spinbox.setDecimals(0)  # Integer precision
         self.duration_spinbox.setToolTip("Sets the running duration threshold modifier value.")
         # noinspection PyUnresolvedReferences
@@ -974,17 +986,17 @@ class _ControlUIWindow(QMainWindow):
 
     def _check_external_state(self) -> None:
         """Checks the state of externally addressable UI elements and updates the managed GUI to reflect the
-        externally-driven changes.
+        externally driven changes.
         """
         # noinspection PyBroadException
         try:
             # If the termination flag has been set to 1, terminates the GUI process
-            if self._data_array[0] == 1:
+            if self._data_array[_DataArrayIndex.TERMINATION] == 1:
                 self.close()
 
             # Checks for external pause state changes and, if necessary, updates the GUI to reflect the current
             # runtime state (running or paused).
-            external_pause_state = bool(self._data_array[5])
+            external_pause_state = bool(self._data_array[_DataArrayIndex.PAUSE_STATE])
             if external_pause_state != self._is_paused:
                 # External pause state changed, update UI accordingly
                 self._is_paused = external_pause_state
@@ -992,7 +1004,7 @@ class _ControlUIWindow(QMainWindow):
 
             # Checks for external guidance state changes and, if necessary, updates the GUI to reflect the current
             # guidance state (enabled or disabled).
-            external_guidance_state = bool(self._data_array[9])
+            external_guidance_state = bool(self._data_array[_DataArrayIndex.GUIDANCE_ENABLED])
             if external_guidance_state != self._guidance_enabled:
                 # External guidance state changed, update UI accordingly
                 self._guidance_enabled = external_guidance_state
@@ -1009,7 +1021,7 @@ class _ControlUIWindow(QMainWindow):
         # Sends a runtime termination signal via the SharedMemoryArray before accepting the close event.
         # noinspection PyBroadException
         with contextlib.suppress(Exception):
-            self._data_array[0] = 1
+            self._data_array[_DataArrayIndex.TERMINATION] = 1
         if event is not None:
             event.accept()
 
@@ -1017,7 +1029,7 @@ class _ControlUIWindow(QMainWindow):
         """Instructs the system to terminate the runtime."""
         previous_status = self.runtime_status_label.text()
         style = self.runtime_status_label.styleSheet()
-        self._data_array[1] = 1
+        self._data_array[_DataArrayIndex.EXIT_SIGNAL] = 1
         self.runtime_status_label.setText("✖ Exit signal sent")
         self.runtime_status_label.setStyleSheet("QLabel { color: #e74c3c; font-weight: bold; }")
         self.exit_btn.setText("✖ Exit Requested")
@@ -1036,7 +1048,7 @@ class _ControlUIWindow(QMainWindow):
         """Instructs the system to deliver a water reward to the animal."""
         # Sends the reward command via the SharedMemoryArray and temporarily sets the statsu to indicate that the
         # reward is sent.
-        self._data_array[2] = 1
+        self._data_array[_DataArrayIndex.REWARD_SIGNAL] = 1
         self.valve_status_label.setText("Reward: 🟢 Sent")
         self.valve_status_label.setStyleSheet("QLabel { color: #3498db; font-weight: bold; }")
 
@@ -1049,37 +1061,42 @@ class _ControlUIWindow(QMainWindow):
 
     def _open_valve(self) -> None:
         """Instructs the system to open the water delivery valve."""
-        self._data_array[6] = 1
+        self._data_array[_DataArrayIndex.OPEN_VALVE] = 1
         self.valve_status_label.setText("Valve: 🔓 Opened")
         self.valve_status_label.setStyleSheet("QLabel { color: #27ae60; font-weight: bold; }")
 
     def _close_valve(self) -> None:
         """Instructs the system to close the water delivery valve."""
-        self._data_array[7] = 1
+        self._data_array[_DataArrayIndex.CLOSE_VALVE] = 1
         self.valve_status_label.setText("Valve: 🔒 Closed")
         self.valve_status_label.setStyleSheet("QLabel { color: #e67e22; font-weight: bold; }")
 
     def _toggle_pause(self) -> None:
         """Instructs the system to pause or resume the data acquisition session's runtime."""
         self._is_paused = not self._is_paused
-        self._data_array[5] = 1 if self._is_paused else 0
+        self._data_array[_DataArrayIndex.PAUSE_STATE] = 1 if self._is_paused else 0
         self._update_pause_ui()
 
     def _update_reward_volume(self) -> None:
         """Updates the volume used by the system when delivering water rewards to match the current GUI
         configuration.
         """
-        self._data_array[8] = int(self.volume_spinbox.value())
+        self._data_array[_DataArrayIndex.REWARD_VOLUME] = int(self.volume_spinbox.value())
 
     def _update_speed_modifier(self) -> None:
         """Updates the running speed threshold modifier to match the current GUI configuration."""
-        self._speed_modifier = int(self.speed_spinbox.value())
-        self._data_array[3] = self._speed_modifier
+        self._data_array[_DataArrayIndex.SPEED_MODIFIER] = int(self.speed_spinbox.value())
 
     def _update_duration_modifier(self) -> None:
         """Updates the running epoch duration modifier to match the current GUI configuration."""
-        self._duration_modifier = int(self.duration_spinbox.value())
-        self._data_array[4] = self._duration_modifier
+        self._data_array[_DataArrayIndex.DURATION_MODIFIER] = int(self.duration_spinbox.value())
+
+    @staticmethod
+    def _refresh_button_style(button: QPushButton) -> None:
+        """Refreshes button styles after object name change."""
+        button.style().unpolish(button)
+        button.style().polish(button)
+        button.update()
 
     def _update_guidance_ui(self) -> None:
         """Updates the GUI to reflect the current Virtual Reality task guidance state."""
@@ -1091,14 +1108,12 @@ class _ControlUIWindow(QMainWindow):
             self.guidance_btn.setObjectName("guidanceButton")
 
         # Refreshes styles after object name change
-        self.guidance_btn.style().unpolish(self.guidance_btn)
-        self.guidance_btn.style().polish(self.guidance_btn)
-        self.guidance_btn.update()  # Forces update to apply new styles
+        self._refresh_button_style(button=self.guidance_btn)
 
     def _toggle_guidance(self) -> None:
         """Instructs the system to enable or disable the Virtual Reality task guidance mode."""
         self._guidance_enabled = not self._guidance_enabled
-        self._data_array[9] = 1 if self._guidance_enabled else 0
+        self._data_array[_DataArrayIndex.GUIDANCE_ENABLED] = 1 if self._guidance_enabled else 0
         self._update_guidance_ui()
 
     def _update_pause_ui(self) -> None:
@@ -1115,26 +1130,22 @@ class _ControlUIWindow(QMainWindow):
             self.runtime_status_label.setStyleSheet("QLabel { color: #27ae60; font-weight: bold; }")
 
         # Refresh styles after object name change
-        self.pause_btn.style().unpolish(self.pause_btn)
-        self.pause_btn.style().polish(self.pause_btn)
-        self.pause_btn.update()  # Forces update to apply new styles
+        self._refresh_button_style(button=self.pause_btn)
 
     def _toggle_reward_visibility(self) -> None:
         """Instructs the system to show or hide the Virtual Reality guidance mode collision box."""
         self._show_reward = not self._show_reward
         if self._show_reward:
-            self._data_array.write_data(index=10, data=np.int32(1))
+            self._data_array[_DataArrayIndex.SHOW_REWARD] = 1
             self.reward_visibility_btn.setText("🙈 Hide Reward")
             self.reward_visibility_btn.setObjectName("hideRewardButton")
         else:
-            self._data_array.write_data(index=10, data=np.int32(0))
+            self._data_array[_DataArrayIndex.SHOW_REWARD] = 0
             self.reward_visibility_btn.setText("👁️ Show Reward")
             self.reward_visibility_btn.setObjectName("showRewardButton")
 
         # Refreshes styles after object name change
-        self.reward_visibility_btn.style().unpolish(self.reward_visibility_btn)
-        self.reward_visibility_btn.style().polish(self.reward_visibility_btn)
-        self.reward_visibility_btn.update()  # Forces update to apply new styles
+        self._refresh_button_style(button=self.reward_visibility_btn)
 
 
 class CachedMotifDecomposer:
