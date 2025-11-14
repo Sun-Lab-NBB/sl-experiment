@@ -136,7 +136,8 @@ lint.select = ["ALL"]
 
 # General ignore directives
 lint.ignore = [
-    "W291",  # Conflicts with docstring formatting
+    "W291",  # Conflicts with docstring formatting.
+    "W293",  # Conflicts with UI style formatting.
     "BLE001",  # Catching blind exceptions is necessary for the functioning of this library.
     "T201",  # Print is necessary to work with some external formatters used in this library.
     "ANN401",  # While suboptimal, ANY is a helpful type when used with caution

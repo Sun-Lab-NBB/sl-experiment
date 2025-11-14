@@ -2,6 +2,7 @@
 
 import sys
 from pathlib import Path
+import contextlib
 from dataclasses import field, dataclass
 from multiprocessing import Process
 
@@ -34,7 +35,7 @@ def get_system_configuration() -> MesoscopeSystemConfiguration:
         The data acquisition system configuration data as a MesoscopeSystemConfiguration instance.
 
     Raises:
-        ValueError: If the host-machine does not belong to the Mesoscope-VR data acquisition system.
+        TypeError: If the host-machine does not belong to the Mesoscope-VR data acquisition system.
     """
     system_configuration = get_system_configuration_data()
     if not isinstance(system_configuration, MesoscopeSystemConfiguration):
@@ -43,10 +44,10 @@ def get_system_configuration() -> MesoscopeSystemConfiguration:
             f"belongs to the {system_configuration.name} data acquisition system. Use the 'sl-configure system' CLI "
             f"command to reconfigure the host-machine to belong the Mesoscope-VR data acquisition system."
         )
-        console.error(message, error=ValueError)
+        console.error(message, error=TypeError)
 
         # Fallback to appease mypy, should not be reachable
-        raise ValueError(message)  # pragma: no cover
+        raise TypeError(message)  # pragma: no cover
     return system_configuration
 
 
@@ -166,71 +167,50 @@ class _ScanImagePCData:
 
 @dataclass()
 class _VRPCDestinations:
-    """Stores the paths to the VRPC filesystem-mounted directories of the Synology NAS and BioHPC server.
-
-    The paths from this section are primarily used to transfer preprocessed data to the long-term storage destinations.
+    """Defines the layout of the long-term data storage infrastructure mounted to the VRPC's filesystem via the SMB
+    protocol used to store the session's data after acquisition.
     """
 
-    nas_raw_data_path: Path
-    """Stores the path to the session's raw_data directory on the Synology NAS, which is mounted to the VRPC via the 
-    SMB or equivalent protocol."""
-    server_raw_data_path: Path
-    """Stores the path to the session's raw_data directory on the BioHPC server, which is mounted to the VRPC via the 
-    SMB or equivalent protocol."""
-    telomere_path: Path = field(default_factory=Path, init=False)
-    """Stores the path to the session's telomere.bin marker. This marker is generated as part of data preprocessing on 
-    the VRPC and can be removed by the BioHPC server to notify the VRPC that the server received preprocessed in a 
-    compromised (damaged) state. If the telomere.bin file is present on the BioHPC server after the VRPC instructs the
-    server to verify the integrity opf the transferred data, the VRPC concludes that the data was transferred intact and
-    removes (purges) the local copy of raw_data."""
+    nas_data_path: Path
+    """The path to the session's data directory on the Synology NAS."""
+    server_data_path: Path
+    """The path to the session's data directory on the BioHPC server."""
 
     def __post_init__(self) -> None:
-        # Resolves the server-side telomere.bin marker path using the root directory.
-        self.telomere_path = self.server_raw_data_path.joinpath("telomere.bin")
-
+        """Resolves the managed directory layout, creating any missing directory components."""
         # Ensures all destination directories exist
-        ensure_directory_exists(self.nas_raw_data_path)
-        ensure_directory_exists(self.server_raw_data_path)
+        ensure_directory_exists(self.nas_data_path)
+        ensure_directory_exists(self.server_data_path)
 
 
 class MesoscopeData:
-    """This works together with the SessionData class to define additional filesystem paths used by the Mesoscope-VR
-    data acquisition system during runtime.
-
-    Specifically, the paths from this class are used during both data acquisition and preprocessing to work with
-    the managed session's data across the machines (PCs) that make up the acquisition system and long-term storage
-    infrastructure.
+    """Defines the Mesoscope-VR data acquisition system's filesystem layout used to acquire and preprocess the target
+    session's data.
 
     Args:
-        session_data: The SessionData instance for the managed session.
+        session_data: The SessionData instance that defines the processed data acquisition session.
 
     Attributes:
-        vrpc_persistent_data: Stores paths to files inside the VRPC persistent_data directory for the managed session's
-            project and animal.
-        scanimagepc_data: Stores paths to all ScanImagePC (Mesoscope PC) files and directories used during data
-            acquisition and processing.
-        destinations: Stores paths to the long-term data storage destinations.
+        vrpc_data: Defines the layout of the session-specific VRPC's persistent data directory.
+        scanimagepc_data: Defines the layout of the ScanImagePC's mesoscope data directory.
+        destinations: Defines the layout of the long-term data storage infrastructure mounted to the VRPC's filesystem.
     """
 
-    def __init__(self, session_data: SessionData):
-        # Prevents this class from being instantiated on any acquisition system other than the Mesoscope-VR system.
-        system_configuration = get_system_configuration()
-
-        # Unpacks session paths nodes from the SessionData instance
+    def __init__(self, system_configuration: MesoscopeSystemConfiguration, session_data: SessionData) -> None:
+        # Unpacks session path nodes from the SessionData instance
         project = session_data.project_name
         animal = session_data.animal_id
         session = session_data.session_name
 
-        # Instantiates additional path data classes
-        # noinspection PyArgumentList
-        self.vrpc_persistent_data = _VRPCPersistentData(
+        # VRPC persistent data
+        self.vrpc_data = _VRPCPersistentData(
             session_type=session_data.session_type,
             persistent_data_path=system_configuration.filesystem.root_directory.joinpath(
                 project, animal, "persistent_data"
             ),
         )
 
-        # noinspection PyArgumentList
+        # ScanImagePC mesoscope data
         self.scanimagepc_data = _ScanImagePCData(
             session=session,
             meso_data_path=system_configuration.filesystem.mesoscope_directory,
@@ -239,113 +219,104 @@ class MesoscopeData:
             ),
         )
 
-        # noinspection PyArgumentList
+        # Server and NAS (data storage)
         self.destinations = _VRPCDestinations(
-            nas_raw_data_path=system_configuration.filesystem.nas_directory.joinpath(
-                project, animal, session, "raw_data"
-            ),
-            server_raw_data_path=system_configuration.filesystem.server_directory.joinpath(
-                project, animal, session, "raw_data"
-            ),
+            nas_data_path=system_configuration.filesystem.nas_directory.joinpath(project, animal, session),
+            server_data_path=system_configuration.filesystem.server_directory.joinpath(project, animal, session),
         )
 
 
 class RuntimeControlUI:
-    """Provides a real-time Graphical User Interface (GUI) that allows interactively controlling certain Mesoscope-VR
-    runtime parameters.
-
-    The UI itself runs in a parallel process and communicates with an instance of this class via the SharedMemoryArray
-    instance. This optimizes the UI's responsiveness without overburdening the main thread that runs the task logic and
-    the animal performance visualization.
+    """Provides the Graphical User Interface (GUI) that allows modifying certain Mesoscope-VR runtime parameters in real
+    time.
 
     Notes:
-        This class is specialized to work with the Qt6 framework. In the future, it may be refactored to support the Qt6
-        framework.
+        The UI runs in a parallel process and requires a single CPU core to support its runtime.
 
-        The UI starts the runtime in the 'paused' state to allow the user to check the valve and all other runtime
-        components before formally starting the runtime.
+        Initializing the class does not start the UI process. Call the start() method before calling any other instance
+        methods to start the UI process.
 
     Attributes:
-        _data_array: A SharedMemoryArray used to store the data recorded by the remote UI process.
-        _ui_process: The Process instance running the Qt6 UI.
-        _started: A static flag used to prevent the __del__ method from shutting down an already terminated instance.
-
-    Notes:
-        Since version 3.0.0, calling the initializer does not start the IO process. Call the start() method to finish
-        initializing all UI assets.
+        _data_array: The SharedMemoryArray instance used to bidirectionally transfer the data between the UI process
+            and other runtime processes.
+        _ui_process: The Process instance running the GUI cycle.
+        _started: Tracks whether the UI process is running.
     """
 
     def __init__(self) -> None:
-        self._data_array = SharedMemoryArray.create_array(
-            name="runtime_control_ui", prototype=np.zeros(shape=11, dtype=np.int32), exist_ok=True
-        )
+        # Defines the prototype array for the SharedMemoryArray initialization and sets the array elements to the
+        # desired default state
+        prototype = np.zeros(shape=11, dtype=np.uint32)
+        prototype[5] = 1  # Ensures all runtimes start in a paused state
+        prototype[9] = 0  # Initially disables guidance for all runtimes
+        prototype[10] = 0  # Defaults to not showing reward collision boundary
+        prototype[8] = 5  # Preconfigures reward delivery to use 5 uL rewards
 
-        # Configures certain array elements to specific initialization values
-        self._data_array.write_data(index=8, data=np.int32(5))  # Preconfigures reward delivery to use 5 uL rewards
-        self._data_array.write_data(index=10, data=np.int32(0))  # Defaults to not showing reward collision boundary
-        self._data_array.write_data(index=9, data=np.int32(0))  # Initially disables guidance for all runtimes
-        self._data_array.write_data(index=5, data=np.int32(1))  # Ensures all runtimes start in a paused state
+        # Initializes the SharedMemoryArray instance
+        self._data_array = SharedMemoryArray.create_array(
+            name="runtime_control_ui", prototype=prototype, exists_ok=True
+        )
 
         # Defines but does not automatically start the UI process.
         self._ui_process = Process(target=self._run_ui_process, daemon=True)
         self._started = False
 
     def __del__(self) -> None:
-        """Ensures all class resources are released before the instance is destroyed.
-
-        This is a fallback method, using shutdown() directly is the preferred way of releasing resources.
+        """Terminates the UI process and releases the instance's shared memory buffer when the instance is
+        garbage-collected.
         """
         self.shutdown()
 
     def start(self) -> None:
         """Starts the remote UI process."""
-        # Prevents starting an already started instance
+        # If the instance is already started, aborts early
         if self._started:
             return
 
+        # Starts the remote UI process.
         self._ui_process.start()
+
+        # Connects to the shared memory array from the central runtime process and configures it to destroy the
+        # shared memory buffer in case of an emergency (error) shutdown.
+        self._data_array.connect()
+        self._data_array.enable_buffer_destruction()
+
+        # Marks the instance as started
         self._started = True
 
     def shutdown(self) -> None:
-        """Shuts down the UI and releases all SharedMemoryArray resources.
-
-        This method should be called at the end of runtime to properly release all resources and terminate the
-        remote UI process.
-        """
-        # Prevents shutting down an already terminated instance
+        """Shuts down the remote UI process and releases the instance's shared memory buffer."""
+        # If the instance is already shut down, aborts early.
         if not self._started:
             return
 
-        # If the UI process is still alive, shuts it down
+        # Shuts down the remote UI process.
         if self._ui_process.is_alive():
-            self._data_array.write_data(index=0, data=np.int32(1))  # Sends the termination signal to the remote process
+            self._data_array[0] = 1  # Sends the termination signal to the remote process
             self._ui_process.terminate()
-            self._ui_process.join(timeout=2.0)  # Waits for at most 2 seconds to terminate the process gracefully
+            self._ui_process.join(timeout=2.0)
 
-        # Destroys the SharedMemoryArray
+        # Terminates the shared memory array buffer.
         self._data_array.disconnect()
         self._data_array.destroy()
 
-        # Toggles the flag
+        # Marks the instance as shut down
         self._started = False
 
     def _run_ui_process(self) -> None:
-        """The main function that runs in the parallel process to display and manage the Qt6 UI.
-
-        This runs Qt6 in the main thread of the separate process, which is perfectly valid.
-        """
+        """Runs UI management cycle in a parallel process."""
         # Connects to the shared memory array from the remote process
         self._data_array.connect()
 
-        # Create and run the Qt6 application in this process's main thread
+        # Creates and runs the Qt6 application in this process's main thread
         try:
-            # Creates the QT5 GUI application
+            # Creates the GUI application
             app = QApplication(sys.argv)
             app.setApplicationName("Mesoscope-VR Control Panel")
             app.setOrganizationName("SunLab")
 
             # Sets Qt6 application-wide style
-            app.setStyle("Fusion")  # Modern flat style available in Qt6
+            app.setStyle("Fusion")
 
             # Creates the main application window
             window = _ControlUIWindow(self._data_array)
@@ -353,136 +324,109 @@ class RuntimeControlUI:
 
             # Runs the app
             app.exec()
-
-        # Terminates with an exception which will be propagated to the main process
         except Exception as e:
-            message = f"Unable to initialize the QT5 GUI application. Encountered the following error {e}."
+            message = (
+                f"Unable to initialize the GUI application for the main runtime user interface. "
+                f"Encountered the following error {e}."
+            )
             console.error(message=message, error=RuntimeError)
 
         # Ensures proper UI shutdown when runtime encounters errors
         finally:
             self._data_array.disconnect()
 
-    def set_pause_state(self, paused: bool) -> None:
-        """Sets the runtime pause state from outside the UI.
-
-        This method is used to synchronize the remote GUI with the main runtime process if the runtime process enters
-        the paused state. Typically, this happens when a major external component, such as the Mesoscope or Unity,
-        unexpectedly terminates its runtime.
+    def set_pause_state(self, *, paused: bool) -> None:
+        """Configures the GUI to reflect the current data acquisition session's runtime state.
 
         Args:
-            paused: Determines the externally assigned GUI pause state.
+            paused: Determines whether the session is paused or running.
         """
-        self._data_array.write_data(index=5, data=np.int32(1 if paused else 0))
+        self._data_array[5] = 1 if paused else 0
 
-    def set_guidance_state(self, enabled: bool) -> None:
-        """Sets the guidance state from outside the UI.
-
-        This method is used to synchronize the remote GUI with the main runtime process when the lick guidance state
-        needs to be controlled programmatically.
+    def set_guidance_state(self, *, enabled: bool) -> None:
+        """Configures the GUI to reflect the data acquisition session's Virtual Reality task guidance state.
 
         Args:
-            enabled: Determines the externally assigned GUI guidance state.
+            enabled: Determines whether the guidance mode is currently enabled.
         """
-        self._data_array.write_data(index=9, data=np.int32(1 if enabled else 0))
+        self._data_array[9] = 1 if enabled else 0
 
     @property
     def exit_signal(self) -> bool:
-        """Returns True if the user has requested the runtime to gracefully abort.
-
-        Notes:
-            Each time this property is accessed, the flag is reset to 0.
-        """
-        exit_flag = bool(self._data_array.read_data(index=1, convert_output=True))
-        self._data_array.write_data(index=1, data=np.int32(0))
+        """Returns True if the user has requested the system to abort the data acquisition session's runtime."""
+        exit_flag = bool(self._data_array[1])
+        self._data_array[1] = 0
         return exit_flag
 
     @property
     def reward_signal(self) -> bool:
-        """Returns True if the user has requested the system to deliver a water reward.
-
-        Notes:
-            Each time this property is accessed, the flag is reset to 0.
-        """
-        reward_flag = bool(self._data_array.read_data(index=2, convert_output=True))
-        self._data_array.write_data(index=2, data=np.int32(0))
+        """Returns True if the user has requested the system to deliver a water reward."""
+        reward_flag = bool(self._data_array[2])
+        self._data_array[2] = 0
         return reward_flag
 
     @property
     def speed_modifier(self) -> int:
-        """Returns the current user-defined modifier to apply to the running speed threshold."""
-        return int(self._data_array.read_data(index=3, convert_output=True))
+        """Returns the current user-defined running speed threshold modifier."""
+        return int(self._data_array[3])
 
     @property
     def duration_modifier(self) -> int:
-        """Returns the current user-defined modifier to apply to the running epoch duration threshold."""
-        return int(self._data_array.read_data(index=4, convert_output=True))
+        """Returns the current user-defined running epoch duration threshold modifier."""
+        return int(self._data_array[4])
 
     @property
     def pause_runtime(self) -> bool:
-        """Returns True if the user has requested the acquisition system to pause the current runtime."""
-        return bool(self._data_array.read_data(index=5, convert_output=True))
+        """Returns True if the user has requested the system to pause the data acquisition session's runtime."""
+        return bool(self._data_array[5])
 
     @property
     def open_valve(self) -> bool:
-        """Returns True if the user has requested the acquisition system to permanently open the water delivery
-        valve.
-
-        Notes:
-            Each time this property is accessed, the flag is reset to 0.
-        """
-        open_flag = bool(self._data_array.read_data(index=6, convert_output=True))
-        self._data_array.write_data(index=6, data=np.int32(0))
+        """Returns True if the user has requested the system to open the water delivery valve."""
+        open_flag = bool(self._data_array[6])
+        self._data_array[6] = 0
         return open_flag
 
     @property
     def close_valve(self) -> bool:
-        """Returns True if the user has requested the acquisition system to permanently close the water delivery
-        valve.
-
-        Notes:
-            Each time this property is accessed, the flag is reset to 0.
-        """
-        close_flag = bool(self._data_array.read_data(index=7, convert_output=True))
-        self._data_array.write_data(index=7, data=np.int32(0))
+        """Returns True if the user has requested the system to close the water delivery valve."""
+        close_flag = bool(self._data_array[7])
+        self._data_array[7] = 0
         return close_flag
 
     @property
     def reward_volume(self) -> int:
-        """Returns the current user-defined water reward volume value."""
-        return int(self._data_array.read_data(index=8, convert_output=True))
+        """Returns the current user-defined volume of water dispensed by the valve when delivering water rewards."""
+        return int(self._data_array[8])
 
     @property
     def enable_guidance(self) -> bool:
-        """Returns True if the user has enabled lick guidance mode."""
-        return bool(self._data_array.read_data(index=9, convert_output=True))
+        """Returns True if the user has enabled the Virtual Reality task guidance mode."""
+        return bool(self._data_array[9])
 
     @property
     def show_reward(self) -> bool:
-        """Returns True if the reward zone collision boundary should be shown/displayed to the animal."""
-        return bool(self._data_array.read_data(index=10, convert_output=True))
+        """Returns True if the user has enabled showing the Virtual Reality task guidance mode collision box to the
+        animal.
+        """
+        return bool(self._data_array[10])
 
 
 class _ControlUIWindow(QMainWindow):
-    """Generates, renders, and maintains the main Mesoscope-VR acquisition system Graphical User Interface Qt6
-    application window.
-
-    This class binds the Qt6 GUI elements and statically defines the GUI element layout used by the main interface
-    window application. The interface enables sl-experiment users to control certain runtime parameters in real time via
-    an interactive GUI.
+    """Generates, renders, and maintains the Mesoscope-VR acquisition system's Graphical User Interface application
+    window.
 
     Attributes:
-        _data_array: A reference to the shared memory array used for communication between the main runtime thread
-            and the Qt6 GUI.
-        _is_paused: A flag indicating whether the runtime is paused or not.
-        _speed_modifier: The current user-defined modifier to apply to the running speed threshold.
-        _duration_modifier: The current user-defined modifier to apply to the running epoch duration threshold.
-        _guidance_enabled: A flag indicating whether lick guidance mode is enabled or not.
-        _show_reward: A flag indicating whether the reward zone collision boundary should be shown/displayed to the
-            animal.
+        _data_array: The SharedMemoryArray instance used to bidirectionally transfer the data between the UI process
+            and other runtime processes.
+        _is_paused: Tracks whether the runtime is paused.
+        _speed_modifier: The user-defined running speed threshold modifier.
+        _duration_modifier: The user-defined running epoch duration threshold modifier.
+        _guidance_enabled: Tracks whether the Virtual Reality task guidance mode is enabled.
+        _show_reward: Tracks whether the Virtual Reality guidance mode collision box is visible to the animal.
     """
 
-    def __init__(self, data_array: SharedMemoryArray):
+    def __init__(self, data_array: SharedMemoryArray) -> None:
         super().__init__()  # Initializes the main window superclass
 
         # Defines internal attributes.
@@ -507,7 +451,7 @@ class _ControlUIWindow(QMainWindow):
         self._apply_qt6_styles()
 
     def _setup_ui(self) -> None:
-        """Creates and arranges all UI elements optimized for Qt6 with proper scaling."""
+        """Creates and arranges all UI elements."""
         # Initializes the main widget container
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
@@ -551,7 +495,7 @@ class _ControlUIWindow(QMainWindow):
         self.reward_visibility_btn.clicked.connect(self._toggle_reward_visibility)
         self.reward_visibility_btn.setObjectName("showRewardButton")
 
-        # Configures the buttons to expand when UI is resized, but use a fixed height of 35 points
+        # Configures the buttons to expand when the UI is resized, but use a fixed height of 35 points
         for btn in [self.exit_btn, self.pause_btn, self.guidance_btn, self.reward_visibility_btn]:
             btn.setMinimumHeight(35)
             btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
@@ -599,7 +543,7 @@ class _ControlUIWindow(QMainWindow):
         self.reward_btn.clicked.connect(self._deliver_reward)
         self.reward_btn.setObjectName("rewardButton")
 
-        # Configures the buttons to expand when UI is resized, but use a fixed height of 35 points
+        # Configures the buttons to expand when the UI is resized, but use a fixed height of 35 points
         for btn in [self.valve_open_btn, self.valve_close_btn, self.reward_btn]:
             btn.setMinimumHeight(35)
             btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
@@ -692,10 +636,7 @@ class _ControlUIWindow(QMainWindow):
         main_layout.addLayout(controls_layout)
 
     def _apply_qt6_styles(self) -> None:
-        """Applies optimized styling to all UI elements managed by this class.
-
-        This configured the UI to display properly, assuming the UI window uses the default resolution.
-        """
+        """Applies optimized styling to all UI elements managed by this instance."""
         self.setStyleSheet("""
                     QMainWindow {
                         background-color: #ecf0f1;
@@ -1025,31 +966,25 @@ class _ControlUIWindow(QMainWindow):
                 """)
 
     def _setup_monitoring(self) -> None:
-        """Sets up a QTimer to monitor the runtime termination status.
-
-        This monitors the value stored under index 0 of the communication SharedMemoryArray and, if the value becomes 1,
-        triggers the GUI termination sequence.
-        """
+        """Sets up a QTimer to monitor the runtime termination status."""
         self.monitor_timer = QTimer(self)
         # noinspection PyUnresolvedReferences
         self.monitor_timer.timeout.connect(self._check_external_state)
         self.monitor_timer.start(100)  # Checks every 100 ms
 
     def _check_external_state(self) -> None:
-        """Checks the state of externally addressable SharedMemoryArray values and acts on received state updates.
-
-        This method monitors certain values of the communication array to receive messages from the main runtime
-        process. Primarily, this functionality is used to gracefully terminate the GUI from the main runtime process.
+        """Checks the state of externally addressable UI elements and updates the managed GUI to reflect the
+        externally-driven changes.
         """
         # noinspection PyBroadException
         try:
             # If the termination flag has been set to 1, terminates the GUI process
-            if self._data_array.read_data(index=0, convert_output=True) == 1:
+            if self._data_array[0] == 1:
                 self.close()
 
             # Checks for external pause state changes and, if necessary, updates the GUI to reflect the current
             # runtime state (running or paused).
-            external_pause_state = bool(self._data_array.read_data(index=5, convert_output=True))
+            external_pause_state = bool(self._data_array[5])
             if external_pause_state != self._is_paused:
                 # External pause state changed, update UI accordingly
                 self._is_paused = external_pause_state
@@ -1057,40 +992,32 @@ class _ControlUIWindow(QMainWindow):
 
             # Checks for external guidance state changes and, if necessary, updates the GUI to reflect the current
             # guidance state (enabled or disabled).
-            external_guidance_state = bool(self._data_array.read_data(index=9, convert_output=True))
+            external_guidance_state = bool(self._data_array[9])
             if external_guidance_state != self._guidance_enabled:
                 # External guidance state changed, update UI accordingly
                 self._guidance_enabled = external_guidance_state
                 self._update_guidance_ui()
-        except:
+        except Exception:
             self.close()
 
-    def closeEvent(self, event: QCloseEvent | None) -> None:
+    def closeEvent(self, event: QCloseEvent | None) -> None:  # noqa: N802
         """Handles GUI window close events.
 
-        This function is called when the user manually closes the GUI window. This is treated as the request to
-        terminate the ongoing runtime.
-
-        Notes:
-            Do not call this function manually! It is designed to be used by Qt GUI manager only.
-
         Args:
-            event: The Qt-generated window shutdown event object.
+            event: The Qt-generated window shutdown event instance.
         """
         # Sends a runtime termination signal via the SharedMemoryArray before accepting the close event.
         # noinspection PyBroadException
-        try:
-            self._data_array.write_data(index=0, data=np.int32(1))
-        except:
-            pass
+        with contextlib.suppress(Exception):
+            self._data_array[0] = 1
         if event is not None:
             event.accept()
 
     def _exit_runtime(self) -> None:
-        """Signals the runtime to gracefully terminate."""
+        """Instructs the system to terminate the runtime."""
         previous_status = self.runtime_status_label.text()
         style = self.runtime_status_label.styleSheet()
-        self._data_array.write_data(index=1, data=np.int32(1))
+        self._data_array[1] = 1
         self.runtime_status_label.setText("✖ Exit signal sent")
         self.runtime_status_label.setStyleSheet("QLabel { color: #e74c3c; font-weight: bold; }")
         self.exit_btn.setText("✖ Exit Requested")
@@ -1106,13 +1033,10 @@ class _ControlUIWindow(QMainWindow):
         QTimer.singleShot(2000, lambda: self.runtime_status_label.setStyleSheet(style))
 
     def _deliver_reward(self) -> None:
-        """Triggers the Mesoscope-VR system to deliver a single water reward to the animal.
-
-        The size of the reward is addressable (configurable) via the reward volume box under the Valve control buttons.
-        """
+        """Instructs the system to deliver a water reward to the animal."""
         # Sends the reward command via the SharedMemoryArray and temporarily sets the statsu to indicate that the
         # reward is sent.
-        self._data_array.write_data(index=2, data=np.int32(1))
+        self._data_array[2] = 1
         self.valve_status_label.setText("Reward: 🟢 Sent")
         self.valve_status_label.setStyleSheet("QLabel { color: #3498db; font-weight: bold; }")
 
@@ -1124,40 +1048,41 @@ class _ControlUIWindow(QMainWindow):
         )
 
     def _open_valve(self) -> None:
-        """Permanently opens the water delivery valve."""
-        self._data_array.write_data(index=6, data=np.int32(1))
+        """Instructs the system to open the water delivery valve."""
+        self._data_array[6] = 1
         self.valve_status_label.setText("Valve: 🔓 Opened")
         self.valve_status_label.setStyleSheet("QLabel { color: #27ae60; font-weight: bold; }")
 
     def _close_valve(self) -> None:
-        """Permanently closes the water delivery valve."""
-        self._data_array.write_data(index=7, data=np.int32(1))
+        """Instructs the system to close the water delivery valve."""
+        self._data_array[7] = 1
         self.valve_status_label.setText("Valve: 🔒 Closed")
         self.valve_status_label.setStyleSheet("QLabel { color: #e67e22; font-weight: bold; }")
 
     def _toggle_pause(self) -> None:
-        """Toggles the runtime between paused and unpaused (active) states."""
+        """Instructs the system to pause or resume the data acquisition session's runtime."""
         self._is_paused = not self._is_paused
-        self._data_array.write_data(index=5, data=np.int32(1 if self._is_paused else 0))
+        self._data_array[5] = 1 if self._is_paused else 0
         self._update_pause_ui()
 
     def _update_reward_volume(self) -> None:
-        """Updates the reward volume in the data array in response to the user modifying the GUI field value."""
-        volume = int(self.volume_spinbox.value())
-        self._data_array.write_data(index=8, data=np.int32(volume))
+        """Updates the volume used by the system when delivering water rewards to match the current GUI
+        configuration.
+        """
+        self._data_array[8] = int(self.volume_spinbox.value())
 
     def _update_speed_modifier(self) -> None:
-        """Updates the speed modifier in the data array in response to the user modifying the GUI field value."""
+        """Updates the running speed threshold modifier to match the current GUI configuration."""
         self._speed_modifier = int(self.speed_spinbox.value())
-        self._data_array.write_data(index=3, data=np.int32(self._speed_modifier))
+        self._data_array[3] = self._speed_modifier
 
     def _update_duration_modifier(self) -> None:
-        """Updates the duration modifier in the data array in response to the user modifying the GUI field value."""
+        """Updates the running epoch duration modifier to match the current GUI configuration."""
         self._duration_modifier = int(self.duration_spinbox.value())
-        self._data_array.write_data(index=4, data=np.int32(self._duration_modifier))
+        self._data_array[4] = self._duration_modifier
 
     def _update_guidance_ui(self) -> None:
-        """Updates the guidance UI elements based on the current _guidance_enabled state."""
+        """Updates the GUI to reflect the current Virtual Reality task guidance state."""
         if self._guidance_enabled:
             self.guidance_btn.setText("🚫 Disable Guidance")
             self.guidance_btn.setObjectName("guidanceDisableButton")
@@ -1165,19 +1090,19 @@ class _ControlUIWindow(QMainWindow):
             self.guidance_btn.setText("🎯 Enable Guidance")
             self.guidance_btn.setObjectName("guidanceButton")
 
-        # Refresh styles after object name change
+        # Refreshes styles after object name change
         self.guidance_btn.style().unpolish(self.guidance_btn)
         self.guidance_btn.style().polish(self.guidance_btn)
         self.guidance_btn.update()  # Forces update to apply new styles
 
     def _toggle_guidance(self) -> None:
-        """Toggles guidance mode between enabled and disabled states."""
+        """Instructs the system to enable or disable the Virtual Reality task guidance mode."""
         self._guidance_enabled = not self._guidance_enabled
-        self._data_array.write_data(index=9, data=np.int32(1 if self._guidance_enabled else 0))
+        self._data_array[9] = 1 if self._guidance_enabled else 0
         self._update_guidance_ui()
 
     def _update_pause_ui(self) -> None:
-        """Updates the pause UI elements based on the current _is_paused state."""
+        """Updates the GUI to reflect the current data acquisition runtime pause state."""
         if self._is_paused:
             self.pause_btn.setText("▶️ Resume Runtime")
             self.pause_btn.setObjectName("resumeButton")
@@ -1195,7 +1120,7 @@ class _ControlUIWindow(QMainWindow):
         self.pause_btn.update()  # Forces update to apply new styles
 
     def _toggle_reward_visibility(self) -> None:
-        """Toggles reward collision boundary visibility between shown and hidden states."""
+        """Instructs the system to show or hide the Virtual Reality guidance mode collision box."""
         self._show_reward = not self._show_reward
         if self._show_reward:
             self._data_array.write_data(index=10, data=np.int32(1))
@@ -1206,26 +1131,18 @@ class _ControlUIWindow(QMainWindow):
             self.reward_visibility_btn.setText("👁️ Show Reward")
             self.reward_visibility_btn.setObjectName("showRewardButton")
 
-        # Refresh styles after object name change
+        # Refreshes styles after object name change
         self.reward_visibility_btn.style().unpolish(self.reward_visibility_btn)
         self.reward_visibility_btn.style().polish(self.reward_visibility_btn)
         self.reward_visibility_btn.update()  # Forces update to apply new styles
 
 
 class CachedMotifDecomposer:
-    """A helper class to cache the flattened Trial cue sequence motif data between multiple motif decomposition
-    runtimes.
-
-    Trial motifs are used during experiment runtimes to decompose a long sequence of VR wall cues into trials. In turn,
-    this is used to track the animal's performance during runtime (for each trial) and, if necessary, enable or disable
-    lick guidance. Since each experiment can use one or more trial motifs (cue sequences), this decomposition has to be
-    performed at runtime for each experiment. To optimize runtime performance, this class prepares and stores the
-    necessary dat to support numba-accelerated motif decomposition at runtime, especially in (rare) cases where it has
-    to be performed multiple times due to Unity crashing.
+    """Caches the flattened trial cue sequence motif data between multiple motif decomposition runtimes.
 
     Attributes:
         _cached_motifs: Stores the original trial motifs used for decomposition.
-        _cached_flat_data: Stores flattened motif data structure, optimized for numba-accelerated computations.
+        _cached_flat_data: Stores the flattened motif data structure, optimized for numba-accelerated computations.
         _cached_distances: Stores the distances of each trial motif, in centimeters.
     """
 
@@ -1242,23 +1159,26 @@ class CachedMotifDecomposer:
         """Prepares and caches the flattened motif data for faster cue sequence-to-trial decomposition (conversion).
 
         Args:
-            trial_motifs: A list of trial motifs (wall cue sequences) in the format of numpy arrays.
-            trial_distances: A list of trial distances in centimeters.
+            trial_motifs: The trial motifs (wall cue sequences) to decompose.
+            trial_distances: The trial motif distances, in centimeters.
 
         Returns:
-            A tuple containing five elements. The first element is a flattened array of all motifs. The second
-            element is an array that stores the starting indices of each motif in the flat array. The third element is
-            an array that stores the length of each motif. The fourth element is an array that stores the original
-            indices of motifs before sorting. The fifth element is an array of trial distances in centimeters.
+            A tuple with five elements. The first element is the flattened array that stores all motifs. The second
+            element is the array that stores the starting indices of each motif in the flattened array. The third
+            element is the array that stores the length of each motif, in cues. The fourth element is the array
+            that stores the original indices of motifs before sorting. The fifth element is the array of trial distances
+            in centimeters.
         """
         # Checks if the class already contains cached data for the input motifs. In this case, returns the cached data.
         if self._cached_motifs is not None and len(self._cached_motifs) == len(trial_motifs):
             # Carries out deep comparison of motif arrays
             all_equal = all(
-                np.array_equal(cached, current) for cached, current in zip(self._cached_motifs, trial_motifs)
+                np.array_equal(cached, current)
+                for cached, current in zip(self._cached_motifs, trial_motifs, strict=True)
             )
             if all_equal and self._cached_flat_data is not None and self._cached_distances is not None:
-                return self._cached_flat_data + (self._cached_distances,)
+                # noinspection PyRedundantParentheses, PyTypeChecker
+                return (*self._cached_flat_data, self._cached_distances)
 
         # Otherwise, prepares flattened motif data:
         # Sorts motifs by length (longest first)
@@ -1296,5 +1216,5 @@ class CachedMotifDecomposer:
         self._cached_flat_data = (motifs_flat, motif_starts, motif_lengths, motif_indices)
         self._cached_distances = distances_array
 
-        # noinspection PyTypeChecker
-        return self._cached_flat_data + (distances_array,)
+        # noinspection PyTypeChecker, PyRedundantParentheses
+        return (*self._cached_flat_data, distances_array)

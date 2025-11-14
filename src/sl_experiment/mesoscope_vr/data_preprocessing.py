@@ -1039,8 +1039,8 @@ def _push_data(
     # Uses SessionData to get the paths to remote destinations
     mesoscope_data = MesoscopeData(session_data)
     destinations = (
-        Path(mesoscope_data.destinations.nas_raw_data_path),
-        Path(mesoscope_data.destinations.server_raw_data_path),
+        Path(mesoscope_data.destinations.nas_data_path),
+        Path(mesoscope_data.destinations.server_data_path),
     )
 
     # Computes the xxHash3-128 checksum for the source folder
@@ -1354,8 +1354,8 @@ def purge_failed_session(session_data: SessionData) -> None:
     mesoscope_data = MesoscopeData(session_data)
     deletion_candidates = [
         session_data.raw_data.raw_data_path.parent,
-        mesoscope_data.destinations.nas_raw_data_path.parent,
-        mesoscope_data.destinations.server_raw_data_path.parent,
+        mesoscope_data.destinations.nas_data_path.parent,
+        mesoscope_data.destinations.server_data_path.parent,
         mesoscope_data.destinations.server_processed_data_path.parent,
         mesoscope_data.scanimagepc_data.session_specific_path,
     ]
