@@ -1,10 +1,8 @@
-"""This module provides additional tools and classes used by other modules of the mesoscope_vr package. Primarily, this
-includes various dataclasses specific to the Mesoscope-VR systems and utility functions used by other package modules.
-The contents of this module are not intended to be used outside the mesoscope_vr package.
-"""
+"""This module provides utility assets shared by other modules of the mesoscope_vr package."""
 
 import sys
 from pathlib import Path
+import contextlib
 from dataclasses import field, dataclass
 from multiprocessing import Process
 
@@ -27,57 +25,82 @@ from PyQt6.QtWidgets import (
 from sl_shared_assets import SessionData, SessionTypes, MesoscopeSystemConfiguration, get_system_configuration_data
 from ataraxis_base_utilities import console, ensure_directory_exists
 from ataraxis_data_structures import SharedMemoryArray
+from enum import IntEnum
 
 
 def get_system_configuration() -> MesoscopeSystemConfiguration:
-    """Verifies that the current data acquisition system is the Mesoscope-VR and returns its configuration data.
+    """Verifies that the host-machine belongs to the Mesoscope-VR data acquisition system and loads the
+    system configuration data as a MesoscopeSystemConfiguration instance.
+
+    Returns:
+        The data acquisition system configuration data as a MesoscopeSystemConfiguration instance.
 
     Raises:
-        ValueError: If the local data acquisition system is not a Mesoscope-VR system.
+        TypeError: If the host-machine does not belong to the Mesoscope-VR data acquisition system.
     """
     system_configuration = get_system_configuration_data()
     if not isinstance(system_configuration, MesoscopeSystemConfiguration):
         message = (
-            "Unable to instantiate the MesoscopeData class, as the local data acquisition system is not a "
-            "Mesoscope-VR system. This either indicates a user error (calling incorrect Data class) or local data "
-            "acquisition system misconfiguration. To reconfigured the data-acquisition system, use the "
-            "sl-create-system-config' CLI command."
+            f"Unable to resolve the configuration for the Mesoscope-VR data acquisition system, as the host-machine "
+            f"belongs to the {system_configuration.name} data acquisition system. Use the 'sl-configure system' CLI "
+            f"command to reconfigure the host-machine to belong the Mesoscope-VR data acquisition system."
         )
-        console.error(message, error=ValueError)
+        console.error(message, error=TypeError)
+
+        # Fallback to appease mypy, should not be reachable
+        raise TypeError(message)  # pragma: no cover
     return system_configuration
+
+
+mesoscope_vr_sessions: tuple[str, str, str, str] = (
+    SessionTypes.LICK_TRAINING,
+    SessionTypes.RUN_TRAINING,
+    SessionTypes.MESOSCOPE_EXPERIMENT,
+    SessionTypes.WINDOW_CHECKING,
+)
+"""Defines the data acquisition session types supported by the Mesoscope-VR data acquisition system."""
+
+
+class _DataArrayIndex(IntEnum):
+    """Defines the shared memory array indices for each runtime parameter addressable from the user-facing GUI."""
+    TERMINATION = 0
+    EXIT_SIGNAL = 1
+    REWARD_SIGNAL = 2
+    SPEED_MODIFIER = 3
+    DURATION_MODIFIER = 4
+    PAUSE_STATE = 5
+    OPEN_VALVE = 6
+    CLOSE_VALVE = 7
+    REWARD_VOLUME = 8
+    GUIDANCE_ENABLED = 9
+    SHOW_REWARD = 10
 
 
 @dataclass()
 class _VRPCPersistentData:
-    """Stores the paths to the directories and files that make up the 'persistent_data' directory on the VRPC.
-
-    VRPC persistent data directory is used to preserve configuration data, such as the positions of Zaber motors and
-    Meososcope objective, so that they can be reused across sessions of the same animals. The data in this directory
-    is read at the beginning of each session and replaced at the end of each session.
+    """Defines the layout of the VRPC's 'persistent_data' directory, used to cache animal-specific runtime parameters
+    between data acquisition sessions.
     """
 
     session_type: str
-    """Stores the type of the Mesoscope-VR-compatible session for which this additional dataclass is instantiated. This 
-    is used to resolve the cached session_Descriptor instance, as different session types use different descriptor 
-    files."""
+    """The type of the data acquisition session for which this instance was initialized."""
     persistent_data_path: Path
-    """Stores the path to the project- and animal-specific 'persistent_data' directory relative to the VRPC root."""
+    """The path to the project- and animal-specific directory that stores the VRPC runtime parameters and data cached 
+    between data acquisition runtimes."""
     zaber_positions_path: Path = field(default_factory=Path, init=False)
-    """Stores the path to the Zaber motor positions snapshot generated at the end of the previous session runtime. This 
-    is used to automatically restore all Zaber motors to the same position across all sessions."""
+    """The path to the .YAML file that stores Zaber motor positions used during the previous session's runtime."""
     mesoscope_positions_path: Path = field(default_factory=Path, init=False)
-    """Stores the path to the Mesoscope positions snapshot generated at the end of the previous session runtime. This 
-    is used to help the user to (manually) restore the Mesoscope to the same position across all sessions."""
+    """The path to the .YAML file that stores the Mesoscope's imaging axis coordinates used during the previous 
+    session's runtime."""
     session_descriptor_path: Path = field(default_factory=Path, init=False)
-    """Stores the path to the session_descriptor.yaml file generated at the end of the previous session runtime. This 
-    is used to automatically restore session runtime parameters used during the previous session. Primarily, this is 
-    used during animal training."""
+    """The path to the .YAML file that stores the data acquisition session's task parameters used during the previous 
+    session's runtime."""
     window_screenshot_path: Path = field(default_factory=Path, init=False)
-    """Stores the path to the window_screenshot.png file. This is a screenshot of the red-dot alignment, the 
-    ScanImage acquisition parameters, and the state of the imaged ROIs from the previous session. The screenshots are 
-    used to restore the imaging parameters to the same state as used during the previous session."""
+    """The path to the .PNG file that stores the screenshot of the imaging window, the red-dot alignment state, and the 
+    Mesoscope's data-acquisition configuration used during the previous session's runtime."""
 
     def __post_init__(self) -> None:
+        """Resolves the managed directory layout, creating any missing directory components."""
         # Resolves paths that can be derived from the root path.
         self.zaber_positions_path = self.persistent_data_path.joinpath("zaber_positions.yaml")
         self.mesoscope_positions_path = self.persistent_data_path.joinpath("mesoscope_positions.yaml")
@@ -85,88 +108,69 @@ class _VRPCPersistentData:
 
         # Resolves the session descriptor path based on the session type.
         if self.session_type == SessionTypes.LICK_TRAINING:
-            self.session_descriptor_path = self.persistent_data_path.joinpath("lick_training_session_descriptor.yaml")
+            self.session_descriptor_path = self.persistent_data_path.joinpath("lick_training_descriptor.yaml")
         elif self.session_type == SessionTypes.RUN_TRAINING:
-            self.session_descriptor_path = self.persistent_data_path.joinpath("run_training_session_descriptor.yaml")
+            self.session_descriptor_path = self.persistent_data_path.joinpath("run_training_descriptor.yaml")
         elif self.session_type == SessionTypes.MESOSCOPE_EXPERIMENT:
-            self.session_descriptor_path = self.persistent_data_path.joinpath(
-                "mesoscope_experiment_session_descriptor.yaml"
-            )
+            self.session_descriptor_path = self.persistent_data_path.joinpath("mesoscope_experiment_descriptor.yaml")
         elif self.session_type == SessionTypes.WINDOW_CHECKING:
-            self.session_descriptor_path = self.persistent_data_path.joinpath("window_checking_session_descriptor.yaml")
+            self.session_descriptor_path = self.persistent_data_path.joinpath("window_checking_descriptor.yaml")
 
         else:  # Raises an error for unsupported session types
             message = (
-                f"Unsupported session type '{self.session_type}' encountered when initializing additional path "
-                f"dataclasses for the Mesoscope-VR data acquisition system. Supported session types are "
-                f"'lick training', 'run training', 'window checking' and 'mesoscope experiment'."
+                f"Unsupported session type '{self.session_type}' encountered when resolving the filesystem layout for "
+                f"the Mesoscope-VR data acquisition system. Currently, only the following data acquisition session "
+                f"types are supported: {','.join(mesoscope_vr_sessions)}."
             )
             console.error(message, error=ValueError)
 
-        # Ensures that the target persistent directory exists
+        # Ensures that the target persistent_data directory exists
         ensure_directory_exists(self.persistent_data_path)
 
 
 @dataclass()
 class _ScanImagePCData:
-    """Stores the paths to the directories and files that make up the 'meso_data' directory on the ScanImagePC.
-
-    During runtime, the ScanImagePC should organize all collected data under this root directory. During preprocessing,
-    the VRPC uses SMB to access the data in this directory and merge it into the 'raw_data' session directory. The root
-    ScanImagePC directory also includes the persistent_data directories for all animals and projects whose data is
-    acquired via the Mesoscope-VR system.
+    """Defines the layout of the ScanImagePC's 'meso_data' directory used to aggregate all Mesoscope-acquired data
+    during a data acquisition session's runtime.
     """
 
-    session_name: str
-    """Stores the name of the session for which this data management class is instantiated. This is used to rename the 
-    general mesoscope data directory on the ScanImagePC to include the session-specific name."""
+    session: str
+    """The unique identifier of the session for which this instance was initialized."""
     meso_data_path: Path
-    """Stores the path to the root ScanImagePC data directory, mounted to the VRPC filesystem via the SMB or equivalent 
-    protocol. All mesoscope-generated data is stored under this root directory before it is merged into the VRPC-managed
-    raw_data directory of each session."""
+    """The path to the root ScanImagePC data-output directory."""
     persistent_data_path: Path
-    """Stores the path to the project- and animal-specific 'persistent_data' directory relative to the ScanImagePC 
-    root directory ('meso-data' directory)."""
+    """The path to the project- and animal-specific directory that stores the ScanImagePC (Mesoscope) runtime parameters
+    and data cached between data acquisition runtimes."""
     mesoscope_data_path: Path = field(default_factory=Path, init=False)
-    """Stores the path to the 'default' mesoscope_data directory. All experiment sessions across all animals and 
-    projects use the same mesoscope_data directory to save the data generated by the mesoscope via ScanImage 
-    software. This simplifies ScanImagePC configuration process during runtime, as all data is always saved in the same
-    directory. During preprocessing, the data is moved from the default directory first into a session-specific 
-    ScanImagePC directory and then into the VRPC raw_data session directory."""
+    """The path to the directory used by the Mesoscope to save all acquired data during the acquisition session's 
+    runtime, which is shared by all data acquisition sessions."""
     session_specific_path: Path = field(default_factory=Path, init=False)
-    """Stores the path to the session-specific data directory. This directory is generated at the end of each experiment
-    runtime to prepare mesoscope data for being moved to the VRPC-managed raw_data directory and to reset the 'default' 
-    mesoscope_data directory for the next session's runtime."""
+    """The path to the session-specific directory where all Mesoscope-acquired data is moved at the end of each data 
+    acquisition session's runtime."""
     ubiquitin_path: Path = field(default_factory=Path, init=False)
-    """Stores the path to the 'ubiquitin.bin' file. This file is automatically generated inside the session-specific 
-    data directory after its contents are safely transferred to the VRPC as part of preprocessing. During redundant data
-    removal step of preprocessing, the VRPC searches for directories marked with ubiquitin.bin and deletes them from the
-    ScanImagePC filesystem."""
+    """The path to the 'ubiquitin.bin' file used to mark session-specific ScanImagePC directories for deletion once 
+    the data is safely transferred to the VRPC."""
     motion_estimator_path: Path = field(default_factory=Path, init=False)
-    """Stores the path to the 'reference' motion estimator file generated during the first experiment session of each 
-    animal. This file is kept on the ScanImagePC to image the same population of cells across all experiment 
-    sessions."""
+    """The path top the animal-specific reference .ME (motion estimator) file, used to align the Mesoscope's imaging 
+    field to the same view across all data acquisition sessions."""
     roi_path: Path = field(default_factory=Path, init=False)
-    """Stores the path to the 'reference' fov.roi file generated during the first experiment session of each animal. 
-    This file is kept on the ScanImagePC in addition to the motion estimator file. It contains the snapshot of the 
-    ROI used during imaging."""
+    """The path top the animal-specific reference .ROI (Region-of-Interest) file, used to restore the same imaging 
+    field across all data acquisition sessions."""
     kinase_path: Path = field(default_factory=Path, init=False)
-    """Stores the path to the 'kinase.bin' file. The MATLAB runtime function (setupAcquisition.m) that runs on the 
-    ScanImagePC uses the presence of the file as a signal that the VRPC is currently acquiring a session. In turn, this
-    locks the function into data acquisition mode until the kinase marker is removed by the VRPC."""
+    """The path to the 'kinase.bin' file used to lock the MATLAB's runtime function (setupAcquisition.m) into the data 
+    acquisition mode until the kinase marker is removed by the VRPC."""
     phosphatase_path: Path = field(default_factory=Path, init=False)
-    """Stores the path to the 'phosphatase.bin' file. This marker is used together with the 'kinase.bin' marker. The 
-    presence of the 'phosphatase.bin' file is used to disable the acquisition state lock and allows the MATLAB runtime 
-    function to end its runtime even if the acquisition has never been started. This is used to gracefully end runtimes
-    that encountered an error during the initialization process."""
+    """The path to the 'phosphatase.bin' file used to gracefully terminate the MATLAB's runtimes locked into the data 
+    acquisition mode by the presence of the 'kinase.bin' file."""
 
     def __post_init__(
         self,
     ) -> None:
+        """Resolves the managed directory layout, creating any missing directory components."""
         # Resolves additional paths using the input root paths
         self.motion_estimator_path = self.persistent_data_path.joinpath("MotionEstimator.me")
         self.roi_path = self.persistent_data_path.joinpath("fov.roi")
-        self.session_specific_path = self.meso_data_path.joinpath(self.session_name)
+        self.session_specific_path = self.meso_data_path.joinpath(self.session)
         self.ubiquitin_path = self.session_specific_path.joinpath("ubiquitin.bin")
         self.mesoscope_data_path = self.meso_data_path.joinpath("mesoscope_data")
         self.kinase_path = self.mesoscope_data_path.joinpath("kinase.bin")
@@ -179,189 +183,156 @@ class _ScanImagePCData:
 
 @dataclass()
 class _VRPCDestinations:
-    """Stores the paths to the VRPC filesystem-mounted directories of the Synology NAS and BioHPC server.
-
-    The paths from this section are primarily used to transfer preprocessed data to the long-term storage destinations.
+    """Defines the layout of the long-term data storage infrastructure mounted to the VRPC's filesystem via the SMB
+    protocol used to store the session's data after acquisition.
     """
 
-    nas_raw_data_path: Path
-    """Stores the path to the session's raw_data directory on the Synology NAS, which is mounted to the VRPC via the 
-    SMB or equivalent protocol."""
-    server_raw_data_path: Path
-    """Stores the path to the session's raw_data directory on the BioHPC server, which is mounted to the VRPC via the 
-    SMB or equivalent protocol."""
-    server_processed_data_path: Path
-    """Stores the path to the session's processed_data directory on the BioHPC server, which is mounted to the VRPC via 
-    the SMB or equivalent protocol."""
-    telomere_path: Path = field(default_factory=Path, init=False)
-    """Stores the path to the session's telomere.bin marker. This marker is generated as part of data preprocessing on 
-    the VRPC and can be removed by the BioHPC server to notify the VRPC that the server received preprocessed in a 
-    compromised (damaged) state. If the telomere.bin file is present on the BioHPC server after the VRPC instructs the
-    server to verify the integrity opf the transferred data, the VRPC concludes that the data was transferred intact and
-    removes (purges) the local copy of raw_data."""
+    nas_data_path: Path
+    """The path to the session's data directory on the Synology NAS."""
+    server_data_path: Path
+    """The path to the session's data directory on the BioHPC server."""
 
     def __post_init__(self) -> None:
-        # Resolves the server-side telomere.bin marker path using the root directory.
-        self.telomere_path = self.server_raw_data_path.joinpath("telomere.bin")
-
+        """Resolves the managed directory layout, creating any missing directory components."""
         # Ensures all destination directories exist
-        ensure_directory_exists(self.nas_raw_data_path)
-        ensure_directory_exists(self.server_raw_data_path)
-        ensure_directory_exists(self.server_processed_data_path)
+        ensure_directory_exists(self.nas_data_path)
+        ensure_directory_exists(self.server_data_path)
 
 
 class MesoscopeData:
-    """This works together with the SessionData class to define additional filesystem paths used by the Mesoscope-VR
-    data acquisition system during runtime.
-
-    Specifically, the paths from this class are used during both data acquisition and preprocessing to work with
-    the managed session's data across the machines (PCs) that make up the acquisition system and long-term storage
-    infrastructure.
+    """Defines the Mesoscope-VR data acquisition system's filesystem layout used to acquire and preprocess the target
+    session's data.
 
     Args:
-        session_data: The SessionData instance for the managed session.
+        session_data: The SessionData instance that defines the processed data acquisition session.
 
     Attributes:
-        vrpc_persistent_data: Stores paths to files inside the VRPC persistent_data directory for the managed session's
-            project and animal.
-        scanimagepc_data: Stores paths to all ScanImagePC (Mesoscope PC) files and directories used during data
-            acquisition and processing.
-        destinations: Stores paths to the long-term data storage destinations.
+        vrpc_data: Defines the layout of the session-specific VRPC's persistent data directory.
+        scanimagepc_data: Defines the layout of the ScanImagePC's mesoscope data directory.
+        destinations: Defines the layout of the long-term data storage infrastructure mounted to the VRPC's filesystem.
     """
 
-    def __init__(self, session_data: SessionData):
-        # Prevents this class from being instantiated on any acquisition system other than the Mesoscope-VR system.
-        system_configuration = get_system_configuration()
-
-        # Unpacks session paths nodes from the SessionData instance
+    def __init__(self, system_configuration: MesoscopeSystemConfiguration, session_data: SessionData) -> None:
+        # Unpacks session path nodes from the SessionData instance
         project = session_data.project_name
         animal = session_data.animal_id
         session = session_data.session_name
 
-        # Instantiates additional path data classes
-        # noinspection PyArgumentList
-        self.vrpc_persistent_data = _VRPCPersistentData(
+        # VRPC persistent data
+        self.vrpc_data = _VRPCPersistentData(
             session_type=session_data.session_type,
-            persistent_data_path=system_configuration.paths.root_directory.joinpath(project, animal, "persistent_data"),
-        )
-
-        # noinspection PyArgumentList
-        self.scanimagepc_data = _ScanImagePCData(
-            session_name=session,
-            meso_data_path=system_configuration.paths.mesoscope_directory,
-            persistent_data_path=system_configuration.paths.mesoscope_directory.joinpath(
+            persistent_data_path=system_configuration.filesystem.root_directory.joinpath(
                 project, animal, "persistent_data"
             ),
         )
 
-        # noinspection PyArgumentList
+        # ScanImagePC mesoscope data
+        self.scanimagepc_data = _ScanImagePCData(
+            session=session,
+            meso_data_path=system_configuration.filesystem.mesoscope_directory,
+            persistent_data_path=system_configuration.filesystem.mesoscope_directory.joinpath(
+                project, animal, "persistent_data"
+            ),
+        )
+
+        # Server and NAS (data storage)
         self.destinations = _VRPCDestinations(
-            nas_raw_data_path=system_configuration.paths.nas_directory.joinpath(project, animal, session, "raw_data"),
-            server_raw_data_path=system_configuration.paths.server_storage_directory.joinpath(
-                project, animal, session, "raw_data"
-            ),
-            server_processed_data_path=system_configuration.paths.server_working_directory.joinpath(
-                project, animal, session, "processed_data"
-            ),
+            nas_data_path=system_configuration.filesystem.nas_directory.joinpath(project, animal, session),
+            server_data_path=system_configuration.filesystem.server_directory.joinpath(project, animal, session),
         )
 
 
 class RuntimeControlUI:
-    """Provides a real-time Graphical User Interface (GUI) that allows interactively controlling certain Mesoscope-VR
-    runtime parameters.
-
-    The UI itself runs in a parallel process and communicates with an instance of this class via the SharedMemoryArray
-    instance. This optimizes the UI's responsiveness without overburdening the main thread that runs the task logic and
-    the animal performance visualization.
+    """Provides the Graphical User Interface (GUI) that allows modifying certain Mesoscope-VR runtime parameters in real
+    time.
 
     Notes:
-        This class is specialized to work with the Qt6 framework. In the future, it may be refactored to support the Qt6
-        framework.
+        The UI runs in a parallel process and requires a single CPU core to support its runtime.
 
-        The UI starts the runtime in the 'paused' state to allow the user to check the valve and all other runtime
-        components before formally starting the runtime.
+        Initializing the class does not start the UI process. Call the start() method before calling any other instance
+        methods to start the UI process.
 
     Attributes:
-        _data_array: A SharedMemoryArray used to store the data recorded by the remote UI process.
-        _ui_process: The Process instance running the Qt6 UI.
-        _started: A static flag used to prevent the __del__ method from shutting down an already terminated instance.
-
-    Notes:
-        Since version 3.0.0, calling the initializer does not start the IO process. Call the start() method to finish
-        initializing all UI assets.
+        _data_array: The SharedMemoryArray instance used to bidirectionally transfer the data between the UI process
+            and other runtime processes.
+        _ui_process: The Process instance running the GUI cycle.
+        _started: Tracks whether the UI process is running.
     """
 
     def __init__(self) -> None:
-        self._data_array = SharedMemoryArray.create_array(
-            name="runtime_control_ui", prototype=np.zeros(shape=11, dtype=np.int32), exist_ok=True
-        )
+        # Defines the prototype array for the SharedMemoryArray initialization and sets the array elements to the
+        # desired default state
+        prototype = np.zeros(shape=11, dtype=np.uint32)
+        prototype[_DataArrayIndex.PAUSE_STATE] = 1  # Ensures all runtimes start in a paused state
+        prototype[_DataArrayIndex.GUIDANCE_ENABLED] = 0  # Initially disables guidance for all runtimes
+        prototype[_DataArrayIndex.SHOW_REWARD] = 0  # Defaults to not showing reward collision boundary
+        prototype[_DataArrayIndex.REWARD_VOLUME] = 5  # Preconfigures reward delivery to use 5 uL rewards
 
-        # Configures certain array elements to specific initialization values
-        self._data_array.write_data(index=8, data=np.int32(5))  # Preconfigures reward delivery to use 5 uL rewards
-        self._data_array.write_data(index=10, data=np.int32(0))  # Defaults to not showing reward collision boundary
-        self._data_array.write_data(index=9, data=np.int32(0))  # Initially disables guidance for all runtimes
-        self._data_array.write_data(index=5, data=np.int32(1))  # Ensures all runtimes start in a paused state
+        # Initializes the SharedMemoryArray instance
+        self._data_array = SharedMemoryArray.create_array(
+            name="runtime_control_ui", prototype=prototype, exists_ok=True
+        )
 
         # Defines but does not automatically start the UI process.
         self._ui_process = Process(target=self._run_ui_process, daemon=True)
         self._started = False
 
     def __del__(self) -> None:
-        """Ensures all class resources are released before the instance is destroyed.
-
-        This is a fallback method, using shutdown() directly is the preferred way of releasing resources.
+        """Terminates the UI process and releases the instance's shared memory buffer when the instance is
+        garbage-collected.
         """
         self.shutdown()
 
     def start(self) -> None:
         """Starts the remote UI process."""
-        # Prevents starting an already started instance
+        # If the instance is already started, aborts early
         if self._started:
             return
 
+        # Starts the remote UI process.
         self._ui_process.start()
+
+        # Connects to the shared memory array from the central runtime process and configures it to destroy the
+        # shared memory buffer in case of an emergency (error) shutdown.
+        self._data_array.connect()
+        self._data_array.enable_buffer_destruction()
+
+        # Marks the instance as started
         self._started = True
 
     def shutdown(self) -> None:
-        """Shuts down the UI and releases all SharedMemoryArray resources.
-
-        This method should be called at the end of runtime to properly release all resources and terminate the
-        remote UI process.
-        """
-        # Prevents shutting down an already terminated instance
+        """Shuts down the remote UI process and releases the instance's shared memory buffer."""
+        # If the instance is already shut down, aborts early.
         if not self._started:
             return
 
-        # If the UI process is still alive, shuts it down
+        # Shuts down the remote UI process.
         if self._ui_process.is_alive():
-            self._data_array.write_data(index=0, data=np.int32(1))  # Sends the termination signal to the remote process
+            self._data_array[_DataArrayIndex.TERMINATION] = 1  # Sends the termination signal to the remote process
             self._ui_process.terminate()
-            self._ui_process.join(timeout=2.0)  # Waits for at most 2 seconds to terminate the process gracefully
+            self._ui_process.join(timeout=2.0)
 
-        # Destroys the SharedMemoryArray
+        # Terminates the shared memory array buffer.
         self._data_array.disconnect()
         self._data_array.destroy()
 
-        # Toggles the flag
+        # Marks the instance as shut down
         self._started = False
 
     def _run_ui_process(self) -> None:
-        """The main function that runs in the parallel process to display and manage the Qt6 UI.
-
-        This runs Qt6 in the main thread of the separate process, which is perfectly valid.
-        """
+        """Runs UI management cycle in a parallel process."""
         # Connects to the shared memory array from the remote process
         self._data_array.connect()
 
-        # Create and run the Qt6 application in this process's main thread
+        # Creates and runs the Qt6 application in this process's main thread
         try:
-            # Creates the QT5 GUI application
+            # Creates the GUI application
             app = QApplication(sys.argv)
             app.setApplicationName("Mesoscope-VR Control Panel")
             app.setOrganizationName("SunLab")
 
             # Sets Qt6 application-wide style
-            app.setStyle("Fusion")  # Modern flat style available in Qt6
+            app.setStyle("Fusion")
 
             # Creates the main application window
             window = _ControlUIWindow(self._data_array)
@@ -369,145 +340,114 @@ class RuntimeControlUI:
 
             # Runs the app
             app.exec()
-
-        # Terminates with an exception which will be propagated to the main process
         except Exception as e:
-            message = f"Unable to initialize the QT5 GUI application. Encountered the following error {e}."
+            message = (
+                f"Unable to initialize the GUI application for the main runtime user interface. "
+                f"Encountered the following error {e}."
+            )
             console.error(message=message, error=RuntimeError)
 
         # Ensures proper UI shutdown when runtime encounters errors
         finally:
             self._data_array.disconnect()
 
-    def set_pause_state(self, paused: bool) -> None:
-        """Sets the runtime pause state from outside the UI.
-
-        This method is used to synchronize the remote GUI with the main runtime process if the runtime process enters
-        the paused state. Typically, this happens when a major external component, such as the Mesoscope or Unity,
-        unexpectedly terminates its runtime.
+    def set_pause_state(self, *, paused: bool) -> None:
+        """Configures the GUI to reflect the current data acquisition session's runtime state.
 
         Args:
-            paused: Determines the externally assigned GUI pause state.
+            paused: Determines whether the session is paused or running.
         """
-        self._data_array.write_data(index=5, data=np.int32(1 if paused else 0))
+        self._data_array[_DataArrayIndex.PAUSE_STATE] = 1 if paused else 0
 
-    def set_guidance_state(self, enabled: bool) -> None:
-        """Sets the guidance state from outside the UI.
-
-        This method is used to synchronize the remote GUI with the main runtime process when the lick guidance state
-        needs to be controlled programmatically.
+    def set_guidance_state(self, *, enabled: bool) -> None:
+        """Configures the GUI to reflect the data acquisition session's Virtual Reality task guidance state.
 
         Args:
-            enabled: Determines the externally assigned GUI guidance state.
+            enabled: Determines whether the guidance mode is currently enabled.
         """
-        self._data_array.write_data(index=9, data=np.int32(1 if enabled else 0))
+        self._data_array[_DataArrayIndex.GUIDANCE_ENABLED] = 1 if enabled else 0
 
     @property
     def exit_signal(self) -> bool:
-        """Returns True if the user has requested the runtime to gracefully abort.
-
-        Notes:
-            Each time this property is accessed, the flag is reset to 0.
-        """
-        exit_flag = bool(self._data_array.read_data(index=1, convert_output=True))
-        self._data_array.write_data(index=1, data=np.int32(0))
+        """Returns True if the user has requested the system to abort the data acquisition session's runtime."""
+        exit_flag = bool(self._data_array[_DataArrayIndex.EXIT_SIGNAL])
+        self._data_array[_DataArrayIndex.EXIT_SIGNAL] = 0
         return exit_flag
 
     @property
     def reward_signal(self) -> bool:
-        """Returns True if the user has requested the system to deliver a water reward.
-
-        Notes:
-            Each time this property is accessed, the flag is reset to 0.
-        """
-        reward_flag = bool(self._data_array.read_data(index=2, convert_output=True))
-        self._data_array.write_data(index=2, data=np.int32(0))
+        """Returns True if the user has requested the system to deliver a water reward."""
+        reward_flag = bool(self._data_array[_DataArrayIndex.REWARD_SIGNAL])
+        self._data_array[_DataArrayIndex.REWARD_SIGNAL] = 0
         return reward_flag
 
     @property
     def speed_modifier(self) -> int:
-        """Returns the current user-defined modifier to apply to the running speed threshold."""
-        return int(self._data_array.read_data(index=3, convert_output=True))
+        """Returns the current user-defined running speed threshold modifier."""
+        return int(self._data_array[_DataArrayIndex.SPEED_MODIFIER])
 
     @property
     def duration_modifier(self) -> int:
-        """Returns the current user-defined modifier to apply to the running epoch duration threshold."""
-        return int(self._data_array.read_data(index=4, convert_output=True))
+        """Returns the current user-defined running epoch duration threshold modifier."""
+        return int(self._data_array[_DataArrayIndex.DURATION_MODIFIER])
 
     @property
     def pause_runtime(self) -> bool:
-        """Returns True if the user has requested the acquisition system to pause the current runtime."""
-        return bool(self._data_array.read_data(index=5, convert_output=True))
+        """Returns True if the user has requested the system to pause the data acquisition session's runtime."""
+        return bool(self._data_array[_DataArrayIndex.PAUSE_STATE])
 
     @property
     def open_valve(self) -> bool:
-        """Returns True if the user has requested the acquisition system to permanently open the water delivery
-        valve.
-
-        Notes:
-            Each time this property is accessed, the flag is reset to 0.
-        """
-        open_flag = bool(self._data_array.read_data(index=6, convert_output=True))
-        self._data_array.write_data(index=6, data=np.int32(0))
+        """Returns True if the user has requested the system to open the water delivery valve."""
+        open_flag = bool(self._data_array[_DataArrayIndex.OPEN_VALVE])
+        self._data_array[_DataArrayIndex.OPEN_VALVE] = 0
         return open_flag
 
     @property
     def close_valve(self) -> bool:
-        """Returns True if the user has requested the acquisition system to permanently close the water delivery
-        valve.
-
-        Notes:
-            Each time this property is accessed, the flag is reset to 0.
-        """
-        close_flag = bool(self._data_array.read_data(index=7, convert_output=True))
-        self._data_array.write_data(index=7, data=np.int32(0))
+        """Returns True if the user has requested the system to close the water delivery valve."""
+        close_flag = bool(self._data_array[_DataArrayIndex.CLOSE_VALVE])
+        self._data_array[_DataArrayIndex.CLOSE_VALVE] = 0
         return close_flag
 
     @property
     def reward_volume(self) -> int:
-        """Returns the current user-defined water reward volume value."""
-        return int(self._data_array.read_data(index=8, convert_output=True))
+        """Returns the current user-defined volume of water dispensed by the valve when delivering water rewards."""
+        return int(self._data_array[_DataArrayIndex.REWARD_VOLUME])
 
     @property
     def enable_guidance(self) -> bool:
-        """Returns True if the user has enabled lick guidance mode."""
-        return bool(self._data_array.read_data(index=9, convert_output=True))
+        """Returns True if the user has enabled the Virtual Reality task guidance mode."""
+        return bool(self._data_array[_DataArrayIndex.GUIDANCE_ENABLED])
 
     @property
     def show_reward(self) -> bool:
-        """Returns True if the reward zone collision boundary should be shown/displayed to the animal."""
-        return bool(self._data_array.read_data(index=10, convert_output=True))
+        """Returns True if the user has enabled showing the Virtual Reality task guidance mode collision box to the
+        animal.
+        """
+        return bool(self._data_array[_DataArrayIndex.SHOW_REWARD])
 
 
 class _ControlUIWindow(QMainWindow):
-    """Generates, renders, and maintains the main Mesoscope-VR acquisition system Graphical User Interface Qt6
-    application window.
-
-    This class binds the Qt6 GUI elements and statically defines the GUI element layout used by the main interface
-    window application. The interface enables sl-experiment users to control certain runtime parameters in real time via
-    an interactive GUI.
+    """Generates, renders, and maintains the Mesoscope-VR acquisition system's Graphical User Interface application
+    window.
 
     Attributes:
-        _data_array: A reference to the shared memory array used for communication between the main runtime thread
-            and the Qt6 GUI.
-        _is_paused: A flag indicating whether the runtime is paused or not.
-        _speed_modifier: The current user-defined modifier to apply to the running speed threshold.
-        _duration_modifier: The current user-defined modifier to apply to the running epoch duration threshold.
-        _guidance_enabled: A flag indicating whether lick guidance mode is enabled or not.
-        _show_reward: A flag indicating whether the reward zone collision boundary should be shown/displayed to the
-            animal.
+        _data_array: The SharedMemoryArray instance used to bidirectionally transfer the data between the UI process
+            and other runtime processes.
+        _is_paused: Tracks whether the runtime is paused.
+        _guidance_enabled: Tracks whether the Virtual Reality task guidance mode is enabled.
+        _show_reward: Tracks whether the Virtual Reality guidance mode collision box is visible to the animal.
     """
 
-    def __init__(self, data_array: SharedMemoryArray):
+    def __init__(self, data_array: SharedMemoryArray) -> None:
         super().__init__()  # Initializes the main window superclass
 
         # Defines internal attributes.
         self._data_array: SharedMemoryArray = data_array
         self._is_paused: bool = True
-        self._speed_modifier: int = 0
-        self._duration_modifier: int = 0
         self._guidance_enabled: bool = False
-        self._show_reward: bool = True
+        self._show_reward: bool = False
 
         # Configures the window title
         self.setWindowTitle("Mesoscope-VR Control Panel")
@@ -523,7 +463,7 @@ class _ControlUIWindow(QMainWindow):
         self._apply_qt6_styles()
 
     def _setup_ui(self) -> None:
-        """Creates and arranges all UI elements optimized for Qt6 with proper scaling."""
+        """Creates and arranges all UI elements."""
         # Initializes the main widget container
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
@@ -567,7 +507,7 @@ class _ControlUIWindow(QMainWindow):
         self.reward_visibility_btn.clicked.connect(self._toggle_reward_visibility)
         self.reward_visibility_btn.setObjectName("showRewardButton")
 
-        # Configures the buttons to expand when UI is resized, but use a fixed height of 35 points
+        # Configures the buttons to expand when the UI is resized, but use a fixed height of 35 points
         for btn in [self.exit_btn, self.pause_btn, self.guidance_btn, self.reward_visibility_btn]:
             btn.setMinimumHeight(35)
             btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
@@ -615,7 +555,7 @@ class _ControlUIWindow(QMainWindow):
         self.reward_btn.clicked.connect(self._deliver_reward)
         self.reward_btn.setObjectName("rewardButton")
 
-        # Configures the buttons to expand when UI is resized, but use a fixed height of 35 points
+        # Configures the buttons to expand when the UI is resized, but use a fixed height of 35 points
         for btn in [self.valve_open_btn, self.valve_close_btn, self.reward_btn]:
             btn.setMinimumHeight(35)
             btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
@@ -676,7 +616,7 @@ class _ControlUIWindow(QMainWindow):
         speed_layout.addWidget(speed_status_label)
         self.speed_spinbox = QDoubleSpinBox()
         self.speed_spinbox.setRange(-1000, 1000)  # Factoring in the step of 0.01, this allows -20 to +20 cm/s
-        self.speed_spinbox.setValue(self._speed_modifier)  # Default value
+        self.speed_spinbox.setValue(0)  # Default value
         self.speed_spinbox.setDecimals(0)  # Integer precision
         self.speed_spinbox.setToolTip("Sets the running speed threshold modifier value.")
         self.speed_spinbox.setMinimumHeight(30)
@@ -695,7 +635,7 @@ class _ControlUIWindow(QMainWindow):
         duration_layout.addWidget(duration_status_label)
         self.duration_spinbox = QDoubleSpinBox()
         self.duration_spinbox.setRange(-1000, 1000)  # Factoring in the step of 0.01, this allows -20 to +20 s
-        self.duration_spinbox.setValue(self._duration_modifier)  # Default value
+        self.duration_spinbox.setValue(0)  # Default value
         self.duration_spinbox.setDecimals(0)  # Integer precision
         self.duration_spinbox.setToolTip("Sets the running duration threshold modifier value.")
         # noinspection PyUnresolvedReferences
@@ -708,10 +648,7 @@ class _ControlUIWindow(QMainWindow):
         main_layout.addLayout(controls_layout)
 
     def _apply_qt6_styles(self) -> None:
-        """Applies optimized styling to all UI elements managed by this class.
-
-        This configured the UI to display properly, assuming the UI window uses the default resolution.
-        """
+        """Applies optimized styling to all UI elements managed by this instance."""
         self.setStyleSheet("""
                     QMainWindow {
                         background-color: #ecf0f1;
@@ -1041,31 +978,25 @@ class _ControlUIWindow(QMainWindow):
                 """)
 
     def _setup_monitoring(self) -> None:
-        """Sets up a QTimer to monitor the runtime termination status.
-
-        This monitors the value stored under index 0 of the communication SharedMemoryArray and, if the value becomes 1,
-        triggers the GUI termination sequence.
-        """
+        """Sets up a QTimer to monitor the runtime termination status."""
         self.monitor_timer = QTimer(self)
         # noinspection PyUnresolvedReferences
         self.monitor_timer.timeout.connect(self._check_external_state)
         self.monitor_timer.start(100)  # Checks every 100 ms
 
     def _check_external_state(self) -> None:
-        """Checks the state of externally addressable SharedMemoryArray values and acts on received state updates.
-
-        This method monitors certain values of the communication array to receive messages from the main runtime
-        process. Primarily, this functionality is used to gracefully terminate the GUI from the main runtime process.
+        """Checks the state of externally addressable UI elements and updates the managed GUI to reflect the
+        externally driven changes.
         """
         # noinspection PyBroadException
         try:
             # If the termination flag has been set to 1, terminates the GUI process
-            if self._data_array.read_data(index=0, convert_output=True) == 1:
+            if self._data_array[_DataArrayIndex.TERMINATION] == 1:
                 self.close()
 
             # Checks for external pause state changes and, if necessary, updates the GUI to reflect the current
             # runtime state (running or paused).
-            external_pause_state = bool(self._data_array.read_data(index=5, convert_output=True))
+            external_pause_state = bool(self._data_array[_DataArrayIndex.PAUSE_STATE])
             if external_pause_state != self._is_paused:
                 # External pause state changed, update UI accordingly
                 self._is_paused = external_pause_state
@@ -1073,40 +1004,32 @@ class _ControlUIWindow(QMainWindow):
 
             # Checks for external guidance state changes and, if necessary, updates the GUI to reflect the current
             # guidance state (enabled or disabled).
-            external_guidance_state = bool(self._data_array.read_data(index=9, convert_output=True))
+            external_guidance_state = bool(self._data_array[_DataArrayIndex.GUIDANCE_ENABLED])
             if external_guidance_state != self._guidance_enabled:
                 # External guidance state changed, update UI accordingly
                 self._guidance_enabled = external_guidance_state
                 self._update_guidance_ui()
-        except:
+        except Exception:
             self.close()
 
-    def closeEvent(self, event: QCloseEvent | None) -> None:
+    def closeEvent(self, event: QCloseEvent | None) -> None:  # noqa: N802
         """Handles GUI window close events.
 
-        This function is called when the user manually closes the GUI window. This is treated as the request to
-        terminate the ongoing runtime.
-
-        Notes:
-            Do not call this function manually! It is designed to be used by Qt GUI manager only.
-
         Args:
-            event: The Qt-generated window shutdown event object.
+            event: The Qt-generated window shutdown event instance.
         """
         # Sends a runtime termination signal via the SharedMemoryArray before accepting the close event.
         # noinspection PyBroadException
-        try:
-            self._data_array.write_data(index=0, data=np.int32(1))
-        except:
-            pass
+        with contextlib.suppress(Exception):
+            self._data_array[_DataArrayIndex.TERMINATION] = 1
         if event is not None:
             event.accept()
 
     def _exit_runtime(self) -> None:
-        """Signals the runtime to gracefully terminate."""
+        """Instructs the system to terminate the runtime."""
         previous_status = self.runtime_status_label.text()
         style = self.runtime_status_label.styleSheet()
-        self._data_array.write_data(index=1, data=np.int32(1))
+        self._data_array[_DataArrayIndex.EXIT_SIGNAL] = 1
         self.runtime_status_label.setText("✖ Exit signal sent")
         self.runtime_status_label.setStyleSheet("QLabel { color: #e74c3c; font-weight: bold; }")
         self.exit_btn.setText("✖ Exit Requested")
@@ -1122,13 +1045,10 @@ class _ControlUIWindow(QMainWindow):
         QTimer.singleShot(2000, lambda: self.runtime_status_label.setStyleSheet(style))
 
     def _deliver_reward(self) -> None:
-        """Triggers the Mesoscope-VR system to deliver a single water reward to the animal.
-
-        The size of the reward is addressable (configurable) via the reward volume box under the Valve control buttons.
-        """
+        """Instructs the system to deliver a water reward to the animal."""
         # Sends the reward command via the SharedMemoryArray and temporarily sets the statsu to indicate that the
         # reward is sent.
-        self._data_array.write_data(index=2, data=np.int32(1))
+        self._data_array[_DataArrayIndex.REWARD_SIGNAL] = 1
         self.valve_status_label.setText("Reward: 🟢 Sent")
         self.valve_status_label.setStyleSheet("QLabel { color: #3498db; font-weight: bold; }")
 
@@ -1140,40 +1060,46 @@ class _ControlUIWindow(QMainWindow):
         )
 
     def _open_valve(self) -> None:
-        """Permanently opens the water delivery valve."""
-        self._data_array.write_data(index=6, data=np.int32(1))
+        """Instructs the system to open the water delivery valve."""
+        self._data_array[_DataArrayIndex.OPEN_VALVE] = 1
         self.valve_status_label.setText("Valve: 🔓 Opened")
         self.valve_status_label.setStyleSheet("QLabel { color: #27ae60; font-weight: bold; }")
 
     def _close_valve(self) -> None:
-        """Permanently closes the water delivery valve."""
-        self._data_array.write_data(index=7, data=np.int32(1))
+        """Instructs the system to close the water delivery valve."""
+        self._data_array[_DataArrayIndex.CLOSE_VALVE] = 1
         self.valve_status_label.setText("Valve: 🔒 Closed")
         self.valve_status_label.setStyleSheet("QLabel { color: #e67e22; font-weight: bold; }")
 
     def _toggle_pause(self) -> None:
-        """Toggles the runtime between paused and unpaused (active) states."""
+        """Instructs the system to pause or resume the data acquisition session's runtime."""
         self._is_paused = not self._is_paused
-        self._data_array.write_data(index=5, data=np.int32(1 if self._is_paused else 0))
+        self._data_array[_DataArrayIndex.PAUSE_STATE] = 1 if self._is_paused else 0
         self._update_pause_ui()
 
     def _update_reward_volume(self) -> None:
-        """Updates the reward volume in the data array in response to the user modifying the GUI field value."""
-        volume = int(self.volume_spinbox.value())
-        self._data_array.write_data(index=8, data=np.int32(volume))
+        """Updates the volume used by the system when delivering water rewards to match the current GUI
+        configuration.
+        """
+        self._data_array[_DataArrayIndex.REWARD_VOLUME] = int(self.volume_spinbox.value())
 
     def _update_speed_modifier(self) -> None:
-        """Updates the speed modifier in the data array in response to the user modifying the GUI field value."""
-        self._speed_modifier = int(self.speed_spinbox.value())
-        self._data_array.write_data(index=3, data=np.int32(self._speed_modifier))
+        """Updates the running speed threshold modifier to match the current GUI configuration."""
+        self._data_array[_DataArrayIndex.SPEED_MODIFIER] = int(self.speed_spinbox.value())
 
     def _update_duration_modifier(self) -> None:
-        """Updates the duration modifier in the data array in response to the user modifying the GUI field value."""
-        self._duration_modifier = int(self.duration_spinbox.value())
-        self._data_array.write_data(index=4, data=np.int32(self._duration_modifier))
+        """Updates the running epoch duration modifier to match the current GUI configuration."""
+        self._data_array[_DataArrayIndex.DURATION_MODIFIER] = int(self.duration_spinbox.value())
+
+    @staticmethod
+    def _refresh_button_style(button: QPushButton) -> None:
+        """Refreshes button styles after object name change."""
+        button.style().unpolish(button)
+        button.style().polish(button)
+        button.update()
 
     def _update_guidance_ui(self) -> None:
-        """Updates the guidance UI elements based on the current _guidance_enabled state."""
+        """Updates the GUI to reflect the current Virtual Reality task guidance state."""
         if self._guidance_enabled:
             self.guidance_btn.setText("🚫 Disable Guidance")
             self.guidance_btn.setObjectName("guidanceDisableButton")
@@ -1181,19 +1107,17 @@ class _ControlUIWindow(QMainWindow):
             self.guidance_btn.setText("🎯 Enable Guidance")
             self.guidance_btn.setObjectName("guidanceButton")
 
-        # Refresh styles after object name change
-        self.guidance_btn.style().unpolish(self.guidance_btn)
-        self.guidance_btn.style().polish(self.guidance_btn)
-        self.guidance_btn.update()  # Forces update to apply new styles
+        # Refreshes styles after object name change
+        self._refresh_button_style(button=self.guidance_btn)
 
     def _toggle_guidance(self) -> None:
-        """Toggles guidance mode between enabled and disabled states."""
+        """Instructs the system to enable or disable the Virtual Reality task guidance mode."""
         self._guidance_enabled = not self._guidance_enabled
-        self._data_array.write_data(index=9, data=np.int32(1 if self._guidance_enabled else 0))
+        self._data_array[_DataArrayIndex.GUIDANCE_ENABLED] = 1 if self._guidance_enabled else 0
         self._update_guidance_ui()
 
     def _update_pause_ui(self) -> None:
-        """Updates the pause UI elements based on the current _is_paused state."""
+        """Updates the GUI to reflect the current data acquisition runtime pause state."""
         if self._is_paused:
             self.pause_btn.setText("▶️ Resume Runtime")
             self.pause_btn.setObjectName("resumeButton")
@@ -1206,42 +1130,30 @@ class _ControlUIWindow(QMainWindow):
             self.runtime_status_label.setStyleSheet("QLabel { color: #27ae60; font-weight: bold; }")
 
         # Refresh styles after object name change
-        self.pause_btn.style().unpolish(self.pause_btn)
-        self.pause_btn.style().polish(self.pause_btn)
-        self.pause_btn.update()  # Forces update to apply new styles
+        self._refresh_button_style(button=self.pause_btn)
 
     def _toggle_reward_visibility(self) -> None:
-        """Toggles reward collision boundary visibility between shown and hidden states."""
+        """Instructs the system to show or hide the Virtual Reality guidance mode collision box."""
         self._show_reward = not self._show_reward
         if self._show_reward:
-            self._data_array.write_data(index=10, data=np.int32(1))
+            self._data_array[_DataArrayIndex.SHOW_REWARD] = 1
             self.reward_visibility_btn.setText("🙈 Hide Reward")
             self.reward_visibility_btn.setObjectName("hideRewardButton")
         else:
-            self._data_array.write_data(index=10, data=np.int32(0))
+            self._data_array[_DataArrayIndex.SHOW_REWARD] = 0
             self.reward_visibility_btn.setText("👁️ Show Reward")
             self.reward_visibility_btn.setObjectName("showRewardButton")
 
-        # Refresh styles after object name change
-        self.reward_visibility_btn.style().unpolish(self.reward_visibility_btn)
-        self.reward_visibility_btn.style().polish(self.reward_visibility_btn)
-        self.reward_visibility_btn.update()  # Forces update to apply new styles
+        # Refreshes styles after object name change
+        self._refresh_button_style(button=self.reward_visibility_btn)
 
 
 class CachedMotifDecomposer:
-    """A helper class to cache the flattened Trial cue sequence motif data between multiple motif decomposition
-    runtimes.
-
-    Trial motifs are used during experiment runtimes to decompose a long sequence of VR wall cues into trials. In turn,
-    this is used to track the animal's performance during runtime (for each trial) and, if necessary, enable or disable
-    lick guidance. Since each experiment can use one or more trial motifs (cue sequences), this decomposition has to be
-    performed at runtime for each experiment. To optimize runtime performance, this class prepares and stores the
-    necessary dat to support numba-accelerated motif decomposition at runtime, especially in (rare) cases where it has
-    to be performed multiple times due to Unity crashing.
+    """Caches the flattened trial cue sequence motif data between multiple motif decomposition runtimes.
 
     Attributes:
         _cached_motifs: Stores the original trial motifs used for decomposition.
-        _cached_flat_data: Stores flattened motif data structure, optimized for numba-accelerated computations.
+        _cached_flat_data: Stores the flattened motif data structure, optimized for numba-accelerated computations.
         _cached_distances: Stores the distances of each trial motif, in centimeters.
     """
 
@@ -1258,23 +1170,26 @@ class CachedMotifDecomposer:
         """Prepares and caches the flattened motif data for faster cue sequence-to-trial decomposition (conversion).
 
         Args:
-            trial_motifs: A list of trial motifs (wall cue sequences) in the format of numpy arrays.
-            trial_distances: A list of trial distances in centimeters.
+            trial_motifs: The trial motifs (wall cue sequences) to decompose.
+            trial_distances: The trial motif distances, in centimeters.
 
         Returns:
-            A tuple containing five elements. The first element is a flattened array of all motifs. The second
-            element is an array that stores the starting indices of each motif in the flat array. The third element is
-            an array that stores the length of each motif. The fourth element is an array that stores the original
-            indices of motifs before sorting. The fifth element is an array of trial distances in centimeters.
+            A tuple with five elements. The first element is the flattened array that stores all motifs. The second
+            element is the array that stores the starting indices of each motif in the flattened array. The third
+            element is the array that stores the length of each motif, in cues. The fourth element is the array
+            that stores the original indices of motifs before sorting. The fifth element is the array of trial distances
+            in centimeters.
         """
         # Checks if the class already contains cached data for the input motifs. In this case, returns the cached data.
         if self._cached_motifs is not None and len(self._cached_motifs) == len(trial_motifs):
             # Carries out deep comparison of motif arrays
             all_equal = all(
-                np.array_equal(cached, current) for cached, current in zip(self._cached_motifs, trial_motifs)
+                np.array_equal(cached, current)
+                for cached, current in zip(self._cached_motifs, trial_motifs, strict=True)
             )
             if all_equal and self._cached_flat_data is not None and self._cached_distances is not None:
-                return self._cached_flat_data + (self._cached_distances,)
+                # noinspection PyRedundantParentheses, PyTypeChecker
+                return (*self._cached_flat_data, self._cached_distances)
 
         # Otherwise, prepares flattened motif data:
         # Sorts motifs by length (longest first)
@@ -1312,5 +1227,5 @@ class CachedMotifDecomposer:
         self._cached_flat_data = (motifs_flat, motif_starts, motif_lengths, motif_indices)
         self._cached_distances = distances_array
 
-        # noinspection PyTypeChecker
-        return self._cached_flat_data + (distances_array,)
+        # noinspection PyTypeChecker, PyRedundantParentheses
+        return (*self._cached_flat_data, distances_array)

@@ -39,8 +39,8 @@ from .tools import MesoscopeData, RuntimeControlUI, CachedMotifDecomposer, get_s
 from .visualizers import BehaviorVisualizer
 from .binding_classes import ZaberMotors, VideoSystems, MicroControllerInterfaces
 from ..shared_components import (
-    WaterSheet,
-    SurgerySheet,
+    WaterLog,
+    SurgeryLog,
     BrakeInterface,
     ValveInterface,
     get_version_data,
@@ -83,7 +83,7 @@ def _generate_mesoscope_position_snapshot(session_data: SessionData, mesoscope_d
     # Loads the previous position data into memory. At this point, assumes that either the precursor file or the file
     # from a previous session has been saved to the animal's persistent data directory.
     previous_mesoscope_positions: MesoscopePositions = MesoscopePositions.from_yaml(
-        file_path=mesoscope_data.vrpc_persistent_data.mesoscope_positions_path
+        file_path=mesoscope_data.vrpc_data.mesoscope_positions_path
     )
 
     # Forces the user to update the mesoscope positions file with current mesoscope data
@@ -151,7 +151,7 @@ def _generate_mesoscope_position_snapshot(session_data: SessionData, mesoscope_d
     # Copies the updated mesoscope positions data into the animal's persistent directory.
     sh.copy2(
         src=session_data.raw_data.mesoscope_positions_path,
-        dst=mesoscope_data.vrpc_persistent_data.mesoscope_positions_path,
+        dst=mesoscope_data.vrpc_data.mesoscope_positions_path,
     )
 
 
@@ -176,7 +176,7 @@ def _generate_zaber_snapshot(
 
     # Saves the newly generated file both to the persistent folder and to the session folder. Note, saving to the
     # persistent data directory automatically overwrites any existing position file.
-    zaber_positions.to_yaml(file_path=Path(mesoscope_data.vrpc_persistent_data.zaber_positions_path))
+    zaber_positions.to_yaml(file_path=Path(mesoscope_data.vrpc_data.zaber_positions_path))
     zaber_positions.to_yaml(file_path=Path(session_data.raw_data.zaber_positions_path))
 
     message = "Zaber motor positions: Saved."
@@ -353,9 +353,9 @@ def _setup_mesoscope(session_data: SessionData, mesoscope_data: MesoscopeData) -
     # Step 1: Find the imaging plane.
     # If the previous session's mesoscope positions were saved, loads the objective coordinates and uses them to
     # augment the message to the user.
-    if not window_checking and Path(mesoscope_data.vrpc_persistent_data.mesoscope_positions_path).exists():
+    if not window_checking and Path(mesoscope_data.vrpc_data.mesoscope_positions_path).exists():
         previous_positions: MesoscopePositions = MesoscopePositions.from_yaml(
-            file_path=Path(mesoscope_data.vrpc_persistent_data.mesoscope_positions_path)
+            file_path=Path(mesoscope_data.vrpc_data.mesoscope_positions_path)
         )
         # Gives the user time to mount the animal and requires confirmation before proceeding further.
         message = (
@@ -415,7 +415,7 @@ def _setup_mesoscope(session_data: SessionData, mesoscope_data: MesoscopeData) -
 
     # Also saves the screenshot to the animal's persistent data folder so that it can be reused during the next
     # runtime.
-    sh.copy2(screenshot_path, mesoscope_data.vrpc_persistent_data.window_screenshot_path)
+    sh.copy2(screenshot_path, mesoscope_data.vrpc_data.window_screenshot_path)
 
     # Since window checking may reveal that the evaluated animal is not fit for participating in experiments, optionally
     # allows aborting mesoscope setup runtime early for window checking sessions.
@@ -559,7 +559,7 @@ def _verify_descriptor_update(
     # allows keeping a copy of each supported descriptor without interfering with other descriptor types.
     sh.copy2(
         src=session_data.raw_data.session_descriptor_path,
-        dst=mesoscope_data.vrpc_persistent_data.session_descriptor_path,
+        dst=mesoscope_data.vrpc_data.session_descriptor_path,
     )
 
 
@@ -772,10 +772,10 @@ class _MesoscopeVRSystem:
         # If a previous set of mesoscope position coordinates is available, overwrites the 'default' mesoscope
         # coordinates with the positions loaded from the snapshot stored inside the persistent_data folder of the
         # animal.
-        if Path(self._mesoscope_data.vrpc_persistent_data.mesoscope_positions_path).exists():
+        if Path(self._mesoscope_data.vrpc_data.mesoscope_positions_path).exists():
             # Loads the previous position data into memory
             previous_mesoscope_positions: MesoscopePositions = MesoscopePositions.from_yaml(
-                file_path=self._mesoscope_data.vrpc_persistent_data.mesoscope_positions_path
+                file_path=self._mesoscope_data.vrpc_data.mesoscope_positions_path
             )
 
             # Dumps the data to the raw-data folder. If the MesoscopePositions class includes any additional (new)
@@ -789,7 +789,7 @@ class _MesoscopeVRSystem:
             # Caches the precursor file to the raw_data session directory and to the persistent data directory.
             precursor = MesoscopePositions()
             precursor.to_yaml(file_path=Path(session_data.raw_data.mesoscope_positions_path))
-            precursor.to_yaml(file_path=Path(self._mesoscope_data.vrpc_persistent_data.mesoscope_positions_path))
+            precursor.to_yaml(file_path=Path(self._mesoscope_data.vrpc_data.mesoscope_positions_path))
 
         # Defines other flags used during runtime:
         # VR and runtime states are initialized to 0 (idle state) by default. Note, initial VR and runtime states are
@@ -856,7 +856,7 @@ class _MesoscopeVRSystem:
         input("Enter anything to continue: ")
 
         self._zaber_motors: ZaberMotors = ZaberMotors(
-            zaber_positions_path=self._mesoscope_data.vrpc_persistent_data.zaber_positions_path
+            zaber_positions_path=self._mesoscope_data.vrpc_data.zaber_positions_path
         )
 
         # Defines optional assets used by some, but not all runtimes. Most of these assets are initialized to None by
@@ -2858,7 +2858,7 @@ def lick_training_logic(
     # If the managed animal has cached data from a previous lick training session and the function is
     # configured to load previous data, replaces all runtime-defining parameters passed to the function with data
     # loaded from the previous session's descriptor file
-    previous_descriptor_path = mesoscope_data.vrpc_persistent_data.session_descriptor_path
+    previous_descriptor_path = mesoscope_data.vrpc_data.session_descriptor_path
     if previous_descriptor_path.exists() and load_previous_parameters:
         previous_descriptor: LickTrainingDescriptor = LickTrainingDescriptor.from_yaml(
             file_path=previous_descriptor_path
@@ -2929,13 +2929,13 @@ def lick_training_logic(
         # Verifies that the Water Restriction log and the Surgery log Google Sheets are accessible. To do so,
         # instantiates both classes to run through the init checks. The classes are later re-instantiated during
         # session data preprocessing
-        _ = WaterSheet(
+        _ = WaterLog(
             animal_id=int(animal_id),
             session_date=session_data.session_name,
             credentials_path=system_configuration.paths.google_credentials_path,
             sheet_id=system_configuration.sheets.water_log_sheet_id,
         )
-        _ = SurgerySheet(
+        _ = SurgeryLog(
             project_name=project_name,
             animal_id=int(animal_id),
             credentials_path=system_configuration.paths.google_credentials_path,
@@ -3139,7 +3139,7 @@ def run_training_logic(
     # If the managed animal has cached data from a previous run training session and the function is
     # configured to load previous data, replaces all runtime-defining parameters passed to the function with data
     # loaded from the previous session's descriptor file
-    previous_descriptor_path = mesoscope_data.vrpc_persistent_data.session_descriptor_path
+    previous_descriptor_path = mesoscope_data.vrpc_data.session_descriptor_path
     if previous_descriptor_path.exists() and load_previous_parameters:
         previous_descriptor: RunTrainingDescriptor = RunTrainingDescriptor.from_yaml(file_path=previous_descriptor_path)
 
@@ -3228,13 +3228,13 @@ def run_training_logic(
         # Verifies that the Water Restriction log and the Surgery log Google Sheets are accessible. To do so,
         # instantiates both classes to run through the init checks. The classes are later re-instantiated during
         # session data preprocessing
-        _ = WaterSheet(
+        _ = WaterLog(
             animal_id=int(animal_id),
             session_date=session_data.session_name,
             credentials_path=system_configuration.paths.google_credentials_path,
             sheet_id=system_configuration.sheets.water_log_sheet_id,
         )
-        _ = SurgerySheet(
+        _ = SurgeryLog(
             project_name=project_name,
             animal_id=int(animal_id),
             credentials_path=system_configuration.paths.google_credentials_path,
@@ -3559,13 +3559,13 @@ def experiment_logic(
         # Verifies that the Water Restriction log and the Surgery log Google Sheets are accessible. To do so,
         # instantiates both classes to run through the init checks. The classes are later re-instantiated during
         # session data preprocessing
-        _ = WaterSheet(
+        _ = WaterLog(
             animal_id=int(animal_id),
             session_date=session_data.session_name,
             credentials_path=system_configuration.paths.google_credentials_path,
             sheet_id=system_configuration.sheets.water_log_sheet_id,
         )
-        _ = SurgerySheet(
+        _ = SurgeryLog(
             project_name=project_name,
             animal_id=int(animal_id),
             credentials_path=system_configuration.paths.google_credentials_path,
@@ -3761,13 +3761,13 @@ def window_checking_logic(
     # Generates and caches the MesoscopePositions precursor file to the persistent and raw_data folders.
     precursor = MesoscopePositions()
     precursor.to_yaml(file_path=Path(session_data.raw_data.mesoscope_positions_path))
-    precursor.to_yaml(file_path=Path(mesoscope_data.vrpc_persistent_data.mesoscope_positions_path))
+    precursor.to_yaml(file_path=Path(mesoscope_data.vrpc_data.mesoscope_positions_path))
 
     zaber_motors: ZaberMotors | None = None
     try:
         # Verifies that the Surgery log Google Sheet is accessible. To do so, instantiates its interface class to run
         # through the init checks. The class is later re-instantiated during session data preprocessing
-        _ = SurgerySheet(
+        _ = SurgeryLog(
             project_name=project_name,
             animal_id=int(animal_id),
             credentials_path=system_configuration.paths.google_credentials_path,
@@ -3775,7 +3775,7 @@ def window_checking_logic(
         )
 
         # Establishes communication with Zaber motors
-        zaber_motors = ZaberMotors(zaber_positions_path=mesoscope_data.vrpc_persistent_data.zaber_positions_path)
+        zaber_motors = ZaberMotors(zaber_positions_path=mesoscope_data.vrpc_data.zaber_positions_path)
 
         message = "Initializing interface classes..."
         console.echo(message=message, level=LogLevel.INFO)
