@@ -1,6 +1,5 @@
-"""This module provides functions used to preprocess the data acquired by the Mesoscope-VR system after acquisition.
-Primarily, preprocessing prepares the data for long-term storage and further processing in the Sun lab data cluster by
-efficiently and losslessly compressing the raw data and moving it to the BioHPC server and the NAS back-up storage.
+"""This module provides the assets for preprocessing the data acquired by the Mesoscope-VR data acquisition system
+during a session's runtime and moving it to the long-term storage destinations.
 """
 
 import os
@@ -11,163 +10,110 @@ from pathlib import Path
 from datetime import datetime
 from functools import partial
 from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 from tqdm import tqdm
 import numpy as np
 import tifffile
 from natsort_rs import natsort as natsorted
-from numpy.typing import NDArray
-from ataraxis_time import PrecisionTimer
 from sl_shared_assets import (
-    Job,
-    Server,
     SessionData,
     SurgeryData,
     SessionTypes,
-    TrackerFileNames,
     RunTrainingDescriptor,
     LickTrainingDescriptor,
     WindowCheckingDescriptor,
     MesoscopeExperimentDescriptor,
     transfer_directory,
-    generate_manager_id,
-    get_processing_tracker,
     calculate_directory_checksum,
+    delete_directory,
 )
 from ataraxis_base_utilities import LogLevel, console, ensure_directory_exists
-from ataraxis_data_structures import compress_npy_logs
-from ataraxis_time.time_helpers import get_timestamp
+from ataraxis_data_structures import assemble_log_archives
 
 from .tools import MesoscopeData, get_system_configuration
 from ..shared_components import WaterLog, SurgeryLog
 
+_METADATA_SCHEMA = {
+    "frameNumbers": (np.int32, int),
+    "acquisitionNumbers": (np.int32, int),
+    "frameNumberAcquisition": (np.int32, int),
+    "frameTimestamps_sec": (np.float64, float),
+    "acqTriggerTimestamps_sec": (np.float64, float),
+    "nextFileMarkerTimestamps_sec": (np.float64, float),
+    "endOfAcquisition": (np.int32, int),
+    "endOfAcquisitionMode": (np.int32, int),
+    "dcOverVoltage": (np.int32, int),
+}
+"""Defines the schema for the frame-variant ScanImage metadata expected by the _process_stack() function
+when parsing mesoscope-generated metadata. This schema is statically written to match the ScanImage version currently 
+used by the Mesoscope-VR system."""
 
-def _delete_directory(directory_path: Path) -> None:
-    """Removes the input directory and all its subdirectories using parallel processing.
-
-    This function outperforms default approaches like subprocess call with rm -rf and shutil rmtree for directories with
-    a comparably small number of large files. For example, this is the case for the mesoscope frame directories, which
-    are deleted ~6 times faster with this method over sh.rmtree. Potentially, it may also outperform these approaches
-    for all comparatively shallow directories.
-
-    Args:
-        directory_path: The path to the directory to delete.
-    """
-    # Checks if the directory exists and, if not, aborts early
-    if not directory_path.exists():
-        return
-
-    # Builds the list of files and directories inside the input directory using Path
-    files = [p for p in directory_path.iterdir() if p.is_file()]
-    subdirectories = [p for p in directory_path.iterdir() if p.is_dir()]
-
-    # Deletes files in parallel
-    with ThreadPoolExecutor() as executor:
-        list(executor.map(os.unlink, files))  # Forces completion of all tasks
-
-    # Recursively deletes subdirectories
-    for subdir in subdirectories:
-        _delete_directory(subdir)
-
-    # Removes the now-empty root directory. Since Windows (ScanImagePC) is sometimes slow to release file handles, adds
-    # an optional delay step to give Windows time to release file handles.
-    max_attempts = 5
-    delay_timer = PrecisionTimer("ms")
-    for attempt in range(max_attempts):
-        # noinspection PyBroadException
-        try:
-            os.rmdir(directory_path)
-            break  # Breaks early if the call succeeds
-        except Exception:
-            delay_timer.delay_noblock(delay=500, allow_sleep=True)  # For each failed attempt, sleeps for 500 ms
-            continue
+_IGNORED_METADATA_FIELDS = {"auxTrigger0", "auxTrigger1", "auxTrigger2", "auxTrigger3", "I2CData"}
+"""Stores the frame-invariant ScanImage metadata fields that are currently not used by the Mesoscope-VR system."""
 
 
-def _check_stack_size(file: Path) -> int:
-    """Reads the header of the input TIFF file, and if the file is a stack, extracts its size.
-
-    This function is used to both determine the stack size of the processed TIFF files and to exclude non-mesoscope
-    TIFFs from processing.
-
-    Notes:
-        This function only works with monochrome TIFF stacks generated by the mesoscope. It expects each TIFF file to
-        be a stack of 2D frames.
+def _verify_and_get_stack_size(file: Path) -> int:
+    """Reads the header of the specified TIFF file, and, if the file is a valid mesoscope frame stack, extracts and
+    returns its size in frames.
 
     Args:
         file: The path to the TIFF file to evaluate.
 
     Returns:
-        If the file is a stack, returns the number of frames (pages) in the stack. Otherwise, returns 0 to indicate that
-        the file is not a stack.
+        If the file is a valid mesoscope frame stack, returns the number of frames (pages) in the stack. Otherwise,
+        returns 0 to indicate that the file is not a valid mesoscope stack.
     """
     with tifffile.TiffFile(file) as tiff:
-        # Gets number of pages (frames) from tiff header
+        # Gets the number of pages (frames) from the tiff file's header
         n_frames = len(tiff.pages)
 
-        # Considers all files with more than one page and a 2-dimensional (monochrome) image as a stack. For these
-        # stacks, returns the discovered stack size (number of frames). Also ensures that the files have the ScanImage
-        # metadata. This latter step will exclude already converted .tiff files from reprocessing.
+        # Considers all files with more than one page, a 2-dimensional (monochrome) image layout, and ScanImage metadata
+        # a candidate stack for further processing. For these stacks, returns the discovered stack size
+        # (number of frames).
         if n_frames > 1 and len(tiff.pages[0].shape) == 2 and tiff.scanimage_metadata is not None:
             return n_frames
-        # Otherwise, returns 0 to indicate that the file is not a stack.
+        # Otherwise, returns 0 to indicate that the file is not a valid mesoscope frame stack.
         return 0
 
 
 def _process_stack(
-    tiff_path: Path, first_frame_number: int, output_directory: Path, verify_integrity: bool, batch_size: int = 250
+    tiff_path: Path, first_frame_number: int, output_directory: Path, batch_size: int = 250
 ) -> dict[str, Any]:
-    """Reads a TIFF stack, extracts its frame-variant ScanImage data, and saves it as a LERC-compressed stacked TIFF
-    file.
-
-    This is a worker function called by the process_mesoscope_directory in-parallel for each stack inside each
-    processed directory. It re-compresses the input TIFF stack using LERC-compression and extracts the frame-variant
-    ScanImage metadata for each frame inside the stack. Optionally, the function can be configured to verify data
-    integrity after compression.
+    """Recompresses the target mesoscope frame stack TIFF file using the Limited Error Raster Coding (LERC) scheme and
+    extracts its frame-variant ScanImage metadata.
 
     Notes:
-        This function can reserve up to double the processed stack size of RAM bytes to hold the data in memory. If the
-        host-computer does not have enough RAM, reduce the number of concurrent processes, reduce the batch size, or
-        disable verification.
+        This function is designed to be parallelized to work on multiple TIFF files at the same time.
+
+        As part of its runtime, the function strips the extracted metadata from the recompressed frame stack to reduce
+        its size.
 
     Raises:
-        RuntimeError: If any extracted frame does not match the original frame stored inside the TIFF stack.
-        NotImplementedError: If extracted frame-variant metadata contains unexpected keys or expected keys for which
-            we do not have a custom extraction implementation.
+        NotImplementedError: If the extracted frame-variant ScanImage metadata cannot be processed due to a mismatch
+            between the ScanImage version and the version of the sl-experiment library.
 
     Args:
-        tiff_path: The path to the TIFF stack to process.
+        tiff_path: The path to the TIFF file that stores the stack of the mesoscope-acquired frames to process.
         first_frame_number: The position (number) of the first frame stored in the stack, relative to the overall
-            sequence of frames acquired during the experiment. This is used to configure the output file name to include
-            the range of frames stored in the stack.
-        output_directory: The path to the directory where to save the processed stacks.
-        verify_integrity: Determines whether to verify the integrity of compressed data against the source data.
-            The conversion does not alter the source data, so it is usually safe to disable this option, as the chance
-            of compromising the data is negligible. Note, enabling this function doubles the RAM usage for each worker
-            process.
-        batch_size: The number of frames to process at the same time. This directly determines the RAM footprint of
-            this function, as frames are kept in RAM during compression. Note, verification doubles the RAM footprint,
-            as it requires both compressed and uncompressed data to be kept in RAM for comparison.
+            sequence of frames acquired during the data acquisition session's runtime.
+        output_directory: The path to the directory where to save the recompressed stacks.
+        batch_size: The number of frames to process at the same time.
 
     Returns:
-        A dictionary containing the extracted frame-variant ScanImage metadata for the processed stack.
+        A dictionary containing the extracted frame-variant ScanImage metadata for the processed mesoscope frame stack.
     """
     # Generates the file handle for the current stack
     with tifffile.TiffFile(tiff_path) as stack:
         # Determines the size of the stack
         stack_size = len(stack.pages)
 
-        # Initializes arrays for storing metadata
-        frame_nums = np.zeros(stack_size, dtype=np.int32)
-        acq_nums = np.zeros(stack_size, dtype=np.int32)
-        frame_num_acq = np.zeros(stack_size, dtype=np.int32)
-        frame_timestamps = np.zeros(stack_size, dtype=np.float64)
-        acq_trigger_timestamps = np.zeros(stack_size, dtype=np.float64)
-        next_file_timestamps = np.zeros(stack_size, dtype=np.float64)
-        end_of_acq = np.zeros(stack_size, dtype=np.int32)
-        end_of_acq_mode = np.zeros(stack_size, dtype=np.int32)
-        dc_over_voltage = np.zeros(stack_size, dtype=np.int32)
-        epoch_timestamps = np.zeros(stack_size, dtype=np.uint64)
+        # Initializes arrays for storing the extracted metadata using the schema
+        arrays = {key: np.zeros(stack_size, dtype=dtype)
+                  for key, (dtype, _) in _METADATA_SCHEMA.items()}
+
+        # Also initializes the array for storing the converted frame acquisition timestamps.
+        arrays["epochTimestamps_us"] = np.zeros(stack_size, dtype=np.uint64)
 
         # Loops over each page in the stack and extracts the metadata associated with each frame
         for i, page in enumerate(stack.pages):
@@ -183,29 +129,14 @@ def _process_stack(
                 key = key.strip()
                 value = value.strip()
 
-                # This section is geared to the output produced by the Sun Lab mesoscope. Any changes to the output
-                # metadata will trigger an error and will require manual code adjustment to support parsing new
-                # metadata tags. Each cycle updates the specific index of each output array with parsed data.
-                if key == "frameNumbers":
-                    frame_nums[i] = int(value)
-                elif key == "acquisitionNumbers":
-                    acq_nums[i] = int(value)
-                elif key == "frameNumberAcquisition":
-                    frame_num_acq[i] = int(value)
-                elif key == "frameTimestamps_sec":
-                    frame_timestamps[i] = float(value)
-                elif key == "acqTriggerTimestamps_sec":
-                    acq_trigger_timestamps[i] = float(value)
-                elif key == "nextFileMarkerTimestamps_sec":
-                    next_file_timestamps[i] = float(value)
-                elif key == "endOfAcquisition":
-                    end_of_acq[i] = int(value)
-                elif key == "endOfAcquisitionMode":
-                    end_of_acq_mode[i] = int(value)
-                elif key == "dcOverVoltage":
-                    dc_over_voltage[i] = int(value)
-                elif key == "epoch":
-                    # Parse epoch [year month day hour minute second.microsecond]
+                # This section is written to raise errors if it encounters an unexpected (unsupported) metadata field.
+                if key in _METADATA_SCHEMA:  # Expected data fields
+                    # Use the schema to parse and convert the value
+                    _, converter = _METADATA_SCHEMA[key]
+                    arrays[key][i] = converter(value)
+                elif key == "epoch":  # Epoch data is converted to the Sun lab's timestamp format.
+                    # Parses the epoch [year month day hour minute second.microsecond] as microseconds elapsed since
+                    # the UTC onset.
                     epoch_vals = [float(x) for x in value[1:-1].split()]
                     timestamp = int(
                         datetime(
@@ -215,47 +146,38 @@ def _process_stack(
                             int(epoch_vals[3]),
                             int(epoch_vals[4]),
                             int(epoch_vals[5]),
-                            int((epoch_vals[5] % 1) * 1e6),
+                            int((epoch_vals[5] % 1) * 1_000_000),
                         ).timestamp()
-                        * 1e6
-                    )  # Convert to microseconds
-                    epoch_timestamps[i] = timestamp
-                elif key in ["auxTrigger0", "auxTrigger1", "auxTrigger2", "auxTrigger3", "I2CData"]:
+                        * 1_000_000
+                    )  # Converts to microseconds
+                    arrays["epochTimestamps_us"][i] = timestamp
+                elif key in _IGNORED_METADATA_FIELDS:
+                    # These fields are known but not currently used by the system. This section ensures these fields are
+                    # empty to prevent accidental data loss.
                     if len(value) > 2:
                         message = (
                             f"Non-empty unsupported field '{key}' found in the frame-variant ScanImage metadata "
-                            f"associated with the tiff file {tiff_path}. Update the _load_stack_data() with the logic "
-                            f"for parsing the data associated with this field."
+                            f"associated with the tiff file {tiff_path}. Update the _process_stack() function with the "
+                            f"logic for parsing the data associated with this field."
                         )
                         console.error(message=message, error=NotImplementedError)
                 else:
+                    # Unknown field - raise error to ensure schema is updated
                     message = (
                         f"Unknown field '{key}' found in the frame-variant ScanImage metadata associated with the tiff "
-                        f"file {tiff_path}. Update the _load_stack_data() with the logic for parsing the data "
+                        f"file {tiff_path}. Update the _process_stack() function with the logic for parsing the data "
                         f"associated with this field."
                     )
                     console.error(message=message, error=NotImplementedError)
 
-        # Packages arrays into a dictionary with the same key names as the original metadata fields
-        metadata_dict = {
-            "frameNumbers": frame_nums,
-            "acquisitionNumbers": acq_nums,
-            "frameNumberAcquisition": frame_num_acq,
-            "frameTimestamps_sec": frame_timestamps,
-            "acqTriggerTimestamps_sec": acq_trigger_timestamps,
-            "nextFileMarkerTimestamps_sec": next_file_timestamps,
-            "endOfAcquisition": end_of_acq,
-            "endOfAcquisitionMode": end_of_acq_mode,
-            "dcOverVoltage": dc_over_voltage,
-            "epochTimestamps_us": epoch_timestamps,
-        }
-
-        # Computes the starting and ending frame number
-        start_frame = first_frame_number  # This is precomputed to be correct, no adjustment needed
+        # Computes the starting and ending frame numbers
+        start_frame = first_frame_number
         end_frame = first_frame_number + stack_size - 1  # The ending frame number is length - 1 + start
 
-        # Creates the output path for the compressed stack. Uses 6-digit padding for frame numbering
-        output_path = output_directory.joinpath(f"mesoscope_{str(start_frame).zfill(6)}_{str(end_frame).zfill(6)}.tiff")
+        # Creates the output path for the compressed stack. Uses configured digit padding for frame numbering
+        output_path = output_directory.joinpath(
+            f"mesoscope_{str(start_frame).zfill(6)}_{str(end_frame).zfill(6)}.tiff"
+        )
 
         # Calculates the total number of batches required to fully process the stack
         num_batches = int(np.ceil(stack_size / batch_size))
@@ -279,165 +201,22 @@ def _process_stack(
                     predictor=True,
                 )
 
-                # Verifies the integrity of this batch if requested
-                if verify_integrity:
-                    # Opens up the compressed file written above for reading
-                    with tifffile.TiffFile(output_path) as compressed_stack:
-                        # Reads the frames for the current batch using the same indices as used for writing
-                        compressed_batch = np.array(
-                            [compressed_stack.pages[i].asarray() for i in range(start_idx, end_idx)]
-                        )
-
-                        # Compares with the original batch
-                        if not np.array_equal(compressed_batch, original_batch):
-                            message = (
-                                f"Compressed batch {batch_idx + 1}/{num_batches} in {output_path} does not match the "
-                                f"original in {tiff_path}."
-                            )
-                            console.error(message=message, error=RuntimeError)
-
-    # Returns extracted metadata dictionary to caller
-    return metadata_dict
+    # Returns extracted metadata dictionary to caller (all keys from arrays dict)
+    return arrays
 
 
-def _generate_ops(
-    metadata: dict[str, Any],
-    frame_data: NDArray[np.int16],
-    ops_path: Path,
-) -> None:
-    """Uses frame-invariant ScanImage metadata to create an ops.json at the specified ops_path.
-
-    This function is an implementation of the mesoscope data extraction helper from the original suite2p library. The
-    helper function has been reworked to use the metadata parsed by tifffile and reimplemented in Python. Primarily,
-    this function generates the 'fs', 'dx', 'dy', 'lines', 'nroi', 'nplanes' and 'mesoscan' fields of the 'ops'
-    configuration file. The Sun lab suite2p implementation is statically configured to find and use these files when
-    working with mesoscope data to configure the single-day cell activity extraction pipeline.
-
-    Notes:
-        The generated ops.json file will be saved at the location and filename specified by the ops_path.
+def _process_invariant_metadata(frame_stack_path: Path, ops_path: Path, metadata_path: Path) -> None:
+    """Extracts the frame-invariant ScanImage metadata from the target mesoscope frame stack TIFF file and uses it to
+    generate the metadata.json and ops.json files.
 
     Args:
-        metadata: The dictionary containing ScanImage metadata extracted from a mesoscope tiff stack file.
-        frame_data: A numpy array containing the extracted pixel data for the first frame of the stack.
-        ops_path: The path to the output ops.json file. This is generated by the ProjectData class and passed down to
-            this method via the main directory processing function.
-    """
-    # Extracts the mesoscope framerate from metadata. Uses a fallback value of 4 HZ
-    try:
-        framerate = float(metadata["FrameData"]["SI.hRoiManager.scanVolumeRate"])  # formerly fs
-    except KeyError:
-        framerate = float(4)
-
-    # The number of slices (planes) for each ROI
-    nplanes = int(metadata["FrameData"]["SI.hStackManager.actualNumSlices"])
-
-    # The number of channels (color channels) for each ROI
-    nchannels = int(metadata["FrameData"]["SI.hChannels.channelsActive"])
-
-    # Note. Suite2p expects the data to be stacked following the order of: channels, planes, time, e.g.:
-    # frame0 = time0_plane0_channel1
-    # frame1 = time0_plane0_channel2
-    # frame2 = time0_plane1_channel1
-    # frame3 = time0_plane1_channel2
-    # frame4 = time1_plane0_channel1
-    # frame5 = time1_plane0_channel2
-
-    # Extracts the data about all ROIs
-    si_rois: list[dict[str, Any]] | dict[str, Any] = metadata["RoiGroups"]["imagingRoiGroup"]["rois"]
-
-    # If there was only a single ROI in the mesoscan, si_rois is a single dictionary. This makes it a list for the
-    # code below to work as expected
-    if isinstance(si_rois, dict):
-        si_rois = [si_rois]
-
-    # Extracts the ROI dimensions for each ROI.
-
-    # Preallocates output arrays
-    nrois = len(si_rois)
-    roi_heights = np.zeros(nrois)
-    roi_widths = np.zeros(nrois)
-    roi_centers = np.zeros((nrois, 2))
-    roi_sizes = np.zeros((nrois, 2))
-
-    # Loops over all ROIs and extracts dimensional information for each ROI from the metadata.
-    for i in range(nrois):
-        roi_heights[i] = si_rois[i]["scanfields"]["pixelResolutionXY"][1]
-        roi_widths[i] = si_rois[i]["scanfields"]["pixelResolutionXY"][0]
-        roi_centers[i] = si_rois[i]["scanfields"]["centerXY"][::-1]  # Reverse order to match the original matlab code
-        roi_sizes[i] = si_rois[i]["scanfields"]["sizeXY"][::-1]
-
-    # Transforms ROI coordinates into pixel-units, while maintaining accurate relative positions for each ROI.
-    roi_centers -= roi_sizes / 2  # Shifts ROI coordinates to mark the top left corner
-    roi_centers -= np.min(roi_centers, axis=0)  # Normalizes ROI coordinates to leftmost/topmost ROI
-    # Calculates pixels-per-unit scaling factor from ROI dimensions
-    scale_factor = np.median(np.column_stack([roi_heights, roi_widths]) / roi_sizes, axis=0)
-    min_positions = roi_centers * scale_factor  # Converts ROI positions to pixel coordinates
-    min_positions = np.ceil(min_positions)  # This was added to match Spruston lab extraction code
-
-    # Calculates the total number of rows across all ROIs (rows of pixels acquired while imaging ROIs)
-    total_rows = np.sum(roi_heights)
-
-    # Calculates the number of flyback pixels between ROIs. These are the pixels acquired when the galvos are moving
-    # between frames.
-    n_flyback = (frame_data.shape[0] - total_rows) / max(1, (nrois - 1))
-
-    # Creates an array that stores the start and end row indices for each ROI
-    roi_rows = np.zeros((2, nrois))
-    # noinspection PyTypeChecker
-    temp = np.concatenate([[0], np.cumsum(roi_heights + n_flyback)])
-    roi_rows[0] = temp[:-1]  # Starts are all elements except the last
-    roi_rows[1] = roi_rows[0] + roi_heights  # Ends calculation stays the same
-
-    # Generates the data to be stored as the JSON config based on the result of the computations above.
-    # Note, most of these values were filled based on the 'prototype' ops.json from Tyche F3. For our pipeline they are
-    # mostly not relevant, except for the "fs", ""nplanes", and "nrois".
-    data: dict[str, int | float | list[Any]] = {
-        "fs": framerate,
-        "nplanes": nplanes,
-        "nchannels": nchannels,
-        "nrois": roi_rows.shape[1],
-        "mesoscan": 1,
-    }
-
-    # When the config is generated for a mesoscope scan, stores ROI offsets (dx, dy) and line indices (lines) for
-    # each ROI
-    if data["mesoscan"]:
-        # noinspection PyTypeChecker
-        data["dx"] = [round(min_positions[i, 1]) for i in range(nrois)]
-        # noinspection PyTypeChecker
-        data["dy"] = [round(min_positions[i, 0]) for i in range(nrois)]
-        data["lines"] = [list(range(int(roi_rows[0, i]), int(roi_rows[1, i]))) for i in range(nrois)]
-
-    # Saves the generated config as a JSON file (ops.json)
-    with open(ops_path, "w") as f:
-        # noinspection PyTypeChecker
-        json.dump(data, f, separators=(",", ":"), indent=None)  # Maximizes data compression
-
-
-def _process_invariant_metadata(file: Path, ops_path: Path, metadata_path: Path) -> None:
-    """Extracts frame-invariant ScanImage metadata from the target tiff file and uses it to generate metadata.json and
-    ops.json files.
-
-    This function only needs to be called for one raw ScanImage TIFF stack acquired as part of the same experimental
-    session. It extracts the ScanImage metadata that is common for all frames across all stacks and outputs it as a
-    metadata.json file. This function also calls the _generate_ops() function that generates a suite2p ops.json file
-    from the parsed metadata.
-
-    Notes:
-        This function is primarily designed to preserve the metadata before compressing raw TIFF stacks with the
-        Limited Error Raster Compression (LERC) scheme.
-
-    Args:
-        file: The path to the mesoscope TIFF stack file. This can be any file in the directory as the
-            frame-invariant metadata is the same for all stacks.
-        ops_path: The path to the ops.json file that should be created by this function. This is resolved by the
-            ProjectData class to match the processed project, animal, and session combination.
-        metadata_path: The path to the metadata.json file that should be created by this function. This is resolved
-            by the ProjectData class to match the processed project, animal, and session combination.
+        frame_stack_path: The path to the TIFF file that stores a stack of the mesoscope-acquired frames.
+        ops_path: The path to the ops.json file to be created.
+        metadata_path: The path to the metadata.json file to be created.
     """
     # Reads the frame-invariant metadata from the first page (frame) of the stack. This metadata is the same across
     # all frames and stacks.
-    with tifffile.TiffFile(file) as tiff:
+    with tifffile.TiffFile(frame_stack_path) as tiff:
         metadata = tiff.scanimage_metadata
         frame_data = tiff.asarray(key=0)  # Loads the data for the first frame in the stack to generate ops.json
 
@@ -446,31 +225,77 @@ def _process_invariant_metadata(file: Path, ops_path: Path, metadata_path: Path)
         # noinspection PyTypeChecker
         json.dump(metadata, json_file, separators=(",", ":"), indent=None)  # Maximizes data compression
 
-    # Also uses extracted metadata to generate the ops.json configuration file for scanImage processing.
-    _generate_ops(
-        metadata=metadata,
-        frame_data=frame_data,
-        ops_path=ops_path,
-    )
+    # Extracts the mesoscope frame_rate from metadata.
+    frame_rate = float(metadata["FrameData"]["SI.hRoiManager.scanVolumeRate"])
+    plane_number = int(metadata["FrameData"]["SI.hStackManager.actualNumSlices"])
+    channel_number = int(metadata["FrameData"]["SI.hChannels.channelsActive"])
+    si_rois: list[dict[str, Any]] | dict[str, Any] = metadata["RoiGroups"]["imagingRoiGroup"]["rois"]
+
+    # If the acquisition only uses a single ROI, si_rois is a single dictionary. Converts it to a list for the code
+    # below to work for this acquisition mode.
+    if isinstance(si_rois, dict):
+        rois = [si_rois]
+    else:
+        rois = si_rois
+
+    # Extracts the ROI dimensions for each ROI.
+    roi_number = len(rois)
+    roi_heights = np.array([roi["scanfields"]["pixelResolutionXY"][1] for roi in rois])
+    roi_widths = np.array([roi["scanfields"]["pixelResolutionXY"][0] for roi in rois])
+    roi_centers = np.array([roi["scanfields"]["centerXY"][::-1] for roi in rois])
+    roi_sizes = np.array([roi["scanfields"]["sizeXY"][::-1] for roi in rois])
+
+    # Transforms ROI coordinates into pixel-units, while maintaining accurate relative positions for each ROI.
+    roi_centers -= roi_sizes / 2  # Shifts ROI coordinates to mark the top left corner
+    roi_centers -= np.min(roi_centers, axis=0)  # Normalizes ROI coordinates to leftmost/topmost ROI
+    # Calculates pixels-per-unit scaling factor from ROI dimensions
+    scale_factor = np.median(np.column_stack([roi_heights, roi_widths]) / roi_sizes, axis=0)
+    min_positions = np.ceil(roi_centers * scale_factor)  # Converts ROI positions to pixel coordinates
+
+    # Calculates the total number of rows across all ROIs (rows of pixels acquired while imaging ROIs)
+    total_rows = np.sum(roi_heights)
+
+    # Calculates the number of flyback pixels between ROIs. These are the pixels acquired when the galvos are moving
+    # between frames.
+    n_flyback = (frame_data.shape[0] - total_rows) // max(1, (roi_number - 1))  # Uses integer division
+
+    # Creates an array that stores the start and end row indices for each ROI
+    roi_rows = np.zeros(shape=(2, roi_number), dtype=np.int32)
+    # noinspection PyTypeChecker
+    temp = np.concatenate([[0], np.cumsum(roi_heights + n_flyback)])
+    roi_rows[0] = temp[:-1]  # Stores the first line index for each ROI
+    roi_rows[1] = roi_rows[0] + roi_heights  # Stores the last line index for each ROI
+
+    # Extracts the invariant data necessary for the suite2p processing pipeline to be able to load and work with the
+    # stack.
+    data: dict[str, int | float | list[Any]] = {
+        "frame_rate": frame_rate,
+        "plane_number": plane_number,
+        "channel_number": channel_number,
+        "roi_number": roi_rows.shape[1],
+        "roi_x_coordinates": [round(min_positions[i, 1]) for i in range(roi_number)],
+        "roi_y_coordinates": [round(min_positions[i, 0]) for i in range(roi_number)],
+        "roi_lines": [list(range(int(roi_rows[0, i]), int(roi_rows[1, i]))) for i in range(roi_number)]
+    }
+
+    # Saves the generated config as a JSON file (ops.json)
+    with open(ops_path, "w") as f:
+        # noinspection PyTypeChecker
+        json.dump(data, f, separators=(",", ":"), indent=None)  # Maximizes data compression
 
 
 def _preprocess_video_names(session_data: SessionData) -> None:
-    """Renames the video (camera) files generated during runtime to use human-friendly camera names, rather than
-    ID-codes.
-
-    This is a minor preprocessing function primarily designed to make further data processing steps more human-friendly.
-    Since version 2.0.0, this method is also essential for further data processing, as it ensures that video names are
-    unique by including session names (timestamps). This is necessary to support DeepLabCut tracking, as DLC is not
-    able to resolve unique videos based on their storage paths.
+    """Renames the .MP4 video files generated during the processed data acquisition session's runtime to use
+    human-friendly names instead of the source ID codes.
 
     Args:
-        session_data: The SessionData instance for the processed session.
+        session_data: The SessionData instance that defines the processed session.
     """
     # Resolves the path to the camera frame directory
-    camera_frame_directory = Path(session_data.raw_data.camera_data_path)
+    camera_frame_directory = session_data.raw_data.camera_data_path
     session_name = session_data.session_name
 
-    # Renames the video files to use human-friendly names. Assumes the standard data acquisition configuration with 3
+    # Renames the video files to use human-friendly names. Assumes the standard data acquisition configuration with 2
     # cameras and predefined camera IDs.
     if camera_frame_directory.joinpath("051.mp4").exists():
         os.renames(
@@ -480,17 +305,13 @@ def _preprocess_video_names(session_data: SessionData) -> None:
     if camera_frame_directory.joinpath("062.mp4").exists():
         os.renames(
             old=camera_frame_directory.joinpath("062.mp4"),
-            new=camera_frame_directory.joinpath(f"{session_name}_left_camera.mp4"),
-        )
-    if camera_frame_directory.joinpath("073.mp4").exists():
-        os.renames(
-            old=camera_frame_directory.joinpath("073.mp4"),
-            new=camera_frame_directory.joinpath(f"{session_name}_right_camera.mp4"),
+            new=camera_frame_directory.joinpath(f"{session_name}_body_camera.mp4"),
         )
 
 
 def _pull_mesoscope_data(
     session_data: SessionData,
+    mesoscope_data: MesoscopeData,
     num_threads: int = 30,
     remove_sources: bool = True,
     verify_transfer_integrity: bool = False,
@@ -525,7 +346,6 @@ def _pull_mesoscope_data(
     # Uses the input SessionData instance to determine the path to the folder that stores raw mesoscope data on the
     # ScanImage PC.
     session_name = session_data.session_name
-    mesoscope_data = MesoscopeData(session_data)
     source = mesoscope_data.scanimagepc_data.session_specific_path
 
     # If the source folder does not exist or is already marked for deletion by the ubiquitin marker, the mesoscope data
@@ -742,7 +562,7 @@ def _preprocess_mesoscope_directory(
     starting_frame = 1
     for file in tiff_files:
         if "session" in file.name:  # All valid mesoscope data files acquired in the lab are named 'session'.
-            stack_size = _check_stack_size(file)
+            stack_size = _verify_and_get_stack_size(file)
             if stack_size > 0:
                 # Appends the starting frame number to the list and increments the stack list
                 frame_numbers.append(starting_frame)
@@ -762,13 +582,13 @@ def _preprocess_mesoscope_directory(
         # If configured, the processing function ensures that the temporary image directory with all TIFF source files
         # is removed after processing.
         if remove_sources:
-            _delete_directory(image_directory)
+            delete_directory(image_directory)
         return
 
     # Extracts frame invariant metadata using the first frame of the first TIFF stack. Since this metadata is the
     # same for all stacks, it is safe to use any available stack. We use the first one for consistency with
     # suite2p helper scripts.
-    _process_invariant_metadata(file=tiff_files[0], ops_path=ops_path, metadata_path=frame_invariant_metadata_path)
+    _process_invariant_metadata(frame_stack_path=tiff_files[0], ops_path=ops_path, metadata_path=frame_invariant_metadata_path)
 
     # Uses partial to bind the constant arguments to the processing function
     process_func = partial(
@@ -810,7 +630,7 @@ def _preprocess_mesoscope_directory(
     # If configured, the processing function ensures that the temporary image directory with all TIFF source files is
     # removed after processing.
     if remove_sources:
-        _delete_directory(image_directory)
+        delete_directory(image_directory)
 
 
 def _preprocess_log_directory(
@@ -853,12 +673,11 @@ def _preprocess_log_directory(
     # If the input directory contains .npy (uncompressed) log entries and no compressed log entries, compresses all log
     # entries in the directory
     if len(compressed_files) == 0 and len(uncompressed_files) > 0:
-        compress_npy_logs(
+        assemble_log_archives(
             log_directory=log_directory,
             remove_sources=remove_sources,
             memory_mapping=False,
             verbose=True,
-            compress=False,  # Does not compress the data, as compression greatly reduces the speed of post-processing.
             verify_integrity=verify_integrity,
             max_workers=num_processes,
         )
@@ -1076,107 +895,6 @@ def _push_data(
             )
 
 
-def _verify_remote_data_integrity(session_data: SessionData) -> None:
-    """Verifies that the data was moved to the BioHPC server intact and creates the session's processed data directories
-    on the server.
-
-    This service function runs at the end of the data preprocessing pipeline, after the data has been transferred to
-    the BioHPC server. Primarily, it is used to verify that the data was moved intact, and it is safe to delete the
-    local copy of the data stored on the VRPC. Additionally, it is the only function allowed to create processed
-    data directories on the BioHPC server, which is a prerequisite for all further data processing steps.
-
-    Notes:
-        To optimize runtime speed, the server executes the verification check submitted as a remote job. Depending on
-        the overall server utilization, it is possible for the job execution to be delayed if the server does not have
-        enough spare resources to run the job.
-
-        If integrity verification fails, this job will delete the telomere.bin marker file stored in the session's
-        raw_data folder on the server. If it succeeds, the job will generate the 'ubiquitin.bin' marker file in the
-        local (VRPC) session's raw_data folder, marking it for deletion. Generating the deletion marker file will not
-        itself delete the data, that step is performed at a later time point by a dedicated 'purging' function.
-
-    Args:
-        session_data: The SessionData instance for the processed session.
-    """
-    # Instantiates additional configuration and data classes that contain required information to execute server-side
-    # verification
-    system_configuration = get_system_configuration()
-
-    # Establishes bidirectional communication with the server via the SSH protocol.
-    server = Server(credentials_path=system_configuration.paths.server_credentials_path)
-
-    # Resolves the name and the working directory for the verification job
-    timestamp = get_timestamp()
-    job_name = f"{session_data.session_name}_integrity_verification"
-    working_directory = Path(server.user_working_root).joinpath("job_logs", f"{job_name}_{timestamp}")
-
-    # Ensures that the working directory exists on the remote server
-    server.create_directory(remote_path=working_directory)
-
-    # Instantiates the Job object for the integrity verification job.
-    job = Job(
-        job_name=job_name,
-        output_log=working_directory.joinpath("output.txt"),
-        error_log=working_directory.joinpath("errors.txt"),
-        working_directory=working_directory,
-        conda_environment="manage",
-        cpus_to_use=10,
-        ram_gb=10,
-        time_limit=30,
-    )
-
-    # Instructs the server to verify the integrity of the data stored in the remote (server-side) session directory.
-    remote_session_path = Path(server.raw_data_root).joinpath(
-        session_data.project_name, session_data.animal_id, session_data.session_name
-    )
-    process_id = generate_manager_id()
-    job.add_command(
-        f"sl-verify-session -sp {remote_session_path} -id {process_id} -c -pdr {server.processed_data_root} -um"
-    )
-
-    # Submits the job to be executed on the server.
-    job = server.submit_job(job)
-
-    # Waits for the job to complete. Unless the server is overbooked, this should not take long.
-    delay_timer = PrecisionTimer("s")
-    while not server.job_complete(job=job):
-        # Checks completion status every 5 seconds
-        message = f"Waiting for the integrity verification job with ID {job.job_id} to complete..."
-        console.echo(message=message, level=LogLevel.INFO)
-        delay_timer.delay_noblock(delay=5, allow_sleep=True)
-
-    # Resolves the path to the verification tracker .yaml file on the server and the path to a local copy. The remote
-    # tracker is 'pulled' to the specified local path to determine the outcome of the verification.
-    remote_tracker_path = remote_session_path.joinpath("raw_data", TrackerFileNames.INTEGRITY)
-    tracker_file = session_data.raw_data.raw_data_path.joinpath(TrackerFileNames.INTEGRITY)
-
-    # Checks the outcome of the job by evaluating the processing status stored inside the verification tracker file.
-    # To do so, first pulls the tracker file from the remote server to the local machine and then loads its data into
-    # a ProcessingTracker instance.
-    server.pull_file(remote_file_path=remote_tracker_path, local_file_path=tracker_file)
-    tracker = get_processing_tracker(root=session_data.raw_data.raw_data_path, file_name=TrackerFileNames.INTEGRITY)
-
-    # The tracker should indicate that the job is 'complete' if runtime finishes successfully.
-    if not tracker.is_complete:
-        message = (
-            f"Session {session_data.session_name} server-side data integrity: Compromised. The integrity "
-            f"verification job did not run successfully."
-        )
-        console.echo(message=message, level=LogLevel.ERROR)
-    else:
-        message = f"Session {session_data.session_name} server-side data integrity: Verified."
-        console.echo(message=message, level=LogLevel.SUCCESS)
-
-        # Removes job log files from the server to avoid unnecessary clutter.
-        server.remove(remote_path=working_directory, recursive=True, is_dir=True)
-
-        # Dumps the 'ubiquitin.bin' marker file into the raw_data folder on the VRPC, marking the folder for deletion.
-        session_data.raw_data.ubiquitin_path.touch(exist_ok=True)
-
-    # Disconnects from the server
-    server.close()
-
-
 def rename_mesoscope_directory(session_data: SessionData) -> None:
     """This function renames the 'shared' mesoscope_data directory to use the name specific to the target session.
 
@@ -1259,11 +977,6 @@ def preprocess_session_data(session_data: SessionData) -> None:
         num_threads=15,
     )
 
-    # Ensures that the data was transferred to the BioHPC server intact and creates required directories for further
-    # data processing. In the future, this step may be extended to also verify the integrity of the data stored on
-    # the NAS.
-    _verify_remote_data_integrity(session_data=session_data)
-
     # Purges all redundant data from the ScanImagePC and the VRPC
     purge_redundant_data()
 
@@ -1309,7 +1022,7 @@ def purge_redundant_data() -> None:
         # session directory.
         if candidate.name == "raw_data":
             candidate = candidate.parent
-        _delete_directory(directory_path=candidate)
+        delete_directory(directory_path=candidate)
 
     message = "Redundant data purging: Complete"
     console.echo(message=message, level=LogLevel.SUCCESS)
@@ -1362,7 +1075,7 @@ def purge_failed_session(session_data: SessionData) -> None:
 
     # Removes all session-specific data directories from all destinations
     for candidate in tqdm(deletion_candidates, desc="Deleting session directories", unit="directory"):
-        _delete_directory(directory_path=candidate)
+        delete_directory(directory_path=candidate)
 
     # Ensures that the mesoscope_data directory is reset, in case it has any lingering from the purged runtime.
     for file in mesoscope_data.scanimagepc_data.mesoscope_data_path.glob("*"):
@@ -1489,7 +1202,7 @@ def migrate_animal_between_projects(animal: str, source_project: str, target_pro
         system_configuration.paths.server_working_directory.joinpath(source_project, animal),
     ]
     for candidate in tqdm(deletion_candidates, desc="Deleting redundant animal directories", unit="directory"):
-        _delete_directory(directory_path=candidate)
+        delete_directory(directory_path=candidate)
 
     # Note, this process intentionally preserves the now-empty animal directory in the original project to keep the
     # animal project history.
