@@ -2,20 +2,24 @@
 training and experiment runtimes.
 """
 
-import numpy as np
-import matplotlib
-from numpy.typing import NDArray
+from typing import TYPE_CHECKING
 
-matplotlib.use("QtAgg")  # Uses QT backend for performance and compatibility with Linux
+import numpy as np
+import matplotlib as mpl
+
+mpl.use("QtAgg")  # Uses QT backend for performance and compatibility with Linux
 
 from ataraxis_time import PrecisionTimer
-from matplotlib.axes import Axes
-from matplotlib.text import Text
-from matplotlib.lines import Line2D
-from matplotlib.figure import Figure
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator, FixedLocator, FixedFormatter
 from ataraxis_base_utilities import console
+
+if TYPE_CHECKING:
+    from numpy.typing import NDArray
+    from matplotlib.axes import Axes
+    from matplotlib.text import Text
+    from matplotlib.lines import Line2D
+    from matplotlib.figure import Figure
 
 # Updates plotting dictionaries to preferentially use Arial text style and specific sizes for different text elements
 # in plots:
@@ -63,7 +67,7 @@ def _plt_palette(color: str) -> tuple[float, float, float]:
         )
         console.error(message=message, error=KeyError)
         # Fallback to appease mypy, should not be reachable
-        raise KeyError(message)  # pragma: no cover
+        raise KeyError(message) from None  # pragma: no cover
 
 
 def _plt_line_styles(line_style: str) -> str:
@@ -89,7 +93,7 @@ def _plt_line_styles(line_style: str) -> str:
         )
         console.error(message=message, error=KeyError)
         # Fallback to appease mypy, should not be reachable
-        raise KeyError(message)  # pragma: no cover
+        raise KeyError(message) from None  # pragma: no cover
 
 
 class BehaviorVisualizer:
@@ -280,7 +284,7 @@ class BehaviorVisualizer:
             f"Target speed: {0:.2f} cm/s",
             fontdict=_fontdict_legend,
             verticalalignment="top",
-            bbox=dict(facecolor="white", alpha=1.0, edgecolor="none", pad=3),
+            bbox={"facecolor": "white", "alpha": 1.0, "edgecolor": "none", "pad": 3},
         )
 
         self._duration_threshold_text = self._speed_axis.text(
@@ -289,7 +293,7 @@ class BehaviorVisualizer:
             f"Target duration: {0:.2f} s",
             fontdict=_fontdict_legend,
             verticalalignment="top",
-            bbox=dict(facecolor="white", alpha=1.0, edgecolor="none", pad=3),
+            bbox={"facecolor": "white", "alpha": 1.0, "edgecolor": "none", "pad": 3},
         )
 
         # Generates the figure object and updates it
@@ -304,8 +308,8 @@ class BehaviorVisualizer:
         self.close()
 
     def update(self) -> None:
-        """Updates the visualization plot managed by the instance to include the data acquired since the last update()
-        call.
+        """Re-renders the visualization plot managed by the instance to include the data acquired since the last
+        update() call.
 
         Notes:
             The method has an internal update frequency limiter and is designed to be called without any external

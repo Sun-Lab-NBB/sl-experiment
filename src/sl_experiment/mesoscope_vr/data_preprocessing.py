@@ -5,9 +5,9 @@ during a session's runtime and moving it to the long-term storage destinations.
 import os
 import json
 import shutil as sh
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from pathlib import Path
-from datetime import datetime
+from datetime import UTC, datetime
 from functools import partial
 from itertools import chain
 from collections import defaultdict
@@ -17,7 +17,6 @@ from tqdm import tqdm
 import numpy as np
 import tifffile
 from natsort_rs import natsort as natsorted
-from numpy.typing import NDArray
 from sl_shared_assets import (
     SessionData,
     SurgeryData,
@@ -37,6 +36,9 @@ from ataraxis_data_structures import assemble_log_archives
 
 from .tools import MesoscopeData, mesoscope_vr_sessions, get_system_configuration
 from ..shared_components import WaterLog, SurgeryLog
+
+if TYPE_CHECKING:
+    from numpy.typing import NDArray
 
 _METADATA_SCHEMA = {
     "frameNumbers": (np.int32, int),
@@ -75,7 +77,7 @@ def _verify_and_get_stack_size(file: Path) -> int:
         # Considers all files with more than one page, a 2-dimensional (monochrome) image layout, and ScanImage metadata
         # a candidate stack for further processing. For these stacks, returns the discovered stack size
         # (number of frames).
-        if n_frames > 1 and len(tiff.pages[0].shape) == 2 and tiff.scanimage_metadata is not None:
+        if n_frames > 1 and len(tiff.pages[0].shape) == 2 and tiff.scanimage_metadata is not None:  # noqa: PLR2004
             return n_frames
         # Otherwise, returns 0 to indicate that the file is not a valid mesoscope frame stack.
         return 0
@@ -150,6 +152,7 @@ def _process_stack(
                             int(epoch_vals[4]),
                             int(epoch_vals[5]),
                             int((epoch_vals[5] % 1) * 1_000_000),
+                            tzinfo=UTC,
                         ).timestamp()
                         * 1_000_000
                     )  # Converts to microseconds
@@ -157,7 +160,7 @@ def _process_stack(
                 elif key in _IGNORED_METADATA_FIELDS:
                     # These fields are known but not currently used by the system. This section ensures these fields are
                     # empty to prevent accidental data loss.
-                    if len(value) > 2:
+                    if len(value) > 2:  # noqa: PLR2004
                         message = (
                             f"Non-empty unsupported field '{key}' found in the frame-variant ScanImage metadata "
                             f"associated with the tiff file {tiff_path}. Update the _process_stack() function with the "
@@ -223,7 +226,7 @@ def _process_invariant_metadata(frame_stack_path: Path, ops_path: Path, metadata
         frame_data = tiff.asarray(key=0)
 
     # Writes the metadata as a JSON file.
-    with open(metadata_path, "w") as json_file:
+    with metadata_path.open(mode="w") as json_file:
         # noinspection PyTypeChecker
         json.dump(metadata, json_file, separators=(",", ":"), indent=None)  # Maximizes data compression
 
@@ -235,10 +238,7 @@ def _process_invariant_metadata(frame_stack_path: Path, ops_path: Path, metadata
 
     # If the acquisition only uses a single ROI, si_rois is a single dictionary. Converts it to a list for the code
     # below to work for this acquisition mode.
-    if isinstance(si_rois, dict):
-        rois = [si_rois]
-    else:
-        rois = si_rois
+    rois = [si_rois] if isinstance(si_rois, dict) else si_rois
 
     # Extracts the ROI dimensions for each ROI.
     roi_number = len(rois)
@@ -281,7 +281,7 @@ def _process_invariant_metadata(frame_stack_path: Path, ops_path: Path, metadata
     }
 
     # Saves the generated config as a JSON file (suite2p_parameters)
-    with open(ops_path, "w") as f:
+    with ops_path.open(mode="w") as f:
         # noinspection PyTypeChecker
         json.dump(data, f, separators=(",", ":"), indent=None)  # Maximizes data compression
 
@@ -748,11 +748,7 @@ def rename_mesoscope_directory(mesoscope_data: MesoscopeData) -> None:
 
     # Note, the renaming only happens if the session-specific cache does not exist, the general mesoscope_frames cache
     # exists, and it is not empty (has files inside).
-    if (
-        not session_specific_path.exists()
-        and general_path.exists()
-        and len([path for path in general_path.glob("*")]) > 0
-    ):
+    if not session_specific_path.exists() and general_path.exists() and len(list(general_path.glob("*"))) > 0:
         general_path.rename(session_specific_path)
         # Generates a new empty mesoscope_frames directory to support future runtimes.
         ensure_directory_exists(general_path)

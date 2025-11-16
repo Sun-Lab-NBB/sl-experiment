@@ -16,11 +16,11 @@ from ataraxis_base_utilities import LogLevel, console, ensure_directory_exists
 
 from .mesoscope_vr import (
     CRCCalculator,
+    purge_session,
     experiment_logic,
     maintenance_logic,
     run_training_logic,
     lick_training_logic,
-    purge_session,
     purge_redundant_data,
     window_checking_logic,
     discover_zaber_devices,
