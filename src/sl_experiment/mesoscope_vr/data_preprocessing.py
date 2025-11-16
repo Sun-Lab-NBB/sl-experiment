@@ -692,8 +692,8 @@ def _push_data(
     # Resolves the source and destination directories.
     source = session_data.raw_data.raw_data_path
     destinations = (
-        mesoscope_data.destinations.nas_data_path,
-        mesoscope_data.destinations.server_data_path,
+        mesoscope_data.destinations.nas_data_path.joinpath("raw_data"),
+        mesoscope_data.destinations.server_data_path.joinpath("raw_data"),
     )
 
     # Validates that all destinations are accessible before starting transfers.
@@ -729,7 +729,7 @@ def _push_data(
             message="All transfers completed successfully. Removing the now-redundant source directory...",
             level=LogLevel.INFO,
         )
-        delete_directory(directory_path=source)
+        delete_directory(directory_path=source.parent)  # Removes the session's directory.
 
 
 def rename_mesoscope_directory(mesoscope_data: MesoscopeData) -> None:
@@ -813,22 +813,24 @@ def preprocess_session_data(session_data: SessionData) -> None:
 
 
 def purge_session(session_data: SessionData) -> None:
-    """Removes all data and directories associated with the input session.
+    """Removes all data and directories associated with the input session from all Mesoscope-VR system machines and
+    long-term storage destinations.
 
-    This function is extremely dangerous and should be used with caution. It is designed to remove all data from failed
-    or no longer necessary sessions. Never use this function on sessions that contain valid scientific data.
+    Notes:
+        This function is extremely dangerous and should be used with caution. It is designed to remove all data from
+        failed or no longer necessary sessions from all storage locations. Never use this function on sessions that
+        contain valid scientific data.
 
     Args:
-        session_data: The SessionData instance for the session whose data needs to be removed.
+        session_data: The SessionData instance that defines the session whose data needs to be removed.
     """
     # If a session does not contain the nk.bin marker, this suggests that it was able to successfully initialize the
     # runtime and likely contains valid data. In this case, asks the user to confirm they intend to proceed with the
-    # deletion. Sessions with nk.bin markers are considered safe for removal at all times.
+    # deletion. Sessions with nk.bin markers are considered safe for removal with no further confirmation.
     if not session_data.raw_data.nk_path.exists():
         message = (
-            f"Preparing to remove all data for session {session_data.session_name} from animal "
-            f"{session_data.animal_id}. Warning, this process is NOT reversible and removes ALL session data. Are you "
-            f"sure you want to proceed?"
+            f"Preparing to remove all data for the session {session_data.session_name} performed by the animal "
+            f"{session_data.animal_id}. Warning, this process is NOT reversible and removes ALL session data!"
         )
         console.echo(message=message, level=LogLevel.WARNING)
 
@@ -846,17 +848,22 @@ def purge_session(session_data: SessionData) -> None:
                 console.echo(message=message, level=LogLevel.SUCCESS)
                 return
 
+    # Resolves the configuration parameters for the Mesoscope-VR data acquisition system.
+    system_configuration = get_system_configuration()
+
+    # Resolves the filesystem configuration for the Mesoscope-VR data acquisition system.
+    mesoscope_data = MesoscopeData(session_data=session_data, system_configuration=system_configuration)
+
     # Uses MesoscopeData to query the paths to all known session data directories. This includes the directories on the
     # NAS and the BioHPC server.
-    mesoscope_data = MesoscopeData(session_data)
     deletion_candidates = [
         session_data.raw_data.raw_data_path.parent,
-        mesoscope_data.destinations.nas_data_path.parent,
-        mesoscope_data.destinations.server_data_path.parent,
+        mesoscope_data.destinations.nas_data_path,
+        mesoscope_data.destinations.server_data_path,
         mesoscope_data.scanimagepc_data.session_specific_path,
     ]
 
-    # Removes all session-specific data directories from all destinations
+    # Removes all session-specific data directories from all destinations.
     for candidate in tqdm(deletion_candidates, desc="Deleting session directories", unit="directory"):
         delete_directory(directory_path=candidate)
 
@@ -869,39 +876,29 @@ def purge_session(session_data: SessionData) -> None:
 
 
 def migrate_animal_between_projects(animal: str, source_project: str, target_project: str) -> None:
-    """Moves all sessions for the target animal from the source project to the target project.
-
-    This function is primarily used when animals are moved from the shared 'TestMice' project to a user-specific
-    project. It transfers all available data for the target animal across all destinations, based on the list of
-    sessions stored on the remote server. Any session that has not yet been transferred to the server is excluded from
-    the migration process and will remain on the local acquisition system PC.
+    """Transfers all sessions performed by the specified animal from the source project to the target project across
+    all storage locations.
 
     Args:
         animal: The animal for which to migrate the data.
         source_project: The name of the project from which to migrate the data.
         target_project: The name of the project to which the data should be migrated.
     """
-    console.echo(f"Migrating animal {animal} from project {source_project} to project {target_project}...")
+    console.echo(f"Migrating the animal {animal} from project {source_project} to project {target_project}...")
 
-    # Queries the system configuration parameters, which includes the paths to all filesystems used to store project
-    # data
+    # Queries the system configuration parameters, which includes the filesystem configuration.
     system_configuration = get_system_configuration()
 
-    # The two main directories used in the migration process are the server storage directory (source) and the
-    # local acquisition-system PC project directory (destination)
-    source_server_root = system_configuration.paths.server_storage_directory.joinpath(source_project, animal)
-    destination_local_root = system_configuration.paths.root_directory.joinpath(target_project, animal)
+    # Resolves the paths to the key root directories used in the migration process.
+    source_server_root = system_configuration.filesystem.server_directory.joinpath(source_project, animal)
+    destination_local_root = system_configuration.filesystem.root_directory.joinpath(target_project, animal)
+    source_local_root = system_configuration.filesystem.root_directory.joinpath(source_project, animal)
 
-    # Also resolves the path to the local animal root. This is used when processing sessions to purge migrated sessions
-    # from the source project
-    source_local_root = system_configuration.paths.root_directory.joinpath(source_project, animal)
-
-    # If the target project does not exist, aborts with an error (analogous to how creating de-novo animal
-    # datastructures is handled)
+    # If the target project does not exist, aborts with an error.
     if not destination_local_root.parent.exists():
         message = (
             f"Unable to migrate the animal {animal} from project {source_project} to project {target_project}. The "
-            f"target project does not exist. Use the 'sl-create-project' command to create the project before "
+            f"target project does not exist. Use the 'sl-project create' command to create the project before "
             f"migrating animals to this project."
         )
         console.error(message=message, error=FileNotFoundError)
@@ -915,7 +912,7 @@ def migrate_animal_between_projects(animal: str, source_project: str, target_pro
     if len(local_sessions) > 0:
         message = (
             f"Unable to migrate the animal {animal} from project {source_project} to project {target_project}. The "
-            f"source project directory on the local acquisition-system PC contains non-preprocessed session data. "
+            f"source project directory on the VRPC contains non-preprocessed session data. "
             f"Preprocess all locally stored sessions before starting the migration process."
         )
         console.error(message=message, error=FileNotFoundError)
@@ -933,28 +930,26 @@ def migrate_animal_between_projects(animal: str, source_project: str, target_pro
             source=remote_session_path, destination=local_session_path, num_threads=30, verify_integrity=False
         )
 
-        # Copies the session_data.yaml file from the pulled directory to the old local directory for the processed
-        # session. This is then used to remove old session data from all destinations.
+        # Copies the session_data.yaml file from the pulled directory to the old project's session-specific VRPC
+        # directory. This is then used to remove old session data from all destinations.
         new_sd_path = local_session_path.joinpath("raw_data", "session_data.yaml")
         old_sd_path = source_local_root.joinpath(session.name, "raw_data", "session_data.yaml")
-        ensure_directory_exists(old_sd_path)  # Since preprocessing removes the raw_data directory, this recreates it
+        ensure_directory_exists(old_sd_path)  # Since preprocessing removes the raw_data directory, this recreates it.
         sh.copy2(src=new_sd_path, dst=old_sd_path)
 
-        # Modifies the SessionData instance for the pulled session to use the new project name and the new session data
-        # location
+        # Modifies the SessionData instance for the pulled session to use the new project name.
         session_data = SessionData.load(session_path=local_session_path)
         session_data.project_name = target_project
-        session_data.raw_data.session_data_path = new_sd_path
         session_data.save()
 
-        # Reloads session data to apply the changes
+        # Reloads session data to apply the filesystem changes resulting from changing the session's project name.
         session_data = SessionData.load(session_path=local_session_path)
 
-        # Runs preprocessing on the session data again, which regenerates the checksum and transfers the data to
-        # the long-term storage destinations.
+        # Runs preprocessing on the session's data again, which regenerates the checksum and transfers the data to
+        # the long-term storage destinations (including the NAS).
         preprocess_session_data(session_data=session_data)
 
-        # Removes now-obsolete server, NAS, and local machine directories. To do so, first marks the old session for
+        # Removes now-obsolete server, NAS, and VRPC directories. To do so, first marks the old session for
         # deletion by creating the 'nk.bin' marker and then calls the purge pipeline on that session.
         old_session_data = SessionData.load(session_path=old_sd_path.parents[1])
         old_session_data.raw_data.nk_path.touch()
@@ -962,9 +957,9 @@ def migrate_animal_between_projects(animal: str, source_project: str, target_pro
 
     console.echo("Migrating persistent data directories...")
     # Moves ScanImagePC persistent data for the animal between projects This preserves existing MotionEstimator and ROI
-    # data, if any was resolved for any processed session
-    old = system_configuration.paths.mesoscope_directory.joinpath(source_project, animal)
-    new = system_configuration.paths.mesoscope_directory.joinpath(target_project, animal)
+    # data, if any was resolved for any processed session.
+    old = system_configuration.filesystem.mesoscope_directory.joinpath(source_project, animal)
+    new = system_configuration.filesystem.mesoscope_directory.joinpath(target_project, animal)
     sh.rmtree(new)
     sh.move(src=old, dst=new)
 
@@ -978,15 +973,12 @@ def migrate_animal_between_projects(animal: str, source_project: str, target_pro
     # the migration process. This ensures that each animal is found under at most a single project directory on all
     # destinations.
     deletion_candidates = [
-        system_configuration.paths.mesoscope_directory.joinpath(source_project, animal),
-        system_configuration.paths.nas_directory.joinpath(source_project, animal),
-        system_configuration.paths.root_directory.joinpath(source_project, animal),
-        system_configuration.paths.server_storage_directory.joinpath(source_project, animal),
-        system_configuration.paths.server_working_directory.joinpath(source_project, animal),
+        system_configuration.filesystem.mesoscope_directory.joinpath(source_project, animal),
+        system_configuration.filesystem.nas_directory.joinpath(source_project, animal),
+        system_configuration.filesystem.root_directory.joinpath(source_project, animal),
+        system_configuration.filesystem.server_directory.joinpath(source_project, animal),
     ]
     for candidate in tqdm(deletion_candidates, desc="Deleting redundant animal directories", unit="directory"):
         delete_directory(directory_path=candidate)
 
-    # Note, this process intentionally preserves the now-empty animal directory in the original project to keep the
-    # animal project history.
     console.echo("Migration: Complete.", level=LogLevel.SUCCESS)
