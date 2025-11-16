@@ -208,18 +208,19 @@ def _process_stack(
 
 def _process_invariant_metadata(frame_stack_path: Path, ops_path: Path, metadata_path: Path) -> None:
     """Extracts the frame-invariant ScanImage metadata from the target mesoscope frame stack TIFF file and uses it to
-    generate the metadata.json and ops.json files.
+    generate the metadata.json and suite2p_parameters.json files.
 
     Args:
         frame_stack_path: The path to the TIFF file that stores a stack of the mesoscope-acquired frames.
-        ops_path: The path to the ops.json file to be created.
+        ops_path: The path to the suite2p_parameters.json file to be created.
         metadata_path: The path to the metadata.json file to be created.
     """
     # Reads the frame-invariant metadata from the first page (frame) of the stack. This metadata is the same across
     # all frames and stacks.
     with tifffile.TiffFile(frame_stack_path) as tiff:
         metadata = tiff.scanimage_metadata
-        frame_data = tiff.asarray(key=0)  # Loads the data for the first frame in the stack to generate ops.json
+        # Loads the data for the first frame in the stack to generate suite2p_parameters.json
+        frame_data = tiff.asarray(key=0)
 
     # Writes the metadata as a JSON file.
     with open(metadata_path, "w") as json_file:
@@ -279,7 +280,7 @@ def _process_invariant_metadata(frame_stack_path: Path, ops_path: Path, metadata
         "roi_lines": [list(range(int(roi_rows[0, i]), int(roi_rows[1, i]))) for i in range(roi_number)],
     }
 
-    # Saves the generated config as a JSON file (ops.json)
+    # Saves the generated config as a JSON file (suite2p_parameters)
     with open(ops_path, "w") as f:
         # noinspection PyTypeChecker
         json.dump(data, f, separators=(",", ":"), indent=None)  # Maximizes data compression
@@ -449,7 +450,7 @@ def _preprocess_mesoscope_directory(
     # Resolves the paths to the output directories and files used during mesoscope frame stack processing.
     frame_invariant_metadata_path = output_directory.joinpath("frame_invariant_metadata.json")
     frame_variant_metadata_path = output_directory.joinpath("frame_variant_metadata.npz")
-    ops_path = output_directory.joinpath("ops.json")
+    ops_path = output_directory.joinpath("suite2p_parameters.json")
 
     # Pre-creates the dictionary to store frame-variant metadata extracted from all TIFF frames.
     all_metadata: defaultdict[str, list[NDArray]] = defaultdict(list)
