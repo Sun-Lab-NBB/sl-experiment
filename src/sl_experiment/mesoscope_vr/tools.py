@@ -1,6 +1,7 @@
 """This module provides utility assets shared by other modules of the mesoscope_vr package."""
 
 import sys
+from enum import IntEnum
 from pathlib import Path
 import contextlib
 from dataclasses import field, dataclass
@@ -25,7 +26,6 @@ from PyQt6.QtWidgets import (
 from sl_shared_assets import SessionData, SessionTypes, MesoscopeSystemConfiguration, get_system_configuration_data
 from ataraxis_base_utilities import console, ensure_directory_exists
 from ataraxis_data_structures import SharedMemoryArray
-from enum import IntEnum
 
 
 def get_system_configuration() -> MesoscopeSystemConfiguration:
@@ -63,6 +63,7 @@ mesoscope_vr_sessions: tuple[str, str, str, str] = (
 
 class _DataArrayIndex(IntEnum):
     """Defines the shared memory array indices for each runtime parameter addressable from the user-facing GUI."""
+
     TERMINATION = 0
     EXIT_SIGNAL = 1
     REWARD_SIGNAL = 2
@@ -147,9 +148,6 @@ class _ScanImagePCData:
     session_specific_path: Path = field(default_factory=Path, init=False)
     """The path to the session-specific directory where all Mesoscope-acquired data is moved at the end of each data 
     acquisition session's runtime."""
-    ubiquitin_path: Path = field(default_factory=Path, init=False)
-    """The path to the 'ubiquitin.bin' file used to mark session-specific ScanImagePC directories for deletion once 
-    the data is safely transferred to the VRPC."""
     motion_estimator_path: Path = field(default_factory=Path, init=False)
     """The path top the animal-specific reference .ME (motion estimator) file, used to align the Mesoscope's imaging 
     field to the same view across all data acquisition sessions."""
@@ -171,7 +169,6 @@ class _ScanImagePCData:
         self.motion_estimator_path = self.persistent_data_path.joinpath("MotionEstimator.me")
         self.roi_path = self.persistent_data_path.joinpath("fov.roi")
         self.session_specific_path = self.meso_data_path.joinpath(self.session)
-        self.ubiquitin_path = self.session_specific_path.joinpath("ubiquitin.bin")
         self.mesoscope_data_path = self.meso_data_path.joinpath("mesoscope_data")
         self.kinase_path = self.mesoscope_data_path.joinpath("kinase.bin")
         self.phosphatase_path = self.mesoscope_data_path.joinpath("phosphatase.bin")
