@@ -45,7 +45,7 @@ dependencies = [
     "zaber-motion==7.14.0",
     "crc==7.1.0",
     "tabulate2==1.10.2",
-    "click==8.3.0",
+    "click==8.3.1",
     "numpy==2.3.4",
     "numba==0.62.1",
     "intel-cmplr-lib-rt==2025.3.1; platform_system != 'Darwin'",
@@ -96,22 +96,7 @@ dev = [
 # Currently, the library is intended to be interfaced with more or less exclusively through the CLI commands exported
 # below.
 [project.scripts]
-sl-crc = "sl_experiment.cli:calculate_crc"
-sl-devices = "sl_experiment.cli:list_devices"
-sl-create-system-config = "sl_experiment.cli:generate_system_configuration_file"
-sl-create-project = "sl_experiment.cli:generate_project_data_structure"
-sl-create-experiment = "sl_experiment.cli:generate_experiment_configuration_file"
-sl-maintain = "sl_experiment.cli:maintain_acquisition_system"
-sl-lick-train = "sl_experiment.cli:lick_training"
-sl-run-train = "sl_experiment.cli:run_training"
-sl-experiment = "sl_experiment.cli:run_experiment"
-sl-check-window = "sl_experiment.cli:check_window"
-sl-preprocess = "sl_experiment.cli:preprocess_session"
-sl-purge = "sl_experiment.cli:purge_data"
-sl-delete-session-data = "sl_experiment.cli:delete_session"
-sl-migrate-animal = "sl_experiment.cli:migrate_animal"
-sl-projects = "sl_experiment.cli:list_projects"
-sl-experiments = "sl_experiment.cli:list_experiments"
+sl-get = "sl_experiment.command_line_interfaces.get:get"
 
 # Specifies files that should not be included in the source-code distribution but are also not part of gitignore.
 [tool.hatch.build.targets.sdist]
