@@ -20,7 +20,7 @@ from .mesoscope_vr import (
     maintenance_logic,
     run_training_logic,
     lick_training_logic,
-    purge_failed_session,
+    purge_session,
     purge_redundant_data,
     window_checking_logic,
     discover_zaber_devices,
@@ -693,7 +693,7 @@ def delete_session(session_path: Path) -> None:
 
     # Removes all data of the target session from all data acquisition and long-term storage machines accessible to the
     # host-computer
-    purge_failed_session(session_data)
+    purge_session(session_data)
 
 
 @click.command()

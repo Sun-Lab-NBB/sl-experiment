@@ -47,7 +47,7 @@ from ..shared_components import (
     get_animal_project,
     get_project_experiments,
 )
-from .data_preprocessing import purge_failed_session, preprocess_session_data, rename_mesoscope_directory
+from .data_preprocessing import purge_session, preprocess_session_data, rename_mesoscope_directory
 
 
 # Defines shared methods to make their use consistent between window checking and other runtimes.
@@ -1146,7 +1146,7 @@ class _MesoscopeVRSystem:
 
             # Exclusively for failed runtimes: removes all session data from all destinations.
             if answer.lower() == "purge session":
-                purge_failed_session(session_data=self._session_data)
+                purge_session(session_data=self._session_data)
                 break
 
         message = "Mesoscope-VR system runtime: Terminated."
@@ -3022,7 +3022,7 @@ def lick_training_logic(
                 "Removing all leftover data from the uninitialized session from all destinations..."
             )
             console.echo(message=message, level=LogLevel.ERROR)
-            purge_failed_session(session_data)
+            purge_session(session_data)
 
         message = "Lick training runtime: Complete."
         console.echo(message=message, level=LogLevel.SUCCESS)
@@ -3418,7 +3418,7 @@ def run_training_logic(
                 "Removing all leftover data from the uninitialized session from all destinations..."
             )
             console.echo(message=message, level=LogLevel.ERROR)
-            purge_failed_session(session_data)
+            purge_session(session_data)
 
         message = "Run training runtime: Complete."
         console.echo(message=message, level=LogLevel.SUCCESS)
@@ -3668,7 +3668,7 @@ def experiment_logic(
                 "Removing all leftover data from the uninitialized session from all destinations..."
             )
             console.echo(message=message, level=LogLevel.ERROR)
-            purge_failed_session(session_data)
+            purge_session(session_data)
 
         message = "Experiment runtime: Complete."
         console.echo(message=message, level=LogLevel.SUCCESS)
@@ -3853,7 +3853,7 @@ def window_checking_logic(
                 "Removing all leftover data from the uninitialized session from all destinations..."
             )
             console.echo(message=message, level=LogLevel.ERROR)
-            purge_failed_session(session_data)
+            purge_session(session_data)
 
         # If Zaber motors were connected, attempts to gracefully shut down the motors.
         if zaber_motors is not None:
