@@ -2,8 +2,9 @@
 
 import sys
 
-from sl_shared_assets import get_system_configuration_data
+from sl_shared_assets import MesoscopeFileSystem, get_system_configuration_data
 from importlib_metadata import metadata as _metadata
+from natsort_rs import natsort as natsorted
 
 
 def get_version_data() -> tuple[str, str]:
@@ -37,16 +38,16 @@ def get_animal_project(animal_id: str) -> tuple[str, ...]:
     )
 
 
-def get_project_experiments(project: str) -> tuple[str, ...]:
+def get_project_experiments(project: str, filesystem_configuration: MesoscopeFileSystem) -> tuple[str, ...]:
     """Discovers the available experiment configuration files for the target project.
 
     Args:
         project: The name of the project for which to discover the experiment configurations.
+        filesystem_configuration: The MesoscopeFileSystem instance that stores the filesystem configuration of the
+            data acquisition system used to acquire the specified project's data.
 
     Returns:
-        A tuple of experiment configurations available for the target project.
+        A tuple of naturally-sorted experiment configurations available for the target project.
     """
-    system_configuration = get_system_configuration_data()
-    configuration_path = system_configuration.filesystem.root_directory.joinpath(project, "configuration")
-
-    return tuple(configuration.stem for configuration in configuration_path.glob("*.yaml"))
+    configuration_path = filesystem_configuration.root_directory.joinpath(project, "configuration")
+    return natsorted([configuration.stem for configuration in configuration_path.glob("*.yaml")])
