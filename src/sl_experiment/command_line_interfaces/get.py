@@ -24,7 +24,7 @@ CONTEXT_SETTINGS = {"max_content_width": 120}  # pragma: no cover
 
 @click.group("get", context_settings=CONTEXT_SETTINGS)
 def get() -> None:  # pragma: no cover
-    """This Command-Line Interface allows evaluating the composition of the data acquisition system managed by the
+    """This Command Line Interface allows evaluating the composition of the data acquisition system managed by the
     host-machine.
     """
 

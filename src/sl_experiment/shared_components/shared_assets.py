@@ -2,9 +2,9 @@
 
 import sys
 
+from natsort_rs import natsort as natsorted
 from sl_shared_assets import MesoscopeFileSystem, get_system_configuration_data
 from importlib_metadata import metadata as _metadata
-from natsort_rs import natsort as natsorted
 
 
 def get_version_data() -> tuple[str, str]:

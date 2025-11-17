@@ -1,5 +1,6 @@
 """This module provides the 'sl-run' Command Line Interface (CLI) for running the data acquisition session and
-maintenance runtimes supported by the data acquisition system managed by the host-machine."""
+maintenance runtimes supported by the data acquisition system managed by the host-machine.
+"""
 
 import click
 

@@ -116,7 +116,7 @@ parts:
 ### Software Dependencies
 ***Note!*** This list only includes *external dependencies*, which are installed *in addition* to all 
 dependencies automatically installed from pip / conda as part of library installation. The dependencies below have to
-be installed and configured on the **VRPC** before calling runtime commands via the command-line interface (CLI) exposed
+be installed and configured on the **VRPC** before calling runtime commands via the command line interface (CLI) exposed
 by this library.
 
 - [MQTT broker](https://mosquitto.org/) version **2.0.21**. The broker should be running locally and can use 

@@ -345,38 +345,25 @@ def _pull_mesoscope_data(session_data: SessionData, mesoscope_data: MesoscopeDat
     _required_mesoscope_files = {"MotionEstimator.me", "fov.roi", "zstack_00000_00001.tif"}
 
     # Verifies that all required files are present in the source directory.
-    _check_reattempts = 5
-    for attempt in range(_check_reattempts):
-        # Extracts the names of files stored in the source directory.
-        files: tuple[Path, ...] = tuple(path for ext in _extensions for path in source.glob(ext))
-        file_names: set[str] = {file.name for file in files}
 
-        # Checks which required files are missing.
-        missing_files = _required_mesoscope_files - file_names
+    # Extracts the names of files stored in the source directory.
+    files: tuple[Path, ...] = tuple(path for ext in _extensions for path in source.glob(ext))
+    file_names: set[str] = {file.name for file in files}
 
-        # If all files are present, breaks the loop.
-        if not missing_files:
-            break
+    # Checks which required files are missing.
+    missing_files = _required_mesoscope_files - file_names
 
-        # On the final attempt, raises an error instead of prompting the user to fix the issue.
-        if attempt == _check_reattempts - 1:
-            message = (
-                f"Failed {_check_reattempts} consecutive attempts to locate all required mesoscope-acquired data "
-                f"files to move them from the ScanImagePC to the VRPC. Aborting the data transfer and terminating the "
-                f"preprocessing runtime."
-            )
-            console.error(message=message, error=RuntimeError)
-
-        # Otherwise, prompts the user to add missing files before retrying the verification.
+    # Raises a runtime error if any required files are missing.
+    if missing_files:
         missing_files_str = ", ".join(sorted(missing_files))
         message = (
             f"Unable to pull the mesoscope-acquired data from the ScanImagePC to the VRPC. The "
             f"'mesoscope_frames' ScanImage PC directory for the session {session_name} is missing the "
             f"following required files: {missing_files_str}. Ensure that all required files are stored in the "
-            f"session-specific 'mesoscope_frames' directory on the ScanImagePC before continuing."
+            f"session-specific 'mesoscope_frames' directory on the ScanImagePC and rerun the command that caused this "
+            f"error."
         )
-        console.echo(message=message, level=LogLevel.WARNING)
-        input(f"Press Enter to retry (attempt {attempt + 2}/{_check_reattempts})... ")
+        console.error(message=message, error=RuntimeError)
 
     # Removes all binary files from the source directory before transferring. This ensures that the directory
     # does not contain any marker files used during runtime.
@@ -895,7 +882,7 @@ def migrate_animal_between_projects(animal: str, source_project: str, target_pro
     if not destination_local_root.parent.exists():
         message = (
             f"Unable to migrate the animal {animal} from project {source_project} to project {target_project}. The "
-            f"target project does not exist. Use the 'sl-project create' command to create the project before "
+            f"target project does not exist. Use the 'sl-configure project' command to create the project before "
             f"migrating animals to this project."
         )
         console.error(message=message, error=FileNotFoundError)

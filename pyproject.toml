@@ -97,6 +97,7 @@ dev = [
 # below.
 [project.scripts]
 sl-get = "sl_experiment.command_line_interfaces.get:get"
+sl-manage = "sl_experiment.command_line_interfaces.manage:manage"
 
 # Specifies files that should not be included in the source-code distribution but are also not part of gitignore.
 [tool.hatch.build.targets.sdist]

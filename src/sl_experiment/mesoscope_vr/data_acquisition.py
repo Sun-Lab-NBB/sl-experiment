@@ -16,7 +16,7 @@ from tqdm import tqdm
 from numba import njit
 import numpy as np
 from numpy.typing import NDArray
-from ataraxis_time import PrecisionTimer
+from ataraxis_time import PrecisionTimer, TimerPrecisions, convert_time, get_timestamp
 from sl_shared_assets import (
     SessionData,
     SessionTypes,
@@ -32,11 +32,12 @@ from sl_shared_assets import (
 )
 from ataraxis_base_utilities import LogLevel, console
 from ataraxis_data_structures import DataLogger, LogPackage
-from ataraxis_time.time_helpers import convert_time, get_timestamp
 from ataraxis_communication_interface import MQTTCommunication, MicroControllerInterface
 
-from .tools import MesoscopeData, RuntimeControlUI, CachedMotifDecomposer, get_system_configuration
+from .tools import MesoscopeData, CachedMotifDecomposer, get_system_configuration
+from .runtime_ui import RuntimeControlUI
 from .visualizers import BehaviorVisualizer
+from .maintenance_ui import MaintenanceControlUI
 from .binding_classes import ZaberMotors, VideoSystems, MicroControllerInterfaces
 from ..shared_components import (
     WaterLog,
@@ -830,9 +831,6 @@ class _MesoscopeVRSystem:
         self._logger: DataLogger = DataLogger(
             output_directory=Path(session_data.raw_data.raw_data_path),
             instance_name="behavior",  # Creates behavior_log subfolder under raw_data
-            sleep_timer=0,
-            exist_ok=True,
-            process_count=1,
             thread_count=10,
         )
 
@@ -1133,8 +1131,6 @@ class _MesoscopeVRSystem:
 
             # Default case: preprocesses the data. For experiment runtimes, this may take between 15 and 20 minutes.
             if answer.lower() == "yes":
-                # TODO Fix later
-                break
                 preprocess_session_data(session_data=self._session_data)
                 break
 
@@ -3753,7 +3749,7 @@ def window_checking_logic(
         python_version=python_version,
         sl_experiment_version=library_version,
     )
-    mesoscope_data = MesoscopeData(session_data=session_data)
+    mesoscope_data = MesoscopeData(session_data=session_data, system_configuration=system_configuration)
     # Caches descriptor file precursor to disk before starting the main runtime. This is consistent with the behavior of
     # all other runtime functions.
     descriptor.to_yaml(file_path=session_data.raw_data.session_descriptor_path)
@@ -3765,15 +3761,6 @@ def window_checking_logic(
 
     zaber_motors: ZaberMotors | None = None
     try:
-        # Verifies that the Surgery log Google Sheet is accessible. To do so, instantiates its interface class to run
-        # through the init checks. The class is later re-instantiated during session data preprocessing
-        _ = SurgeryLog(
-            project_name=project_name,
-            animal_id=int(animal_id),
-            credentials_path=system_configuration.paths.google_credentials_path,
-            sheet_id=system_configuration.sheets.surgery_sheet_id,
-        )
-
         # Establishes communication with Zaber motors
         zaber_motors = ZaberMotors(zaber_positions_path=mesoscope_data.vrpc_data.zaber_positions_path)
 
@@ -3784,9 +3771,6 @@ def window_checking_logic(
         logger: DataLogger = DataLogger(
             output_directory=Path(session_data.raw_data.raw_data_path),
             instance_name="behavior",  # Creates behavior_log subfolder under raw_data
-            sleep_timer=0,
-            exist_ok=True,
-            process_count=1,
             thread_count=10,
         )
         logger.start()
@@ -3836,9 +3820,6 @@ def window_checking_logic(
         # Stops the data logger
         logger.stop()
 
-        # TODO Fix later
-        return
-
         # Triggers preprocessing pipeline. In this case, since there is no data to preprocess, the pipeline primarily
         # just copies the session raw_data folder to the NAS and BioHPC server. Unlike other pipelines, window
         # checking does not give the user a choice. All window checking data is necessarily preprocessed.
@@ -3865,201 +3846,162 @@ def window_checking_logic(
 
 
 def maintenance_logic() -> None:
-    """Encapsulates the logic used to maintain various components of the Mesoscope-VR system.
+    """Encapsulates the logic used to maintain a subset of the Mesoscope-VR system's hardware components."""
+    console.echo(message="Initializing Mesoscope-VR system maintenance runtime...", level=LogLevel.INFO)
 
-    This runtime is primarily used to verify and, if necessary, recalibrate the water valve between training or
-    experiment days and to maintain the surface material of the running wheel.
-    """
-    message = "Initializing Mesoscope-VR system maintenance runtime..."
-    console.echo(message=message, level=LogLevel.INFO)
-
-    # Queries the data acquisition system runtime parameters. This runtime only needs access to the base acquisition
-    # system configuration data, as it does not generate any new data by itself.
+    # Queries the data acquisition system runtime parameters
     system_configuration = get_system_configuration()
 
-    # Initializes a timer used to optimize console printouts for using the valve in debug mode (which also posts
-    # things to the console).
-    delay_timer = PrecisionTimer("s")
+    # Initializes a timer used to optimize console printouts
+    delay_timer = PrecisionTimer(precision=TimerPrecisions.MILLISECOND)
 
-    message = "Initializing interface classes..."
-    console.echo(message=message, level=LogLevel.INFO)
+    console.echo(message="Initializing the maintenance assets...", level=LogLevel.INFO)
 
-    # All calibration procedures are executed in a temporary directory deleted after runtime.
+    # All calibration procedures are executed in a temporary directory deleted after runtime
     with tempfile.TemporaryDirectory(prefix="sl_maintenance_") as output_dir:
-        output_path: Path = Path(output_dir)
+        try:
+            output_path: Path = Path(output_dir)
 
-        # Initializes the data logger. Due to how the MicroControllerInterface class is implemented, this is required
-        # even for runtimes that do not need to save data.
-        logger = DataLogger(
-            output_directory=output_path,
-            instance_name="temp",
-            exist_ok=True,
-            process_count=1,
-            thread_count=10,
-        )
-        logger.start()
-
-        # If the maintenance runtime is called to clean the running wheel, positioning Zaber motors is not necessary
-        message = "Do you want to position Zaber motors for valve calibration or referencing procedure?"
-        console.echo(message=message, level=LogLevel.INFO)
-        move_zaber_motors = ""
-        while move_zaber_motors not in ["yes", "no"]:
-            move_zaber_motors = input("Enter 'yes' to move Zaber motors or 'no' to skip Zaber positioning: ")
-
-        # Only initializes ZaberMotors if the user intends to position them for calibration or referencing.
-        if move_zaber_motors == "yes":
-            # Providing the class with an invalid path makes sure it falls back to using default positions cached in
-            # the non-volatile memory of each device.
-            zaber_motors: ZaberMotors = ZaberMotors(zaber_positions_path=output_path.joinpath("invalid_path.yaml"))
-
-        # Initializes the interface for the Actor MicroController that manages the valve and brake modules.
-        valve: ValveInterface = ValveInterface(
-            valve_calibration_data=system_configuration.microcontrollers.valve_calibration_data,
-            debug=True,  # Hardcoded to True during maintenance
-        )
-        wheel: BrakeInterface = BrakeInterface(
-            minimum_brake_strength=system_configuration.microcontrollers.minimum_brake_strength_g_cm,
-            maximum_brake_strength=system_configuration.microcontrollers.maximum_brake_strength_g_cm,
-        )
-        controller: MicroControllerInterface = MicroControllerInterface(
-            controller_id=np.uint8(101),  # Hardcoded
-            buffer_size=8192,  # Hardcoded
-            port=system_configuration.microcontrollers.actor_port,
-            data_logger=logger,
-            module_interfaces=(valve, wheel),
-        )
-        controller.start()
-        controller.unlock_controller()  # Unlocks actor controller to allow manipulating managed hardware
-
-        # Delays for 1 second for the valve to initialize and send the state message. This avoids the visual clash
-        # with the zaber positioning dialog
-        delay_timer.delay_noblock(delay=1)
-
-        message = "Actor MicroController interface: Initialized."
-        console.echo(message=message, level=LogLevel.SUCCESS)
-
-        # If the maintenance runtime is called to clean the running wheel, positioning Zaber motors is not necessary
-        if move_zaber_motors == "yes":
-            message = (
-                "Preparing to move Zaber motors into maintenance position. Remove the mesoscope objective, swivel out "
-                "the VR screens, and make sure the animal is NOT mounted on the rig. Failure to fulfill these steps "
-                "may DAMAGE the mesoscope and / or HARM the animal."
+            # Initializes the data logger. All log entries recorded by the logger during runtime are discarded at the
+            # end of runtime, hence the name 'temporary'.
+            logger = DataLogger(
+                output_directory=output_path,
+                instance_name="temporary",
+                thread_count=10,
             )
-            console.echo(message=message, level=LogLevel.WARNING)
-            input("Enter anything to continue: ")
-            zaber_motors.prepare_motors()  # homes all motors
-            zaber_motors.maintenance_position()  # Moves all motors to the maintenance position
+            logger.start()
 
-            message = "Zaber motors: Positioned for Mesoscope-VR system maintenance."
+            # Determines whether to move all Zaber motors to the predefined maintenance positions.
+            console.echo(
+                message="Do you want to position Zaber motors for valve calibration or referencing procedure?",
+                level=LogLevel.INFO,
+            )
+            move_zaber_motors = ""
+            while move_zaber_motors not in ["yes", "no"]:
+                move_zaber_motors = input("Enter 'yes' to move Zaber motors or 'no' to skip Zaber positioning: ")
+
+            # Initializes the interface for the Actor MicroController.
+            valve: ValveInterface = ValveInterface(
+                valve_calibration_data=system_configuration.microcontrollers.valve_calibration_data,
+            )
+            wheel: BrakeInterface = BrakeInterface(
+                minimum_brake_strength=system_configuration.microcontrollers.minimum_brake_strength_g_cm,
+                maximum_brake_strength=system_configuration.microcontrollers.maximum_brake_strength_g_cm,
+            )
+            controller: MicroControllerInterface = MicroControllerInterface(
+                controller_id=np.uint8(101),
+                buffer_size=8192,
+                port=system_configuration.microcontrollers.actor_port,
+                data_logger=logger,
+                module_interfaces=(valve, wheel),
+            )
+            controller.start()
+
+            message = "Actor MicroController interface: Initialized."
             console.echo(message=message, level=LogLevel.SUCCESS)
 
-        # Notifies the user about supported calibration commands
-        message = (
-            "Supported valve commands: open, close, close_10, reference, reward, calibrate_15, calibrate_30, "
-            "calibrate_45, calibrate_60. Supported brake (wheel) commands: lock, unlock. Use 'q' command to terminate "
-            "the runtime."
-        )
-        console.echo(message=message, level=LogLevel.INFO)
+            # Delays for 500 milliseconds to avoid the visual clash with the Zaber positioning dialog.
+            delay_timer.delay(delay=500, block=False)
 
-        # Precomputes correct auditory tone duration from Mesoscope-VR configuration
-        tone_duration: float = convert_time(
-            from_units="ms", to_units="us", time=system_configuration.microcontrollers.auditory_tone_duration_ms
-        )
-
-        while True:
-            command = input()  # Silent input to avoid visual spam.
-
-            if command == "open":
-                message = "Opening the valve..."
+            # If Zaber motors are being used, initializes and moves them to the maintenance positions.
+            if move_zaber_motors == "yes":
+                message = "Initializing Zaber motors..."
                 console.echo(message=message, level=LogLevel.INFO)
-                valve.set_state(state=True)
+                zaber_motors: ZaberMotors = ZaberMotors(
+                    zaber_positions=None, zaber_configuration=system_configuration.assets
+                )
+                message = (
+                    "Preparing to move Zaber motors to their maintenance positions. Remove the mesoscope objective, "
+                    "swivel out the VR screens, and make sure the animal is NOT mounted on the rig. Failure to fulfill "
+                    "these steps may DAMAGE the mesoscope and / or HARM the animal."
+                )
+                console.echo(message=message, level=LogLevel.WARNING)
 
-            if command == "close":
-                message = "Closing the valve..."
-                console.echo(message=message, level=LogLevel.INFO)
-                valve.set_state(state=False)
+                # Delays for 2 seconds to ensure the user reads the message before continuing.
+                delay_timer.delay(delay=2000, block=False)
 
-            if command == "close_10":
-                message = "Closing the valve after a 10-second delay..."
-                console.echo(message=message, level=LogLevel.INFO)
-                start = delay_timer.elapsed
-                previous_time = delay_timer.elapsed
-                while delay_timer.elapsed - start < 10:
-                    if previous_time != delay_timer.elapsed:
-                        previous_time = delay_timer.elapsed
-                        console.echo(
-                            message=f"Remaining time: {10 - (delay_timer.elapsed - start)} seconds...",
-                            level=LogLevel.INFO,
-                        )
-                valve.set_state(state=False)  # Closes the valve after a 10-second delay
+                input("Press Enter to continue: ")
+                zaber_motors.prepare_motors()
+                zaber_motors.maintenance_position()
 
-            if command == "reward":
-                message = "Delivering 5 uL water reward..."
-                console.echo(message=message, level=LogLevel.INFO)
-                valve.deliver_reward(volume=5.0)
+                message = "Zaber motors: Positioned for Mesoscope-VR system maintenance."
+                console.echo(message=message, level=LogLevel.SUCCESS)
 
-            if command == "reference":
-                message = "Running the reference valve calibration procedure..."
-                console.echo(message=message, level=LogLevel.INFO)
-                message = "Expecting to dispense 1 ml of water (200 pulses x 5 uL each)..."
-                console.echo(message=message, level=LogLevel.INFO)
-                valve.reference_valve()
+            # Initializes the maintenance GUI
+            # noinspection PyProtectedMember
+            ui = MaintenanceControlUI(valve_tracker=valve._valve_tracker)  # Directly access the module's tracker.
+            ui.start()
 
-            if command == "calibrate_15":
-                message = "Running 15 ms pulse duration valve calibration..."
-                console.echo(message=message, level=LogLevel.INFO)
-                valve.calibrate_valve(pulse_duration=15)
-
-            if command == "calibrate_30":
-                message = "Running 30 ms pulse valve calibration..."
-                console.echo(message=message, level=LogLevel.INFO)
-                valve.calibrate_valve(pulse_duration=30)
-
-            if command == "calibrate_45":
-                message = "Running 45 ms pulse valve calibration..."
-                console.echo(message=message, level=LogLevel.INFO)
-                valve.calibrate_valve(pulse_duration=45)
-
-            if command == "calibrate_60":
-                message = "Running 60 ms pulse valve calibration..."
-                console.echo(message=message, level=LogLevel.INFO)
-                valve.calibrate_valve(pulse_duration=60)
-
-            if command == "lock":
-                message = "Locking wheel brake..."
-                console.echo(message=message, level=LogLevel.INFO)
-                wheel.set_state(state=True)
-
-            if command == "unlock":
-                message = "Unlocking wheel brake..."
-                console.echo(message=message, level=LogLevel.INFO)
-                wheel.set_state(state=False)
-
-            if command == "q":
-                message = "Terminating Mesoscope-VR maintenance runtime..."
-                console.echo(message=message, level=LogLevel.INFO)
-                break
-
-        # Shuts down zaber bindings
-        if move_zaber_motors == "yes":
-            # Instructs the user to remove all objects that may interfere with moving the motors.
-            message = (
-                "Preparing to reset all Zaber motors. Remove all objects used during Mesoscope-VR maintenance, such as "
-                "water collection flasks, from the Mesoscope-VR cage."
+            # Notifies the user that the runtime is initialized.
+            console.echo(
+                message="Maintenance runtime: Initialized. Use the GUI to control the valve and brake.",
+                level=LogLevel.SUCCESS,
             )
-            console.echo(message=message, level=LogLevel.WARNING)
-            input("Enter anything to continue: ")
-            zaber_motors.park_position()
-            zaber_motors.disconnect()
 
-        # Shuts down microcontroller interfaces
-        controller.stop()
+            # Enters the main control loop, relinquishing control to the maintenance GUI.
+            while not ui.exit_signal:
+                # Opens the valve
+                if ui.valve_open_signal:
+                    valve.set_state(state=True)
 
-        message = "Actor MicroController interface: Terminated."
-        console.echo(message=message, level=LogLevel.SUCCESS)
+                # Closes the valve
+                if ui.valve_close_signal:
+                    valve.set_state(state=False)
 
-        # Stops the data logger
-        logger.stop()
+                # Uses the valve to deliver a water reward
+                if ui.valve_reward_signal:
+                    valve.deliver_reward(volume=float(ui.reward_volume))
 
-        message = "Mesoscope-VR system maintenance runtime: Terminated."
-        console.echo(message=message, level=LogLevel.SUCCESS)
+                # References the valve
+                if ui.valve_reference_signal:
+                    valve.reference_valve()
+
+                # Performs the valve calibration procedure
+                if ui.valve_calibrate_signal:
+                    valve.calibrate_valve(pulse_duration=ui.calibration_pulse_duration)
+
+                # Locks the wheel brake
+                if ui.brake_lock_signal:
+                    wheel.set_state(state=True)
+
+                # Unlocks the wheel brake
+                if ui.brake_unlock_signal:
+                    wheel.set_state(state=False)
+
+                # Delays for 5 milliseconds to avoid busy-waiting
+                delay_timer.delay(delay=5, block=False)
+
+        # Ensures that the runtime always attempts to terminate all assets gracefully
+        finally:
+            message = "Terminating Mesoscope-VR maintenance runtime..."
+            console.echo(message=message, level=LogLevel.INFO)
+
+            # If Zaber motors were used and are still connected, moves them to the park position.
+            if move_zaber_motors == "yes" and zaber_motors.is_connected:
+                message = (
+                    "Preparing to reset all Zaber motors. Remove all objects used during Mesoscope-VR maintenance, "
+                    "such as water collection flasks, from the Mesoscope-VR cage."
+                )
+                console.echo(message=message, level=LogLevel.WARNING)
+
+                # Delays for 2 seconds to ensure the user reads the message before continuing.
+                delay_timer.delay(delay=2000, block=False)
+
+                input("Press Enter to continue: ")
+                zaber_motors.park_position()
+                zaber_motors.disconnect()
+
+            # Shuts down the actor microcontroller interface.
+            controller.stop()
+
+            message = "Actor MicroController interface: Terminated."
+            console.echo(message=message, level=LogLevel.SUCCESS)
+
+            # Stops the data logger
+            logger.stop()
+
+            # Shuts down the UI
+            ui.shutdown()
+
+            message = "Mesoscope-VR system maintenance runtime: Terminated."
+            console.echo(message=message, level=LogLevel.SUCCESS)

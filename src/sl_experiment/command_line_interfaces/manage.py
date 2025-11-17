@@ -5,9 +5,8 @@ acquisition system managed by the host-machine.
 from pathlib import Path
 
 import click
-from sl_shared_assets import (
-    SessionData,
-)
+from sl_shared_assets import SessionData, get_system_configuration_data
+from ataraxis_base_utilities import console
 
 from ..mesoscope_vr import (
     purge_session,
@@ -15,62 +14,80 @@ from ..mesoscope_vr import (
     migrate_animal_between_projects,
 )
 
+# Ensures that displayed CLICK help messages are formatted according to the lab standard.
+CONTEXT_SETTINGS = {"max_content_width": 120}  # pragma: no cover
 
-@click.command()
+
+@click.group("manage", context_settings=CONTEXT_SETTINGS)
+def manage() -> None:  # pragma: no cover
+    """This Command Line Interface allows managing the data accessible to the data acquisition system managed by the
+    local host-machine.
+    """
+
+
+@manage.command("preprocess")
 @click.option(
     "-sp",
     "--session-path",
     type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
     required=True,
-    prompt="Enter the path to the target session directory: ",
-    help="The path to the session directory to preprocess.",
+    prompt="Enter the path to the target data acquisition session's directory: ",
+    help="The path to the data acquisition session's directory to preprocess.",
 )
 def preprocess_session(session_path: Path) -> None:
-    """Preprocesses the target session's data.
+    """Preprocesses the target session's data stored on the data acquisition system's host-machine."""
+    system_configuration = get_system_configuration_data()  # Retrieves the system configuration data.
 
-    This command aggregates all session data on the VRPC, compresses the data to optimize it for network transmission
-    and storage, and transfers the data to the NAS and the BioHPC cluster. It automatically skips already completed
-    processing stages as necessary to optimize runtime performance.
+    # Prevent using this command on sessions that are not stored on the local host-machine, but accessible to its
+    # filesystem. Specifically, prevents working with sessions stored on the NAS and BioHPC server.
+    message = (
+        f"Unable to preprocess the session's directory stored at the {session_path} path. The session's directory must "
+        f"be located inside the root directory of the {system_configuration.name} data acquisition system "
+        f"({system_configuration.filesystem.root_directory})."
+    )
+    if not session_path.is_relative_to(system_configuration.filesystem.root_directory):
+        console.error(message=message, error=FileNotFoundError)
 
-    Primarily, this command is intended to retry or resume failed or interrupted preprocessing runtimes.
-    Preprocessing should be carried out immediately after data acquisition to optimize the acquired data for long-term
-    storage and distribute it to the NAS and the BioHPC cluster for further processing and storage.
-    """
-    session_path = Path(session_path)  # Ensures the path is wrapped into a Path object instance.
-
-    # Restores SessionData from the cache .yaml file.
+    # Loads the SessionData instance for the processed session.
     session_data = SessionData.load(session_path=session_path)
     preprocess_session_data(session_data)  # Runs the preprocessing logic.
 
 
-@click.command()
+@manage.command("delete")
 @click.option(
     "-sp",
     "--session-path",
     type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
     required=True,
-    prompt="Enter the path to the target session directory: ",
-    help="The path to the local session directory of the session to be removed.",
+    prompt="Enter the path to the target data acquisition session's directory: ",
+    help="The path to the data acquisition session's directory to remove.",
 )
 def delete_session(session_path: Path) -> None:
-    """Removes ALL data of the target session from ALL data acquisition and long-term storage machines accessible to
-    the host-machine.
+    """Removes the target session's data from all destinations accessible to the data acquisition system.
 
-    This is an EXTREMELY dangerous command that can potentially delete valuable data if not used well. This command is
-    intended exclusively for removing failed and test sessions from all computers used in the Sun lab data acquisition
-    process. Never call this command unless you know what you are doing.
+    This is an extremely dangerous command that can potentially delete valuable data if used carelessly. This command
+    removes the session's data from all machines of the data acquisition system and all long-term storage destinations
+    accessible to the data acquisition system.
     """
-    session_path = Path(session_path)  # Ensures the path is wrapped into a Path object instance.
+    system_configuration = get_system_configuration_data()  # Retrieves the system configuration data.
 
-    # Restores SessionData from the cache .yaml file.
-    session_data = SessionData.load(session_path=session_path)
+    # Ensures that the command can only target sessions stored on the local host-machine. While this does not make the
+    # command safe, it reduces the risk of accidentally removing valid scientific data.
+    message = (
+        f"Unable to preprocess the session's directory stored at the {session_path} path. The session's directory must "
+        f"be located inside the root directory of the {system_configuration.name} data acquisition system "
+        f"({system_configuration.filesystem.root_directory})."
+    )
+    if not session_path.is_relative_to(system_configuration.filesystem.root_directory):
+        console.error(message=message, error=FileNotFoundError)
 
     # Removes all data of the target session from all data acquisition and long-term storage machines accessible to the
-    # host-computer
+    # host-machine.
+    session_data = SessionData.load(session_path=session_path)
     purge_session(session_data)
 
 
-@click.command()
+@manage.command("migrate")
 @click.option(
     "-s",
     "--source",
@@ -90,14 +107,8 @@ def delete_session(session_path: Path) -> None:
     "--animal",
     type=str,
     required=True,
-    help="The ID of the animal whose data is being migrated.",
+    help="The ID of the animal whose data ito migrate.",
 )
 def migrate_animal(source: str, destination: str, animal: str) -> None:
-    """Migrates all sessions for the specified animal from the source project to the target project.
-
-    This CLI command is primarily intended to move mice from the initial 'test' project to the final experiment project
-    in which they will participate. Note, the migration process determines what data to move based on the current state
-    of the project data on the remote compute server. Any session that has not been moved to the server will be ignored
-    during this command's runtime.
-    """
+    """Transfers all sessions for the specified animal from the source project to the target project."""
     migrate_animal_between_projects(source_project=source, target_project=destination, animal=animal)

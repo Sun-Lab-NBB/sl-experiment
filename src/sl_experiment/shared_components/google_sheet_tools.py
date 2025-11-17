@@ -10,7 +10,7 @@ from datetime import (
 from zoneinfo import ZoneInfo
 
 from sl_shared_assets import DrugData, ImplantData, SubjectData, SurgeryData, InjectionData, ProcedureData
-from ataraxis_base_utilities import LogLevel, console
+from ataraxis_base_utilities import console
 from googleapiclient.discovery import Resource, build
 from google.oauth2.service_account import Credentials
 
@@ -782,44 +782,30 @@ class WaterLog:
         # Gets the date column letter
         date_column = self._headers["date"]
 
-        while True:
-            # Retrieves all dates from the date column (row 3 and below)
-            # noinspection PyUnresolvedReferences
-            date_data = (
-                self._service.spreadsheets()
-                .values()
-                .get(spreadsheetId=self._sheet_id, range=f"'{self._animal_id}'!{date_column}3:{date_column}")
-                .execute()
-            )
-            date_values = date_data.get("values", [])
+        # Retrieves all dates from the date column (row 3 and below)
+        # noinspection PyUnresolvedReferences
+        date_data = (
+            self._service.spreadsheets()
+            .values()
+            .get(spreadsheetId=self._sheet_id, range=f"'{self._animal_id}'!{date_column}3:{date_column}")
+            .execute()
+        )
+        date_values = date_data.get("values", [])
 
-            # Finds the row with the target date
-            row_index = -1
-            for i, date_cell in enumerate(date_values):
-                # Checks if the cell has a value matching the target date
-                if date_cell and date_cell[0] == target_date:
-                    # Adds 3 to account for 0-indexing and the fact we started from row 3
-                    row_index = i + 3
-                    break
-            else:
-                message = (
-                    f"Unable to find the row for the target date {target_date} inside the water restriction and "
-                    f"animal interaction log file for the animal {self._animal_id}. Update the log to include the "
-                    f"specified date and repeat the date resolution procedure."
-                )
-                console.echo(message=message, level=LogLevel.WARNING)
-                response = input("Enter anything to retry. Enter 'a' to abort: ").lower()
-                if response == "a":
-                    message = (
-                        f"Unable to find the row for the target date {target_date} inside the water restriction and "
-                        f"animal interaction log file for the animal {self._animal_id}."
-                    )
-                    console.error(message, error=ValueError)  # Aborts with an error
-                    raise ValueError(message)  # Fallback to appease mypy, should not be reachable.
-                continue  # Cycles the while loop if the user chooses to retry
-            break  # Breaks the while loop if the row is found
-
-        return row_index
+        # Finds the row with the target date
+        for i, date_cell in enumerate(date_values):
+            # Checks if the cell has a value matching the target date
+            if date_cell and date_cell[0] == target_date:
+                # Adds 3 to account for 0-indexing and the fact we started from row 3
+                row_index = i + 3
+                return row_index
+        message = (
+            f"Unable to find the row for the target date {target_date} inside the water restriction and "
+            f"animal interaction log file for the animal {self._animal_id}. Update the log to include the "
+            f"specified date and rerun the command that caused this error."
+        )
+        console.error(message, error=ValueError)  # Aborts with an error
+        raise ValueError(message)  # Fallback to appease mypy, should not be reachable.
 
     def _write_value(self, column_name: str, row_index: int, value: float | str) -> None:
         """Writes the input value to the target log's cell based on the column name and row index.
