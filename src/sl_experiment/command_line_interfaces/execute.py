@@ -370,7 +370,7 @@ def run_experiment(
 
     Experiment runtimes are carried out after the lick and run training sessions Unlike training session commands, this
     command can be used to run different experiments. Each experiment runtime is configured via the user-defined
-    configuration .yaml file, which should be stored inside the 'configuration' folder of the target project. The
+    configuration .yaml file, which should be stored inside the 'configuration' directory of the target project. The
     experiments are discovered by name, allowing a single project to have multiple different experiments. To create a
     new experiment configuration, use the 'sl-create-experiment' CLI command.
     """

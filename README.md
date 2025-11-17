@@ -97,7 +97,7 @@ parts:
    are performed by a dedicated computer referred to as the **'ScanImagePC'** or, (less frequently) the
    **'Mesoscope PC'**. This PC is assembled and configured by the [MBF Bioscience](https://www.mbfbioscience.com/). The
    only modification carried out by the Sun lab during assembly was the configuration of a Server Message Block (SMB)
-   protocol access to the root folder used by the ScanImage software to save the Mesoscope data.
+   protocol access to the root directory used by the ScanImage software to save the Mesoscope data.
 2. The [Unity game engine](https://unity.com/products/unity-engine) running the Virtual Reality game world used in all 
    experiments to control the task environment and resolve the task logic. The virtual environment runs on the main data
    acquisition computer referred to as the **'VRPC'** and relies on the [MQTT](https://mqtt.org/) communication protocol
@@ -291,14 +291,14 @@ requires additional assets and configuration post-assembly to make it compatible
 To support the sl-experiment runtime, the ScanImagePC’s filesystem must be accessible to the **VRPC** via the Server 
 Message Block version 3 (SMB3) or equivalent protocol. Since ScanImagePC uses Windows, it is advised to use the SMB3 
 protocol, as all Windows machines support it natively with minimal configuration. As a minimum, the ScanImagePC must be 
-configured to share the root Mesoscope output folder with the VRPC over the local network. This is required to both 
+configured to share the root Mesoscope output directory with the VRPC over the local network. This is required to both 
 fetch the data acquired by the Mesoscope during preprocessing and to control the Mesoscope during runtime.
 
 #### Default Screenshot Directory
 During runtime, the sl-experiment library prompts the user to generate a screenshot of the ScanImagePC desktop and 
-place it in the network-shared mesoscope data folder (see above). The screenshot is used to store the information about
+place it in the network-shared mesoscope data directory (see above). The screenshot is used to store the information about
 the red-dot alignment, the acquisition parameters, and the state of the imaging plane at the beginning of each session. 
-The library is statically configured to fetch the screenshot from the shared folder and will not look in any other 
+The library is statically configured to fetch the screenshot from the shared directory and will not look in any other 
 directories. Therefore, it is advised to reconfigure the default output directory used by the 'Win + PrntSc' command on 
 the ScanImagePC to save the screenshots into the shared Mesoscope output directory.
 
@@ -312,7 +312,7 @@ correction algorithm, and allowing the VRPC to control the Mesoscope via creatin
 
 To configure MATLAB to access the mesoscope assets, git-clone the entire repository to the ScanImagePC. Then, follow the
 tutorials [here](https://www.mathworks.com/help/matlab/matlab_env/add-remove-or-reorder-folders-on-the-search-path.html)
-and add the path to the root mesoscope assets folder to MATLAB’s search path. MATLAB will then be able to use all 
+and add the path to the root mesoscope assets directory to MATLAB’s search path. MATLAB will then be able to use all 
 functions from that repository, including the setupAcquisition function. The repository also contains the online 
 motion estimation and correction assets developed in the [Pachitariu and Stringer lab](https://mouseland.github.io/), 
 which are required for the setupAcquisition function to work as expected.
@@ -421,7 +421,7 @@ after this section.
 **Note!** For information about the **processed** data, see the 
 [main data processing library](https://github.com/Sun-Lab-NBB/sl-forgery).
 
-After acquisition and preprocessing, the **raw_data** folder of each acquisition system will, as a minimum, contain the 
+After acquisition and preprocessing, the **raw_data** directory of each acquisition system will, as a minimum, contain the 
 following files and subdirectories:
 1. **ax_checksum.txt**: Stores the xxHash-128 checksum used to verify data integrity when it is transferred to the 
    long-term storage destination. The checksum is generated before the data leaves the main data acquisition system PC
@@ -455,7 +455,7 @@ following files and subdirectories:
    This includes all messages sent or received by each microcontroller, the timestamps for the frames acquired by 
    each camera and (if applicable) the main brain activity recording device (e.g.: Mesoscope). These logs also include 
    session metadata, such as trials, task conditions, and system and runtime state transitions. Although the exact 
-   content of the behavior data folder can differ between acquisition systems, all systems used in the lab generate some
+   content of the behavior data directory can differ between acquisition systems, all systems used in the lab generate some
    form of non-video behavior data.
 8. **camera_data**: Stores the behavior videos recorded by video cameras used by the acquisition system. While not 
    technically required for every system, all current Sun lab data acquisition systems use one or more cameras to 
@@ -473,7 +473,7 @@ following files and subdirectories:
 11. **integrity_verification_tracker.yaml**: This tracker file is used internally to run and track the outcome of the 
    remote data verification procedure. This procedure runs as part of moving the data to the long-term storage 
    destinations to ensure the data is transferred intact. Users can optionally check the status of the verification by 
-   accessing the data stored inside the file. **Note!** This file is added **only!** to the raw_data folder stored on
+   accessing the data stored inside the file. **Note!** This file is added **only!** to the raw_data directory stored on
    the BioHPC server.
 
 ### Shared Temporary Data
@@ -492,7 +492,7 @@ before the raw data is transmitted to the long-term storage destinations:
    millions of .npy files at runtime, making it challenging for human operators to work with the data. During 
    preprocessing, individual .npy files are grouped by their source (what made the log entry, e.g.: VideoSystem, 
    MicroController, Data Acquisition System, etc.) and are compressed into .npz archives, one for each source. The 
-   .npz archives are then moved to the *behavior_Data* folder, and the *behavior_data_log* with the individual 
+   .npz archives are then moved to the *behavior_Data* directory, and the *behavior_data_log* with the individual 
    .npy files is deleted to conserve disk space.
 3. **ubiquitin.bin**: This marker file is created during *preprocessing* runtime to mark directories that
    are no longer needed for deletion. Specifically, when preprocessing safely moves the acquired data to long-term 
@@ -511,7 +511,7 @@ The Mesoscope-VR system generates the following files and directories, in additi
 raw data section on the VRPC:
 1. **mesoscope_data**: Stores all Mesoscope-acquired data (frames, motion estimation files, etc.). Since Mesoscope data
    is only acquired for **experiment** sessions, this directory is kept empty for all other session types. During 
-   preprocessing, the folder contents are organized in a way to automatically work with 
+   preprocessing, the directory contents are organized in a way to automatically work with 
    [sl-suite2p](https://github.com/Sun-Lab-NBB/suite2p) single-day processing pipeline. All Mesoscope data is intended 
    to be processed with the sl-suite2p library.
 2. **zaber_positions.yaml**: Stores the snapshot of the positions used by the HeadBar, LickPort, and Wheel Zaber motor 
@@ -560,7 +560,7 @@ The Mesoscope-VR system also generates the following temporary files and directo
 1. **raw_mesoscope_data**: Stores uncompressed .TIFF stacks fetched by the VRPC from the ScanImagePC. This is done 
    as part of data preprocessing to collect all data on the VRPC before executing individual preprocessing subroutines.
    The .TIFF stacks are then re-compressed using the Limited Error Raster Compression (LERC) scheme and are saved to the
-   *mesoscope_data* folder. Once this process completes successfully, the *raw_mesoscope_data* with all raw files is 
+   *mesoscope_data* directory. Once this process completes successfully, the *raw_mesoscope_data* with all raw files is 
    deleted to conserve disk space.
 2. **kinase.bin**: This marker is created in the *mesoscope_data* ScanImagePC directory. During runtime, the 
    *setupAcquisition* MATLAB function monitors the *mesoscope_data* directory for the presence of this marker file. If 
@@ -783,7 +783,7 @@ If the VRPC runtime unexpectedly interrupts at any point without executing the g
 instructions:
 1. If the session involved Mesoscope imaging, shut down the Mesoscope acquisition process and make sure all required 
    files (frame stacks, motion estimator data, cranial window screenshot) have been generated and saved to the 
-   **mesoscope_data** folder.
+   **mesoscope_data** directory.
 2. If necessary, **manually** edit the session_descriptor.yaml, the mesoscope_positions.yaml, and the 
    zaber_positions.yaml files to include actual runtime information. Estimate the volume of water delivered at runtime 
    by manually reading the water tank level gauge. 
@@ -795,8 +795,8 @@ instructions:
 5. Go into the 'Device Settings' tab of the Zaber Launcher, click on each Device tab (NOT motor!) and navigate to its 
    User Data section. Then **flip Setting 1 from 0 to 1**. Without this, the library will refuse to operate the Zaber 
    Motors during all future runtimes.
-6. If the session involved Mesoscope imaging, **rename the mesoscope_data folder to prepend the session name, using an
-   underscore to separate the folder name from the session name**. For example, from mesoscope_data → 
+6. If the session involved Mesoscope imaging, **rename the mesoscope_data directory to prepend the session name, using an
+   underscore to separate the directory name from the session name**. For example, from mesoscope_data → 
    2025-11-11-05-03-234123_mesoscope_data. **Critical!** if this is not done, the library may **delete** any leftover 
    Mesoscope files during the next runtime and will not be able to properly preprocess the frames for the interrupted
    session during the next step.

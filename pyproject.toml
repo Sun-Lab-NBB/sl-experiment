@@ -176,7 +176,7 @@ length-sort = true                 # Places shorter imports first
 disallow_untyped_defs = true # Enforces function annotation
 warn_unused_ignores = true   # Warns against using 'type: ignore' for packages that have type stubs available.
 exclude = [
-    "sl-experiment-\\d+", # Ignores temporary folder created by setuptools when building the sdist
+    "sl-experiment-\\d+", # Ignores the temporary directory created by setuptools when building the sdist
     "venv.*/",            # Ignores virtual environments
     "build/",             # Ignores the sdist directory
     "dist/",              # Ignores the wheel directory

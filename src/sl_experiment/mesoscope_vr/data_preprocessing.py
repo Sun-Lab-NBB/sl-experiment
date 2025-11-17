@@ -340,9 +340,9 @@ def _pull_mesoscope_data(session_data: SessionData, mesoscope_data: MesoscopeDat
     destination = session_data.raw_data.raw_data_path.joinpath("raw_mesoscope_frames")
     ensure_directory_exists(destination)
 
-    # Defines the set of extensions and filenames to look for when verifying source folder contents.
+    # Defines the set of extensions and filenames to look for when verifying source directory contents.
     _extensions = {"*.me", "*.tiff", "*.tif", "*.roi"}
-    _required_mesoscope_files = {"MotionEstimator.me", "fov.roi", "zstack_00000_00001.tif"}
+    _required_mesoscope_files = {"MotionEstimator.me", "fov.roi", "zstack.tiff"}
 
     # Verifies that all required files are present in the source directory.
 
@@ -418,7 +418,7 @@ def _preprocess_mesoscope_directory(
     # Handles special files that need to be processed differently to the TIFF stacks.
     motion_estimator_file = image_directory.joinpath("MotionEstimator.me")
     fov_roi_file = image_directory.joinpath("fov.roi")
-    zstack_file = image_directory.joinpath("zstack_00000_00001.tif")
+    zstack_file = image_directory.joinpath("zstack.tiff")
 
     # If necessary, persists the MotionEstimator and the fov.roi files to the 'persistent data' directory of the
     # processed animal on the ScanImagePC.
