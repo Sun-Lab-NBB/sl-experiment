@@ -1128,197 +1128,6 @@ class _MesoscopeVRSystem:
         message = "Mesoscope-VR system runtime: Terminated."
         console.echo(message=message, level=LogLevel.SUCCESS)
 
-    def _checkpoint(self) -> None:
-        """Instructs the user to verify the functioning of the water delivery valve and all other components before
-        starting the runtime.
-
-        This utility method is called as part of the start() method to allow the user to ensure that all critical system
-        elements are ready for runtime. This method is designed to run briefly and is primarily intended for the user
-        to test the valve before starting the runtime.
-        """
-        # Notifies the user about the checkpoint.
-        message = (
-            "Runtime preparation: Complete. Carry out all final checks and adjustments, such as priming the water "
-            "delivery valve. When you are ready to start the runtime, use the UI to 'resume' it."
-        )
-        console.echo(message=message, level=LogLevel.SUCCESS)
-
-        # Secondary message added in 4.0.0 to address frequent user questions and errors.
-        message = (
-            "Note: All sensors, including the lick sensor, are DISABLED at this time. If you are running a training "
-            "session, apply the electroconductive gel to the headbar to ensure lick sensor works as expected once the "
-            "runtime starts."
-        )
-        console.echo(message=message, level=LogLevel.WARNING)
-
-        # At this point, the user can use the GUI and the Zaber UI to freely manipulate all components of the
-        # mesoscope-VR system.
-        while self._ui.pause_runtime:
-            self._visualizer.update()  # Refreshes the visualizer window.
-
-            if self._ui.reward_signal:
-                self._deliver_reward(reward_size=self._ui.reward_volume)
-
-            if self._ui.open_valve:
-                self._microcontrollers.valve.set_state(state=True)
-
-            if self._ui.close_valve:
-                self._microcontrollers.valve.set_state(state=False)
-
-            # Switches the guidance status in response to user requests
-            if self._ui.enable_guidance != self._enable_guidance:
-                self._enable_guidance = self._ui.enable_guidance
-                self._toggle_lick_guidance(enable_guidance=self._enable_guidance)
-
-            # Switches the reward boundary visibility in response to user requests
-            if self._ui.show_reward != self._show_reward_zone_boundary:
-                self._show_reward_zone_boundary = self._ui.show_reward
-                self._toggle_show_reward(show_reward=self._show_reward_zone_boundary)
-
-            # If the user decides to terminate the runtime at the checkpoint, transitions into the shutdown state
-            if self._ui.exit_signal:
-                self._terminate_runtime()
-                if self._terminated:
-                    break
-
-        # Ensures the valve is closed before continuing.
-        self._microcontrollers.valve.set_state(state=False)
-
-        # Updates the paused water volume tracker to reflect the total volume of water delivered during the checkpoint.
-        self._paused_water_volume += self._microcontrollers.valve.delivered_volume
-
-        # Since deliver_reward() method automatically increments unconsumed reward counter, resets the tracker before
-        # starting runtime
-        self._unconsumed_reward_count = 0
-
-    def _start_mesoscope(self) -> None:
-        """Generates the acquisition start marker file on the ScanImagePC and waits for the frame acquisition to begin.
-
-        This method is used internally to start the mesoscope frame acquisition as part of the runtime startup
-        process and to verify that the mesoscope is available and properly configured to acquire frames
-        based on the input triggers.
-
-        Notes:
-            This method contains an infinite loop that allows retrying the failed mesoscope acquisition start. This
-            prevents the runtime from aborting unless the user purposefully chooses the hard abort option.
-
-        Raises:
-            RuntimeError: If the mesoscope does not confirm frame acquisition within 2 seconds after the
-                acquisition marker file is created, and the user chooses to abort the runtime.
-        """
-        # Initializes a second-precise timer to ensure the request is fulfilled within a 2-second timeout
-        timeout_timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
-
-        # Ensures that both acquisition marker files are removed before executing mesoscope startup sequence.
-        self._mesoscope_data.scanimagepc_data.phosphatase_path.unlink(missing_ok=True)
-        self._mesoscope_data.scanimagepc_data.kinase_path.unlink(missing_ok=True)
-
-        # Keeps retrying to activate mesoscope acquisition until success or until the user aborts the acquisition
-        outcome = ""
-        while outcome != "abort":
-            self._microcontrollers.mesoscope_frame.reset_pulse_count()  # Resets the frame counter
-
-            # Ensures that the mesoscope is not currently acquiring frames. If it is acquiring frames, then it has not
-            # been set up correctly for acquisition.
-            timeout_timer.delay_noblock(1)  # Waits for 1 second to assess whether the mesoscope is acquiring frames.
-
-            # If mesoscope has acquired frames over the delay period, it is not prepared for acquisition.
-            if self._microcontrollers.mesoscope_frame.pulse_count > 0:
-                message = (
-                    "Unable to trigger mesoscope frame acquisition, as the mesoscope is already acquiring frames. "
-                    "This indicates that the setupAcquisition() MATLAB function did not run as expected, as that "
-                    "function is meant to lock the mesoscope down for acquisition and wait for VRPC to trigger it. "
-                    "Re-run the setupAcquisition function before retrying."
-                )
-                console.echo(message=message, level=LogLevel.ERROR)
-
-            # Otherwise, proceeds with the startup process
-            else:
-                # Before starting the acquisition, clears any unexpected TIFF / TIF files. This ensures that the data
-                # inside the mesoscope directory always perfectly aligns with the number of frame acquisition triggers
-                # recorded by the frame monitor module. Note, this is performed only if this is the first call to the
-                # start_mesoscope() method during this runtime.
-                if not self._mesoscope_started:
-                    for pattern in ["*.tif", "*.tiff"]:
-                        for file in self._mesoscope_data.scanimagepc_data.mesoscope_data_path.glob(pattern):
-                            # Specifically excludes 'zstack.tif' files from this process, as that stack is generated
-                            # as part of the acquisition setup procedure.
-                            if "zstack" not in file.name:
-                                file.unlink(missing_ok=True)
-
-                # Starts the acquisition process by creating the kinase.bin marker. The acquisition function running
-                # on the ScanImagePC starts the acquisition process as soon as it detects the presence of the marker
-                # file.
-                self._mesoscope_data.scanimagepc_data.kinase_path.touch()
-
-                # Ensures that the frame acquisition starts as expected
-                message = "Mesoscope acquisition trigger: Sent. Waiting for the mesoscope frame acquisition to start..."
-                console.echo(message=message, level=LogLevel.INFO)
-
-                # Waits at most 5 seconds for the mesoscope to acquire at least 10 frames. At ~ 10 Hz, it should take
-                # ~ 1 second of downtime.
-                timeout_timer.reset()
-                while timeout_timer.elapsed < 5:
-                    if self._microcontrollers.mesoscope_frame.pulse_count > 10:
-                        # Ends the runtime
-                        message = "Mesoscope frame acquisition: Started."
-                        console.echo(message=message, level=LogLevel.SUCCESS)
-
-                        # Prepares assets used to detect and recover from unwanted acquisition interruptions.
-                        self._mesoscope_frame_count = self._microcontrollers.mesoscope_frame.pulse_count
-                        self._mesoscope_timer.reset()
-                        self._mesoscope_started = True
-                        return
-
-                # If the loop above is escaped, this is due to not receiving the mesoscope frame acquisition pulses.
-                message = (
-                    "The Mesoscope-VR system has requested the mesoscope to start acquiring frames and failed to "
-                    "receive 10 frame acquisition triggers over 5 seconds. It is likely that the mesoscope has not "
-                    "been armed for externally-triggered frame acquisition or that the mesoscope frame monitoring "
-                    "module is not functioning. Make sure the Mesoscope is configured for data acquisition before "
-                    "continuing and retry the mesoscope activation."
-                )
-                console.echo(message=message, level=LogLevel.ERROR)
-            outcome = input("Enter 'abort' to abort with an error. Enter anything else to retry: ").lower()
-
-        message = "Runtime aborted due to user request."
-        console.error(message=message, error=RuntimeError)
-        raise RuntimeError(message)  # Fallback to appease mypy, should not be reachable
-
-    def _stop_mesoscope(self) -> None:
-        """Sends the frame acquisition stop TTL pulse to the mesoscope and waits for the frame acquisition to stop.
-
-        This method is used internally to stop the mesoscope frame acquisition as part of the stop() method runtime.
-
-        Notes:
-            This method contains an infinite loop that waits for the mesoscope to stop generating frame acquisition
-            triggers.
-        """
-        # Removes the acquisition marker file, which causes the runtime control MATLAB function to stop the acquisition.
-        self._mesoscope_data.scanimagepc_data.kinase_path.unlink(missing_ok=True)
-
-        # As a fall-back mechanism for terminating runtimes that failed to initialize, generates the phosphatase.bin
-        # marker. The presence of this marker ends the runtime of the MATLAB function if the kinase.bin marker was
-        # never created.
-        self._mesoscope_data.scanimagepc_data.phosphatase_path.touch()
-
-        # Blocks until the Mesoscope stops sending frame acquisition pulses to the microcontroller.
-        message = "Waiting for the Mesoscope to stop acquiring frames..."
-        console.echo(message=message, level=LogLevel.INFO)
-        self._microcontrollers.mesoscope_frame.reset_pulse_count()  # Resets the frame tracker array
-        while True:
-            # Delays for 2 seconds. Mesoscope acquires frames at 10 Hz, so if there are no incoming triggers for that
-            # period of time, it is safe to assume that the acquisition has stopped.
-            self._timestamp_timer.delay_noblock(delay=2000000)
-            if self._microcontrollers.mesoscope_frame.pulse_count == 0:
-                break  # Breaks the loop
-            self._microcontrollers.mesoscope_frame.reset_pulse_count()  # Resets the frame tracker array and waits more
-
-        # Removes the phosphatase marker once the Mesoscope stops sending acquisition triggers.
-        self._mesoscope_data.scanimagepc_data.phosphatase_path.unlink(missing_ok=True)
-
-        # NOTE, purposefully avoids flipping the mesoscope_started flag.
-
     def _generate_hardware_state_snapshot(self) -> None:
         """Resolves and caches the snapshot of the system's hardware configuration parameters to the acquired session's
         raw_data directory as a hardware_state.yaml file.
@@ -1789,6 +1598,197 @@ class _MesoscopeVRSystem:
                 return trial_indices, -1
 
         return trial_indices[:trial_count], trial_count
+
+    def _start_mesoscope(self) -> None:
+        """Generates the acquisition start marker file on the ScanImagePC and waits for the frame acquisition to begin.
+
+        This method is used internally to start the mesoscope frame acquisition as part of the runtime startup
+        process and to verify that the mesoscope is available and properly configured to acquire frames
+        based on the input triggers.
+
+        Notes:
+            This method contains an infinite loop that allows retrying the failed mesoscope acquisition start. This
+            prevents the runtime from aborting unless the user purposefully chooses the hard abort option.
+
+        Raises:
+            RuntimeError: If the mesoscope does not confirm frame acquisition within 2 seconds after the
+                acquisition marker file is created, and the user chooses to abort the runtime.
+        """
+        # Initializes a second-precise timer to ensure the request is fulfilled within a 2-second timeout
+        timeout_timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
+
+        # Ensures that both acquisition marker files are removed before executing mesoscope startup sequence.
+        self._mesoscope_data.scanimagepc_data.phosphatase_path.unlink(missing_ok=True)
+        self._mesoscope_data.scanimagepc_data.kinase_path.unlink(missing_ok=True)
+
+        # Keeps retrying to activate mesoscope acquisition until success or until the user aborts the acquisition
+        outcome = ""
+        while outcome != "abort":
+            self._microcontrollers.mesoscope_frame.reset_pulse_count()  # Resets the frame counter
+
+            # Ensures that the mesoscope is not currently acquiring frames. If it is acquiring frames, then it has not
+            # been set up correctly for acquisition.
+            timeout_timer.delay_noblock(1)  # Waits for 1 second to assess whether the mesoscope is acquiring frames.
+
+            # If mesoscope has acquired frames over the delay period, it is not prepared for acquisition.
+            if self._microcontrollers.mesoscope_frame.pulse_count > 0:
+                message = (
+                    "Unable to trigger mesoscope frame acquisition, as the mesoscope is already acquiring frames. "
+                    "This indicates that the setupAcquisition() MATLAB function did not run as expected, as that "
+                    "function is meant to lock the mesoscope down for acquisition and wait for VRPC to trigger it. "
+                    "Re-run the setupAcquisition function before retrying."
+                )
+                console.echo(message=message, level=LogLevel.ERROR)
+
+            # Otherwise, proceeds with the startup process
+            else:
+                # Before starting the acquisition, clears any unexpected TIFF / TIF files. This ensures that the data
+                # inside the mesoscope directory always perfectly aligns with the number of frame acquisition triggers
+                # recorded by the frame monitor module. Note, this is performed only if this is the first call to the
+                # start_mesoscope() method during this runtime.
+                if not self._mesoscope_started:
+                    for pattern in ["*.tif", "*.tiff"]:
+                        for file in self._mesoscope_data.scanimagepc_data.mesoscope_data_path.glob(pattern):
+                            # Specifically excludes 'zstack.tif' files from this process, as that stack is generated
+                            # as part of the acquisition setup procedure.
+                            if "zstack" not in file.name:
+                                file.unlink(missing_ok=True)
+
+                # Starts the acquisition process by creating the kinase.bin marker. The acquisition function running
+                # on the ScanImagePC starts the acquisition process as soon as it detects the presence of the marker
+                # file.
+                self._mesoscope_data.scanimagepc_data.kinase_path.touch()
+
+                # Ensures that the frame acquisition starts as expected
+                message = "Mesoscope acquisition trigger: Sent. Waiting for the mesoscope frame acquisition to start..."
+                console.echo(message=message, level=LogLevel.INFO)
+
+                # Waits at most 5 seconds for the mesoscope to acquire at least 10 frames. At ~ 10 Hz, it should take
+                # ~ 1 second of downtime.
+                timeout_timer.reset()
+                while timeout_timer.elapsed < 5:
+                    if self._microcontrollers.mesoscope_frame.pulse_count > 10:
+                        # Ends the runtime
+                        message = "Mesoscope frame acquisition: Started."
+                        console.echo(message=message, level=LogLevel.SUCCESS)
+
+                        # Prepares assets used to detect and recover from unwanted acquisition interruptions.
+                        self._mesoscope_frame_count = self._microcontrollers.mesoscope_frame.pulse_count
+                        self._mesoscope_timer.reset()
+                        self._mesoscope_started = True
+                        return
+
+                # If the loop above is escaped, this is due to not receiving the mesoscope frame acquisition pulses.
+                message = (
+                    "The Mesoscope-VR system has requested the mesoscope to start acquiring frames and failed to "
+                    "receive 10 frame acquisition triggers over 5 seconds. It is likely that the mesoscope has not "
+                    "been armed for externally-triggered frame acquisition or that the mesoscope frame monitoring "
+                    "module is not functioning. Make sure the Mesoscope is configured for data acquisition before "
+                    "continuing and retry the mesoscope activation."
+                )
+                console.echo(message=message, level=LogLevel.ERROR)
+            outcome = input("Enter 'abort' to abort with an error. Enter anything else to retry: ").lower()
+
+        message = "Runtime aborted due to user request."
+        console.error(message=message, error=RuntimeError)
+        raise RuntimeError(message)  # Fallback to appease mypy, should not be reachable
+
+    def _stop_mesoscope(self) -> None:
+        """Sends the frame acquisition stop TTL pulse to the mesoscope and waits for the frame acquisition to stop.
+
+        This method is used internally to stop the mesoscope frame acquisition as part of the stop() method runtime.
+
+        Notes:
+            This method contains an infinite loop that waits for the mesoscope to stop generating frame acquisition
+            triggers.
+        """
+        # Removes the acquisition marker file, which causes the runtime control MATLAB function to stop the acquisition.
+        self._mesoscope_data.scanimagepc_data.kinase_path.unlink(missing_ok=True)
+
+        # As a fall-back mechanism for terminating runtimes that failed to initialize, generates the phosphatase.bin
+        # marker. The presence of this marker ends the runtime of the MATLAB function if the kinase.bin marker was
+        # never created.
+        self._mesoscope_data.scanimagepc_data.phosphatase_path.touch()
+
+        # Blocks until the Mesoscope stops sending frame acquisition pulses to the microcontroller.
+        message = "Waiting for the Mesoscope to stop acquiring frames..."
+        console.echo(message=message, level=LogLevel.INFO)
+        self._microcontrollers.mesoscope_frame.reset_pulse_count()  # Resets the frame tracker array
+        while True:
+            # Delays for 2 seconds. Mesoscope acquires frames at 10 Hz, so if there are no incoming triggers for that
+            # period of time, it is safe to assume that the acquisition has stopped.
+            self._timestamp_timer.delay_noblock(delay=2000000)
+            if self._microcontrollers.mesoscope_frame.pulse_count == 0:
+                break  # Breaks the loop
+            self._microcontrollers.mesoscope_frame.reset_pulse_count()  # Resets the frame tracker array and waits more
+
+        # Removes the phosphatase marker once the Mesoscope stops sending acquisition triggers.
+        self._mesoscope_data.scanimagepc_data.phosphatase_path.unlink(missing_ok=True)
+
+        # NOTE, purposefully avoids flipping the mesoscope_started flag.
+
+    def _checkpoint(self) -> None:
+        """Instructs the user to verify the functioning of the water delivery valve and all other components before
+        starting the runtime.
+
+        This utility method is called as part of the start() method to allow the user to ensure that all critical system
+        elements are ready for runtime. This method is designed to run briefly and is primarily intended for the user
+        to test the valve before starting the runtime.
+        """
+        # Notifies the user about the checkpoint.
+        message = (
+            "Runtime preparation: Complete. Carry out all final checks and adjustments, such as priming the water "
+            "delivery valve. When you are ready to start the runtime, use the UI to 'resume' it."
+        )
+        console.echo(message=message, level=LogLevel.SUCCESS)
+
+        # Secondary message added in 4.0.0 to address frequent user questions and errors.
+        message = (
+            "Note: All sensors, including the lick sensor, are DISABLED at this time. If you are running a training "
+            "session, apply the electroconductive gel to the headbar to ensure lick sensor works as expected once the "
+            "runtime starts."
+        )
+        console.echo(message=message, level=LogLevel.WARNING)
+
+        # At this point, the user can use the GUI and the Zaber UI to freely manipulate all components of the
+        # mesoscope-VR system.
+        while self._ui.pause_runtime:
+            self._visualizer.update()  # Refreshes the visualizer window.
+
+            if self._ui.reward_signal:
+                self._deliver_reward(reward_size=self._ui.reward_volume)
+
+            if self._ui.open_valve:
+                self._microcontrollers.valve.set_state(state=True)
+
+            if self._ui.close_valve:
+                self._microcontrollers.valve.set_state(state=False)
+
+            # Switches the guidance status in response to user requests
+            if self._ui.enable_guidance != self._enable_guidance:
+                self._enable_guidance = self._ui.enable_guidance
+                self._toggle_lick_guidance(enable_guidance=self._enable_guidance)
+
+            # Switches the reward boundary visibility in response to user requests
+            if self._ui.show_reward != self._show_reward_zone_boundary:
+                self._show_reward_zone_boundary = self._ui.show_reward
+                self._toggle_show_reward(show_reward=self._show_reward_zone_boundary)
+
+            # If the user decides to terminate the runtime at the checkpoint, transitions into the shutdown state
+            if self._ui.exit_signal:
+                self._terminate_runtime()
+                if self._terminated:
+                    break
+
+        # Ensures the valve is closed before continuing.
+        self._microcontrollers.valve.set_state(state=False)
+
+        # Updates the paused water volume tracker to reflect the total volume of water delivered during the checkpoint.
+        self._paused_water_volume += self._microcontrollers.valve.delivered_volume
+
+        # Since deliver_reward() method automatically increments unconsumed reward counter, resets the tracker before
+        # starting runtime
+        self._unconsumed_reward_count = 0
 
     def _toggle_lick_guidance(self, *, enable_guidance: bool) -> None:
         """Sets the Virtual Reality task guidance mode to the input state.
