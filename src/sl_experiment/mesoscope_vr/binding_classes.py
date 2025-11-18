@@ -421,6 +421,7 @@ class MicroControllerInterfaces:
             port=self._configuration.actor_port,
             data_logger=data_logger,
             module_interfaces=(self.brake, self.valve, self.screens),
+            keepalive_interval=self._configuration.keepalive_interval_ms,
         )
 
         # SENSOR. Sensor AMC controls the hardware that collects data at regular intervals. This includes lick sensors,
@@ -447,6 +448,7 @@ class MicroControllerInterfaces:
             port=self._configuration.sensor_port,
             data_logger=data_logger,
             module_interfaces=(self.mesoscope_frame, self.lick, self.torque),
+            keepalive_interval=self._configuration.keepalive_interval_ms,
         )
 
         # ENCODER. Encoder AMC is specifically designed to interface with a quadrature encoder connected to the running
@@ -468,6 +470,7 @@ class MicroControllerInterfaces:
             port=self._configuration.encoder_port,
             data_logger=data_logger,
             module_interfaces=(self.wheel_encoder,),
+            keepalive_interval=self._configuration.keepalive_interval_ms,
         )
 
     def __del__(self) -> None:
