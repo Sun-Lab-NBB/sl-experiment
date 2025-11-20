@@ -87,11 +87,9 @@ class MaintenanceControlUI:
         """Terminates the UI process and releases the instance's shared memory buffers when garbage-collected."""
         self.shutdown()
         # Clean up valve tracker connection
-        try:
+        with contextlib.suppress(Exception):
             self._valve_tracker.disconnect()
-            # Note: We don't destroy the valve tracker as it's owned by ValveInterface
-        except Exception:
-            pass
+            # Note: Does not destroy the valve tracker as it's owned by ValveInterface
 
     def start(self) -> None:
         """Starts the remote UI process."""
@@ -120,11 +118,9 @@ class MaintenanceControlUI:
         self._data_array.disconnect()
         self._data_array.destroy()
 
-        # Disconnect from the valve tracker (but don't destroy it - it's owned by ValveInterface)
-        try:
+        # Disconnects from the valve tracker (but does not destroy it - it's owned by ValveInterface)
+        with contextlib.suppress(Exception):
             self._valve_tracker.disconnect()
-        except Exception:
-            pass
 
         self._started = False
 
@@ -156,8 +152,7 @@ class MaintenanceControlUI:
     @property
     def exit_signal(self) -> bool:
         """Returns True if the user has requested to terminate the maintenance runtime."""
-        exit_flag = bool(self._data_array[_DataArrayIndex.TERMINATION])
-        return exit_flag
+        return bool(self._data_array[_DataArrayIndex.TERMINATION])
 
     @property
     def valve_open_signal(self) -> bool:
@@ -323,8 +318,8 @@ class _MaintenanceUIWindow(QMainWindow):
         valve_layout.addLayout(volume_reward_layout)
 
         # Reference button
-        self.valve_reference_btn = QPushButton("🔄 Reference (200 × 5 μL)")
-        self.valve_reference_btn.setToolTip("Run reference valve calibration (200 pulses × 5 μL)")
+        self.valve_reference_btn = QPushButton("🔄 Reference (200 x 5 μL)")
+        self.valve_reference_btn.setToolTip("Run reference valve calibration (200 pulses x 5 μL)")
         # noinspection PyUnresolvedReferences
         self.valve_reference_btn.clicked.connect(self._valve_reference)
         self.valve_reference_btn.setObjectName("referenceButton")
@@ -767,7 +762,7 @@ class _MaintenanceUIWindow(QMainWindow):
     def _valve_reference(self) -> None:
         """Signals to run the valve referencing procedure."""
         self._data_array[_DataArrayIndex.VALVE_REFERENCE] = 1
-        self.valve_status_label.setText("Reference: 🔄 Running (200 × 5 μL)...")
+        self.valve_status_label.setText("Reference: 🔄 Running (200 x 5 μL)...")
         self.valve_status_label.setStyleSheet("QLabel { color: #9b59b6; font-weight: bold; }")
         QTimer.singleShot(5000, lambda: self.valve_status_label.setText("Reference: ✓ Complete"))
         QTimer.singleShot(7000, lambda: self.valve_status_label.setText("Valve Status: Awaiting Commands"))

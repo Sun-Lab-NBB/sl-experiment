@@ -696,9 +696,11 @@ class VideoSystems:
         message = "Stopping camera frame acquisition and saving..."
         console.echo(message=message, level=LogLevel.INFO)
 
-        # Instructs all cameras to stop saving frames
-        self._face_camera.stop_frame_saving()
-        self._body_camera.stop_frame_saving()
+        # Instructs all active cameras to stop saving frames
+        if self._face_camera_started:
+            self._face_camera.stop_frame_saving()
+        if self._body_camera_started:
+            self._body_camera.stop_frame_saving()
 
         message = "Camera frame saving: Stopped."
         console.echo(message=message, level=LogLevel.SUCCESS)

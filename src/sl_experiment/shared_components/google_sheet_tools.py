@@ -797,8 +797,7 @@ class WaterLog:
             # Checks if the cell has a value matching the target date
             if date_cell and date_cell[0] == target_date:
                 # Adds 3 to account for 0-indexing and the fact we started from row 3
-                row_index = i + 3
-                return row_index
+                return i + 3
         message = (
             f"Unable to find the row for the target date {target_date} inside the water restriction and "
             f"animal interaction log file for the animal {self._animal_id}. Update the log to include the "
