@@ -2285,12 +2285,13 @@ class _MesoscopeVRSystem:
             self._unity_state.terminated = False
 
         if self._mesoscope_terminated:
-            # Restarting the Mesoscope is slightly different from starting it, as the user needs to call a special
-            # version of the resumeAcquisition() function. Instructs the user to call the function and then enters the
+            # Restarting the Mesoscope is slightly different from starting it, as the user needs to call the
+            # setupAcquisition() function with a special argument. Instructs the user to call the function and then
+            # enters the
             # Mesoscope start sequence.
             message = (
-                "If necessary call the resumeAcquisition(hSI, hSICtl) command in the MATLAB command line interface "
-                "before proceeding to resume an interrupted acquisition."
+                "If necessary call the setupAcquisition(hSI, hSICtl, recovery=true) command in the MATLAB command line "
+                "interface before proceeding to resume an interrupted acquisition."
             )
             console.echo(message=message, level=LogLevel.WARNING)
             input("Enter anything to continue: ")

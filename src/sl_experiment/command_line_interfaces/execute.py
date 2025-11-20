@@ -113,6 +113,13 @@ def check_window(ctx: click.Context) -> None:
 # noinspection PyUnresolvedReferences
 @session.command("lick-training")
 @click.option(
+    "-t",
+    "--maximum_time",
+    type=int,
+    required=True,
+    help="The maximum time to run the training session, in minutes.",
+)
+@click.option(
     "-min",
     "--minimum_delay",
     type=int,
@@ -130,19 +137,13 @@ def check_window(ctx: click.Context) -> None:
     type=float,
     help="The maximum volume of water, in milliliters, that can be delivered during training. If not provided, will be restored from memory.",
 )
-@click.option(
-    "-t",
-    "--maximum_time",
-    type=int,
-    help="The maximum time to run the training, in minutes. If not provided, will be restored from memory.",
-)
 @click.pass_context
 def lick_training(
     ctx: click.Context,
+    maximum_time: int,
     minimum_delay: int | None,
     maximum_delay: int | None,
     maximum_volume: float | None,
-    maximum_time: int | None,
 ) -> None:
     """Runs the lick training session for the specified animal and project combination.
 
@@ -165,6 +166,13 @@ def lick_training(
 
 # noinspection PyUnresolvedReferences
 @session.command("run-training")
+@click.option(
+    "-t",
+    "--maximum_time",
+    type=int,
+    required=True,
+    help="The maximum time to run the training session, in minutes.",
+)
 @click.option(
     "-is",
     "--initial_speed",
@@ -221,13 +229,6 @@ def lick_training(
     help="The maximum volume of water, in milliliters, that can be delivered during training. If not provided, will be restored from memory.",
 )
 @click.option(
-    "-t",
-    "--maximum_time",
-    type=int,
-    default=None,
-    help="The maximum time to run the training, in minutes. If not provided, will be restored from memory.",
-)
-@click.option(
     "-mit",
     "--maximum_idle_time",
     type=float,
@@ -241,13 +242,13 @@ def lick_training(
 @click.pass_context
 def run_training(
     ctx: click.Context,
+    maximum_time: int,
     initial_speed: float | None,
     initial_duration: float | None,
     increase_threshold: float | None,
     speed_step: float | None,
     duration_step: float | None,
     maximum_volume: float | None,
-    maximum_time: int | None,
     maximum_idle_time: float | None,
 ) -> None:
     """Runs the run training session for the specified animal and project combination.
