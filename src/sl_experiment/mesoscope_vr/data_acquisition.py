@@ -2402,6 +2402,181 @@ class _MesoscopeVRSystem:
         return float(self._delivered_water_volume)
 
 
+def window_checking_logic(
+    experimenter: str,
+    project_name: str,
+    animal_id: str,
+) -> None:
+    """Encapsulates the logic used to verify the surgery quality (cranial window) and generate the initial snapshot of
+    the Mesoscope-VR system configuration for a newly added animal of the target project.
+
+    This function is used when new animals are added to the project, before any other training or experiment runtime.
+    Primarily, it is used to verify that the surgery went as expected and the animal is fit for providing high-quality
+    scientific data. As part of this process, the function also generates the snapshot of zaber motor positions, the
+    mesoscope objective position, and the red-dot alignment screenshot to be reused by future sessions.
+
+    Notes:
+        This function largely behaves similar to all other training and experiment session runtimes. However, it does
+        not use most of the Mesoscope-VR components and does not make most of the runtime data files typically generated
+        by other sessions. All window checking sessions are automatically marked as 'incomplete' and excluded from
+        automated data processing.
+
+    Args:
+        experimenter: The id of the experimenter conducting the window checking session.
+        project_name: The name of the project to which the checked animal belongs.
+        animal_id: The numeric ID of the animal whose cranial window is being checked.
+    """
+    message = "Initializing window checking runtime..."
+    console.echo(message=message, level=LogLevel.INFO)
+
+    # Queries the data acquisition system runtime parameters.
+    system_configuration = get_system_configuration()
+
+    # Verifies that the target project exists
+    project_directory = system_configuration.paths.root_directory.joinpath(project_name)
+    if not project_directory.exists():
+        message = (
+            f"Unable to execute the window checking for the animal {animal_id} of project {project_name}. The target "
+            f"project does not exist on the local machine. Use the 'sl-create-project' command to create the project "
+            f"before running training or experiment sessions."
+        )
+        console.error(message=message, error=FileNotFoundError)
+
+    # These checks have been added in version 4.0.0 to help users abide by the 'one animal one project' policy. Now all
+    # runtimes require each animal to be assigned to a single project.
+    animal_projects = get_animal_project(animal_id=animal_id)
+    if len(animal_projects) > 1:  # Rare case, often indicative of old migration pipeline use
+        message = (
+            f"Unable to execute the window checking for the animal {animal_id} of project {project_name}. "
+            f"The animal is associated with multiple projects on the local machine, which is not allowed. Remove the "
+            f"animal from all extra projects and rerun the window checking."
+        )
+        console.error(message=message, error=ValueError)
+    elif len(animal_projects) == 1 and animal_projects[0] != project_name:  # This indicates user error
+        message = (
+            f"Unable to execute the window checking for the animal {animal_id} and project "
+            f"{project_name}. The animal is already associated with a different project '{animal_projects[0]}'. Either "
+            f"adjust the project name to match the animal's current project or use the 'sl-migrate-animal' CLI command "
+            f"to first migrate the animal to the desired project and rerun the window checking."
+        )
+        console.error(message=message, error=ValueError)
+
+    # Queries the current Python and library version information. This is then used to initialize the SessionData
+    # instance.
+    python_version, library_version = get_version_data()
+
+    # Generates the WindowCheckingDescriptor instance, caches it to disk, and forces the user to update the data
+    # in the descriptor file with their notes.
+    descriptor = WindowCheckingDescriptor(
+        experimenter=experimenter,
+        incomplete=True,
+    )
+
+    # Initializes data-management classes for the runtime. Note, SessionData creates the necessary session directory
+    # hierarchy as part of this initialization process
+    session_data = SessionData.create(
+        project_name=project_name,
+        animal_id=animal_id,
+        session_type=SessionTypes.WINDOW_CHECKING,
+        python_version=python_version,
+        sl_experiment_version=library_version,
+    )
+    mesoscope_data = MesoscopeData(session_data=session_data, system_configuration=system_configuration)
+    # Caches descriptor file precursor to disk before starting the main runtime. This is consistent with the behavior of
+    # all other runtime functions.
+    descriptor.to_yaml(file_path=session_data.raw_data.session_descriptor_path)
+
+    # Generates and caches the MesoscopePositions precursor file to the persistent and raw_data directories.
+    precursor = MesoscopePositions()
+    precursor.to_yaml(file_path=session_data.raw_data.mesoscope_positions_path)
+    precursor.to_yaml(file_path=mesoscope_data.vrpc_data.mesoscope_positions_path)
+
+    zaber_motors: ZaberMotors | None = None
+    try:
+        # Establishes communication with Zaber motors
+        zaber_motors = ZaberMotors(zaber_positions_path=mesoscope_data.vrpc_data.zaber_positions_path)
+
+        message = "Initializing interface classes..."
+        console.echo(message=message, level=LogLevel.INFO)
+
+        # Initializes the data logger. This initialization follows the same procedure as the _MesoscopeVRSystem class
+        logger: DataLogger = DataLogger(
+            output_directory=session_data.raw_data.raw_data_path,
+            instance_name="behavior",  # Creates behavior_log subdirectory under raw_data
+            thread_count=10,
+        )
+        logger.start()
+
+        # Initializes the face camera. Body cameras are not used during window checking.
+        cameras = VideoSystems(data_logger=logger, output_directory=session_data.raw_data.camera_data_path)
+        cameras.start_face_camera()
+        message = "Face camera display: Started."
+        console.echo(message=message, level=LogLevel.SUCCESS)
+
+        # While we can connect to ports managed by ZaberLauncher, ZaberLauncher cannot connect to ports managed via
+        # software. Therefore, we have to make sure ZaberLauncher is running before connecting to motors.
+        message = (
+            "Preparing to connect to all Zaber motor controllers. Make sure that ZaberLauncher app is running before "
+            "proceeding further. If ZaberLauncher is not running, you WILL NOT be able to manually control Zaber motor "
+            "positions until you reset the runtime."
+        )
+        console.echo(message=message, level=LogLevel.WARNING)
+        input("Enter anything to continue: ")
+
+        # Removes the nk.bin marker to avoid automatic session cleanup during post-processing.
+        session_data.runtime_initialized()
+
+        # Prepares Zaber motors for data acquisition.
+        _setup_zaber_motors(zaber_motors=zaber_motors)
+
+        # Runs the user through the process of preparing the mesoscope and assessing the quality of the animal's cranial
+        # window.
+        _setup_mesoscope(session_data=session_data, mesoscope_data=mesoscope_data)
+
+        # noinspection PyTypeChecker
+        # Instructs the user to update the session descriptor file
+        _verify_descriptor_update(descriptor=descriptor, session_data=session_data, mesoscope_data=mesoscope_data)
+
+        # Generates the snapshot of the Mesoscope imaging position used to generate the data during window checking.
+        _generate_mesoscope_position_snapshot(session_data=session_data, mesoscope_data=mesoscope_data)
+
+        # Retrieves current motor positions and packages them into a ZaberPositions object.
+        _generate_zaber_snapshot(session_data=session_data, mesoscope_data=mesoscope_data, zaber_motors=zaber_motors)
+
+        # Resets Zaber motors to their original positions.
+        _reset_zaber_motors(zaber_motors=zaber_motors)
+
+        # Terminates the face camera
+        cameras.stop()
+
+        # Stops the data logger
+        logger.stop()
+
+        # Triggers preprocessing pipeline. In this case, since there is no data to preprocess, the pipeline primarily
+        # just copies the session raw_data directory to the NAS and BioHPC server. Unlike other pipelines, window
+        # checking does not give the user a choice. All window checking data is necessarily preprocessed.
+        preprocess_session_data(session_data=session_data)
+
+    finally:
+        # If the session runtime terminates before the session was initialized, removes session data from all sources
+        # before shutting down.
+        if session_data.raw_data.nk_path.exists():
+            message = (
+                "The runtime was unexpectedly terminated before it was able to initialize and start all assets. "
+                "Removing all leftover data from the uninitialized session from all destinations..."
+            )
+            console.echo(message=message, level=LogLevel.ERROR)
+            purge_session(session_data)
+
+        # If Zaber motors were connected, attempts to gracefully shut down the motors.
+        if zaber_motors is not None:
+            _reset_zaber_motors(zaber_motors=zaber_motors)
+
+        # Ends the runtime
+        message = "Window checking runtime: Complete."
+        console.echo(message=message, level=LogLevel.SUCCESS)
+
+
 def lick_training_logic(
     experimenter: str,
     project_name: str,
@@ -3308,181 +3483,6 @@ def experiment_logic(
             purge_session(session_data)
 
         message = "Experiment runtime: Complete."
-        console.echo(message=message, level=LogLevel.SUCCESS)
-
-
-def window_checking_logic(
-    experimenter: str,
-    project_name: str,
-    animal_id: str,
-) -> None:
-    """Encapsulates the logic used to verify the surgery quality (cranial window) and generate the initial snapshot of
-    the Mesoscope-VR system configuration for a newly added animal of the target project.
-
-    This function is used when new animals are added to the project, before any other training or experiment runtime.
-    Primarily, it is used to verify that the surgery went as expected and the animal is fit for providing high-quality
-    scientific data. As part of this process, the function also generates the snapshot of zaber motor positions, the
-    mesoscope objective position, and the red-dot alignment screenshot to be reused by future sessions.
-
-    Notes:
-        This function largely behaves similar to all other training and experiment session runtimes. However, it does
-        not use most of the Mesoscope-VR components and does not make most of the runtime data files typically generated
-        by other sessions. All window checking sessions are automatically marked as 'incomplete' and excluded from
-        automated data processing.
-
-    Args:
-        experimenter: The id of the experimenter conducting the window checking session.
-        project_name: The name of the project to which the checked animal belongs.
-        animal_id: The numeric ID of the animal whose cranial window is being checked.
-    """
-    message = "Initializing window checking runtime..."
-    console.echo(message=message, level=LogLevel.INFO)
-
-    # Queries the data acquisition system runtime parameters.
-    system_configuration = get_system_configuration()
-
-    # Verifies that the target project exists
-    project_directory = system_configuration.paths.root_directory.joinpath(project_name)
-    if not project_directory.exists():
-        message = (
-            f"Unable to execute the window checking for the animal {animal_id} of project {project_name}. The target "
-            f"project does not exist on the local machine. Use the 'sl-create-project' command to create the project "
-            f"before running training or experiment sessions."
-        )
-        console.error(message=message, error=FileNotFoundError)
-
-    # These checks have been added in version 4.0.0 to help users abide by the 'one animal one project' policy. Now all
-    # runtimes require each animal to be assigned to a single project.
-    animal_projects = get_animal_project(animal_id=animal_id)
-    if len(animal_projects) > 1:  # Rare case, often indicative of old migration pipeline use
-        message = (
-            f"Unable to execute the window checking for the animal {animal_id} of project {project_name}. "
-            f"The animal is associated with multiple projects on the local machine, which is not allowed. Remove the "
-            f"animal from all extra projects and rerun the window checking."
-        )
-        console.error(message=message, error=ValueError)
-    elif len(animal_projects) == 1 and animal_projects[0] != project_name:  # This indicates user error
-        message = (
-            f"Unable to execute the window checking for the animal {animal_id} and project "
-            f"{project_name}. The animal is already associated with a different project '{animal_projects[0]}'. Either "
-            f"adjust the project name to match the animal's current project or use the 'sl-migrate-animal' CLI command "
-            f"to first migrate the animal to the desired project and rerun the window checking."
-        )
-        console.error(message=message, error=ValueError)
-
-    # Queries the current Python and library version information. This is then used to initialize the SessionData
-    # instance.
-    python_version, library_version = get_version_data()
-
-    # Generates the WindowCheckingDescriptor instance, caches it to disk, and forces the user to update the data
-    # in the descriptor file with their notes.
-    descriptor = WindowCheckingDescriptor(
-        experimenter=experimenter,
-        incomplete=True,
-    )
-
-    # Initializes data-management classes for the runtime. Note, SessionData creates the necessary session directory
-    # hierarchy as part of this initialization process
-    session_data = SessionData.create(
-        project_name=project_name,
-        animal_id=animal_id,
-        session_type=SessionTypes.WINDOW_CHECKING,
-        python_version=python_version,
-        sl_experiment_version=library_version,
-    )
-    mesoscope_data = MesoscopeData(session_data=session_data, system_configuration=system_configuration)
-    # Caches descriptor file precursor to disk before starting the main runtime. This is consistent with the behavior of
-    # all other runtime functions.
-    descriptor.to_yaml(file_path=session_data.raw_data.session_descriptor_path)
-
-    # Generates and caches the MesoscopePositions precursor file to the persistent and raw_data directories.
-    precursor = MesoscopePositions()
-    precursor.to_yaml(file_path=session_data.raw_data.mesoscope_positions_path)
-    precursor.to_yaml(file_path=mesoscope_data.vrpc_data.mesoscope_positions_path)
-
-    zaber_motors: ZaberMotors | None = None
-    try:
-        # Establishes communication with Zaber motors
-        zaber_motors = ZaberMotors(zaber_positions_path=mesoscope_data.vrpc_data.zaber_positions_path)
-
-        message = "Initializing interface classes..."
-        console.echo(message=message, level=LogLevel.INFO)
-
-        # Initializes the data logger. This initialization follows the same procedure as the _MesoscopeVRSystem class
-        logger: DataLogger = DataLogger(
-            output_directory=session_data.raw_data.raw_data_path,
-            instance_name="behavior",  # Creates behavior_log subdirectory under raw_data
-            thread_count=10,
-        )
-        logger.start()
-
-        # Initializes the face camera. Body cameras are not used during window checking.
-        cameras = VideoSystems(data_logger=logger, output_directory=session_data.raw_data.camera_data_path)
-        cameras.start_face_camera()
-        message = "Face camera display: Started."
-        console.echo(message=message, level=LogLevel.SUCCESS)
-
-        # While we can connect to ports managed by ZaberLauncher, ZaberLauncher cannot connect to ports managed via
-        # software. Therefore, we have to make sure ZaberLauncher is running before connecting to motors.
-        message = (
-            "Preparing to connect to all Zaber motor controllers. Make sure that ZaberLauncher app is running before "
-            "proceeding further. If ZaberLauncher is not running, you WILL NOT be able to manually control Zaber motor "
-            "positions until you reset the runtime."
-        )
-        console.echo(message=message, level=LogLevel.WARNING)
-        input("Enter anything to continue: ")
-
-        # Removes the nk.bin marker to avoid automatic session cleanup during post-processing.
-        session_data.runtime_initialized()
-
-        # Prepares Zaber motors for data acquisition.
-        _setup_zaber_motors(zaber_motors=zaber_motors)
-
-        # Runs the user through the process of preparing the mesoscope and assessing the quality of the animal's cranial
-        # window.
-        _setup_mesoscope(session_data=session_data, mesoscope_data=mesoscope_data)
-
-        # noinspection PyTypeChecker
-        # Instructs the user to update the session descriptor file
-        _verify_descriptor_update(descriptor=descriptor, session_data=session_data, mesoscope_data=mesoscope_data)
-
-        # Generates the snapshot of the Mesoscope imaging position used to generate the data during window checking.
-        _generate_mesoscope_position_snapshot(session_data=session_data, mesoscope_data=mesoscope_data)
-
-        # Retrieves current motor positions and packages them into a ZaberPositions object.
-        _generate_zaber_snapshot(session_data=session_data, mesoscope_data=mesoscope_data, zaber_motors=zaber_motors)
-
-        # Resets Zaber motors to their original positions.
-        _reset_zaber_motors(zaber_motors=zaber_motors)
-
-        # Terminates the face camera
-        cameras.stop()
-
-        # Stops the data logger
-        logger.stop()
-
-        # Triggers preprocessing pipeline. In this case, since there is no data to preprocess, the pipeline primarily
-        # just copies the session raw_data directory to the NAS and BioHPC server. Unlike other pipelines, window
-        # checking does not give the user a choice. All window checking data is necessarily preprocessed.
-        preprocess_session_data(session_data=session_data)
-
-    finally:
-        # If the session runtime terminates before the session was initialized, removes session data from all sources
-        # before shutting down.
-        if session_data.raw_data.nk_path.exists():
-            message = (
-                "The runtime was unexpectedly terminated before it was able to initialize and start all assets. "
-                "Removing all leftover data from the uninitialized session from all destinations..."
-            )
-            console.echo(message=message, level=LogLevel.ERROR)
-            purge_session(session_data)
-
-        # If Zaber motors were connected, attempts to gracefully shut down the motors.
-        if zaber_motors is not None:
-            _reset_zaber_motors(zaber_motors=zaber_motors)
-
-        # Ends the runtime
-        message = "Window checking runtime: Complete."
         console.echo(message=message, level=LogLevel.SUCCESS)
 
 
