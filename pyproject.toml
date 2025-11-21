@@ -42,11 +42,11 @@ classifiers = [
 
 # Runtime project dependencies.
 dependencies = [
-    "zaber-motion==7.14.0",
+    "zaber-motion==7.15.0",
     "crc==7.1.0",
     "tabulate2==1.10.2",
     "click==8.3.1",
-    "numpy==2.3.4",
+    "numpy==2.3.5",
     "numba==0.62.1",
     "intel-cmplr-lib-rt==2025.3.1; platform_system != 'Darwin'",
     "scipy==1.16.3",
@@ -65,7 +65,7 @@ dependencies = [
     "pyqt6==6.10.0",
     "importlib_metadata==8.7.0",
     "natsort-rs==0.1.15",
-    "sl-shared-assets==6.0.1rc5",
+    "sl-shared-assets==6.0.1rc6",
 ]
 
 [project.urls]
