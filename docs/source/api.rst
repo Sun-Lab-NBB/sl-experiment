@@ -4,69 +4,21 @@
 Command Line Interfaces
 =======================
 
-.. automodule:: sl_experiment.cli
+.. automodule:: sl_experiment.command_line_interfaces
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. click:: sl_experiment.cli:calculate_crc
-   :prog: sl-crc
+.. click:: sl_experiment.command_line_interfaces.execute:run
+   :prog: sl-run
    :nested: full
 
-.. click:: sl_experiment.cli:list_devices
+.. click:: sl_experiment.command_line_interfaces.manage:manage
    :prog: sl-devices
    :nested: full
 
-.. click:: sl_experiment.cli:generate_system_configuration_file
+.. click:: sl_experiment.command_line_interfaces.get:get
    :prog: sl-create-system-config
-   :nested: full
-
-.. click:: sl_experiment.cli:generate_project_data_structure
-   :prog: sl-create-project
-   :nested: full
-
-.. click:: sl_experiment.cli:generate_experiment_configuration_file
-   :prog: sl-create-experiment
-   :nested: full
-
-.. click:: sl_experiment.cli:maintain_acquisition_system
-   :prog: sl-maintain
-   :nested: full
-
-.. click:: sl_experiment.cli:lick_training
-   :prog: sl-lick-train
-   :nested: full
-
-.. click:: sl_experiment.cli:run_training
-   :prog: sl-run-train
-   :nested: full
-
-.. click:: sl_experiment.cli:run_experiment
-   :prog: sl-experiment
-   :nested: full
-
-.. click:: sl_experiment.cli:check_window
-   :prog: sl-check-window
-   :nested: full
-
-.. click:: sl_experiment.cli:preprocess_session
-   :prog: sl-preprocess
-   :nested: full
-
-.. click:: sl_experiment.cli:purge_data
-   :prog: sl-purge
-   :nested: full
-
-.. click:: sl_experiment.cli:delete_session
-   :prog: sl-delete-session-data
-   :nested: full
-
-.. click:: sl_experiment.cli:list_projects
-   :prog: sl-projects
-   :nested: full
-
-.. click:: sl_experiment.cli:list_experiments
-   :prog: sl-experiments
    :nested: full
 
 Mesoscope-VR Acquisition System

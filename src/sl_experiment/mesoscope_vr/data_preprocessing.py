@@ -16,7 +16,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from tqdm import tqdm
 import numpy as np
 import tifffile
-from natsort_rs import natsort as natsorted
+from natsort_rs import natsort as natsorted  # type: ignore[import-untyped]
 from sl_shared_assets import (
     SessionData,
     SurgeryData,
@@ -122,7 +122,7 @@ def _process_stack(
 
         # Loops over each page in the stack and extracts the metadata associated with each frame
         for i, page in enumerate(stack.pages):
-            metadata = page.tags["ImageDescription"].value
+            metadata = page.tags["ImageDescription"].value  # type: ignore[union-attr]
 
             # The metadata is returned as a 'newline'-delimited string of key=value pairs. This preprocessing header
             # splits the string into separate key=value pairs. Then, each pair is further separated and processed as
@@ -231,10 +231,11 @@ def _process_invariant_metadata(frame_stack_path: Path, ops_path: Path, metadata
         json.dump(metadata, json_file, separators=(",", ":"), indent=None)  # Maximizes data compression
 
     # Extracts the mesoscope frame_rate from metadata.
-    frame_rate = float(metadata["FrameData"]["SI.hRoiManager.scanVolumeRate"])
-    plane_number = int(metadata["FrameData"]["SI.hStackManager.actualNumSlices"])
-    channel_number = int(metadata["FrameData"]["SI.hChannels.channelsActive"])
-    si_rois: list[dict[str, Any]] | dict[str, Any] = metadata["RoiGroups"]["imagingRoiGroup"]["rois"]
+    frame_rate = float(metadata["FrameData"]["SI.hRoiManager.scanVolumeRate"])  # type: ignore[index]
+    plane_number = int(metadata["FrameData"]["SI.hStackManager.actualNumSlices"])  # type: ignore[index]
+    channel_number = int(metadata["FrameData"]["SI.hChannels.channelsActive"])  # type: ignore[index]
+    si_rois: list[dict[str, Any]] | dict[str, Any]
+    si_rois = metadata["RoiGroups"]["imagingRoiGroup"]["rois"]  # type: ignore[index]
 
     # If the acquisition only uses a single ROI, si_rois is a single dictionary. Converts it to a list for the code
     # below to work for this acquisition mode.
@@ -340,43 +341,30 @@ def _pull_mesoscope_data(session_data: SessionData, mesoscope_data: MesoscopeDat
     destination = session_data.raw_data.raw_data_path.joinpath("raw_mesoscope_frames")
     ensure_directory_exists(destination)
 
-    # Defines the set of extensions and filenames to look for when verifying source folder contents.
+    # Defines the set of extensions and filenames to look for when verifying source directory contents.
     _extensions = {"*.me", "*.tiff", "*.tif", "*.roi"}
-    _required_mesoscope_files = {"MotionEstimator.me", "fov.roi", "zstack_00000_00001.tif"}
+    _required_mesoscope_files = {"MotionEstimator.me", "fov.roi", "zstack.tiff"}
 
     # Verifies that all required files are present in the source directory.
-    _check_reattempts = 5
-    for attempt in range(_check_reattempts):
-        # Extracts the names of files stored in the source directory.
-        files: tuple[Path, ...] = tuple(path for ext in _extensions for path in source.glob(ext))
-        file_names: set[str] = {file.name for file in files}
 
-        # Checks which required files are missing.
-        missing_files = _required_mesoscope_files - file_names
+    # Extracts the names of files stored in the source directory.
+    files: tuple[Path, ...] = tuple(path for ext in _extensions for path in source.glob(ext))
+    file_names: set[str] = {file.name for file in files}
 
-        # If all files are present, breaks the loop.
-        if not missing_files:
-            break
+    # Checks which required files are missing.
+    missing_files = _required_mesoscope_files - file_names
 
-        # On the final attempt, raises an error instead of prompting the user to fix the issue.
-        if attempt == _check_reattempts - 1:
-            message = (
-                f"Failed {_check_reattempts} consecutive attempts to locate all required mesoscope-acquired data "
-                f"files to move them from the ScanImagePC to the VRPC. Aborting the data transfer and terminating the "
-                f"preprocessing runtime."
-            )
-            console.error(message=message, error=RuntimeError)
-
-        # Otherwise, prompts the user to add missing files before retrying the verification.
+    # Raises a runtime error if any required files are missing.
+    if missing_files:
         missing_files_str = ", ".join(sorted(missing_files))
         message = (
             f"Unable to pull the mesoscope-acquired data from the ScanImagePC to the VRPC. The "
             f"'mesoscope_frames' ScanImage PC directory for the session {session_name} is missing the "
             f"following required files: {missing_files_str}. Ensure that all required files are stored in the "
-            f"session-specific 'mesoscope_frames' directory on the ScanImagePC before continuing."
+            f"session-specific 'mesoscope_frames' directory on the ScanImagePC and rerun the command that caused this "
+            f"error."
         )
-        console.echo(message=message, level=LogLevel.WARNING)
-        input(f"Press Enter to retry (attempt {attempt + 2}/{_check_reattempts})... ")
+        console.error(message=message, error=RuntimeError)
 
     # Removes all binary files from the source directory before transferring. This ensures that the directory
     # does not contain any marker files used during runtime.
@@ -431,7 +419,7 @@ def _preprocess_mesoscope_directory(
     # Handles special files that need to be processed differently to the TIFF stacks.
     motion_estimator_file = image_directory.joinpath("MotionEstimator.me")
     fov_roi_file = image_directory.joinpath("fov.roi")
-    zstack_file = image_directory.joinpath("zstack_00000_00001.tif")
+    zstack_file = image_directory.joinpath("zstack.tiff")
 
     # If necessary, persists the MotionEstimator and the fov.roi files to the 'persistent data' directory of the
     # processed animal on the ScanImagePC.
@@ -623,8 +611,8 @@ def _preprocess_google_sheet_data(session_data: SessionData, sheets_data: Mesosc
         raise ValueError(message)  # pragma: no cover
 
     # Loads the session's descriptor data.
-    descriptor_class = descriptor_loaders[session_type]
-    descriptor = descriptor_class.from_yaml(descriptor_path)
+    descriptor_class = descriptor_loaders[session_type]  # type: ignore[index]
+    descriptor = descriptor_class.from_yaml(descriptor_path)  # type: ignore[attr-defined]
 
     # Caches a copy of the animal's surgery log entry to the session's directory as a surgery_metadata.yaml file.
     sl_sheet = SurgeryLog(
@@ -895,7 +883,7 @@ def migrate_animal_between_projects(animal: str, source_project: str, target_pro
     if not destination_local_root.parent.exists():
         message = (
             f"Unable to migrate the animal {animal} from project {source_project} to project {target_project}. The "
-            f"target project does not exist. Use the 'sl-project create' command to create the project before "
+            f"target project does not exist. Use the 'sl-configure project' command to create the project before "
             f"migrating animals to this project."
         )
         console.error(message=message, error=FileNotFoundError)

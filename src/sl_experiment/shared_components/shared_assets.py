@@ -2,9 +2,9 @@
 
 import sys
 
+from natsort_rs import natsort as natsorted  # type: ignore[import-untyped]
 from sl_shared_assets import MesoscopeFileSystem, get_system_configuration_data
 from importlib_metadata import metadata as _metadata
-from natsort_rs import natsort as natsorted
 
 
 def get_version_data() -> tuple[str, str]:
@@ -15,7 +15,7 @@ def get_version_data() -> tuple[str, str]:
         sl-experiment version.
     """
     # Determines the local Python version and the version of the sl-experiment library.
-    sl_experiment_version = _metadata("sl-experiment")["version"]
+    sl_experiment_version = _metadata("sl-experiment")["version"]  # type: ignore[index]
     python_version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"  # Python version
     return python_version, sl_experiment_version
 

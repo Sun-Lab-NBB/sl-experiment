@@ -410,7 +410,7 @@ class MicroControllerInterfaces:
             maximum_brake_strength=self._configuration.maximum_brake_strength_g_cm,
         )
         self.valve = ValveInterface(
-            valve_calibration_data=self._configuration.valve_calibration_data,
+            valve_calibration_data=self._configuration.valve_calibration_data,  # type: ignore[arg-type]
         )
         self.screens = ScreenInterface()
 
@@ -421,6 +421,7 @@ class MicroControllerInterfaces:
             port=self._configuration.actor_port,
             data_logger=data_logger,
             module_interfaces=(self.brake, self.valve, self.screens),
+            keepalive_interval=self._configuration.keepalive_interval_ms,
         )
 
         # SENSOR. Sensor AMC controls the hardware that collects data at regular intervals. This includes lick sensors,
@@ -447,6 +448,7 @@ class MicroControllerInterfaces:
             port=self._configuration.sensor_port,
             data_logger=data_logger,
             module_interfaces=(self.mesoscope_frame, self.lick, self.torque),
+            keepalive_interval=self._configuration.keepalive_interval_ms,
         )
 
         # ENCODER. Encoder AMC is specifically designed to interface with a quadrature encoder connected to the running
@@ -468,6 +470,7 @@ class MicroControllerInterfaces:
             port=self._configuration.encoder_port,
             data_logger=data_logger,
             module_interfaces=(self.wheel_encoder,),
+            keepalive_interval=self._configuration.keepalive_interval_ms,
         )
 
     def __del__(self) -> None:
@@ -498,7 +501,7 @@ class MicroControllerInterfaces:
         )
 
         # Screen Interface
-        screen_pulse_duration: np.float64 = convert_time(
+        screen_pulse_duration: np.float64 = convert_time(  # type: ignore[assignment]
             time=self._configuration.screen_trigger_pulse_duration_ms,
             from_units="ms",
             to_units="us",
@@ -693,9 +696,11 @@ class VideoSystems:
         message = "Stopping camera frame acquisition and saving..."
         console.echo(message=message, level=LogLevel.INFO)
 
-        # Instructs all cameras to stop saving frames
-        self._face_camera.stop_frame_saving()
-        self._body_camera.stop_frame_saving()
+        # Instructs all active cameras to stop saving frames
+        if self._face_camera_started:
+            self._face_camera.stop_frame_saving()
+        if self._body_camera_started:
+            self._body_camera.stop_frame_saving()
 
         message = "Camera frame saving: Stopped."
         console.echo(message=message, level=LogLevel.SUCCESS)

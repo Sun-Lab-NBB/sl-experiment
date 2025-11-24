@@ -10,7 +10,7 @@ from datetime import (
 from zoneinfo import ZoneInfo
 
 from sl_shared_assets import DrugData, ImplantData, SubjectData, SurgeryData, InjectionData, ProcedureData
-from ataraxis_base_utilities import LogLevel, console
+from ataraxis_base_utilities import console
 from googleapiclient.discovery import Resource, build
 from google.oauth2.service_account import Credentials
 
@@ -352,7 +352,7 @@ class SurgeryLog:
         # Retrieves the entire row of data for the target animal
         # noinspection PyUnresolvedReferences
         row_data = (
-            self._service.spreadsheets()
+            self._service.spreadsheets()  # type: ignore[attr-defined]
             .values()
             .get(spreadsheetId=self._sheet_id, range=f"'{self._project_name}'!{row_number}:{row_number}")
             .execute()
@@ -513,7 +513,7 @@ class SurgeryLog:
         cell_range = f"{quality_column}{row_number}"
         body = {"values": [[quality]]}
         # noinspection PyUnresolvedReferences
-        self._service.spreadsheets().values().update(
+        self._service.spreadsheets().values().update(  # type: ignore[attr-defined]
             spreadsheetId=self._sheet_id,
             range=f"'{self._project_name}'!{cell_range}",
             valueInputOption="USER_ENTERED",
@@ -523,14 +523,18 @@ class SurgeryLog:
         # Transforms the column letter and the row index to the format necessary to apply formatting to the newly
         # written value.
         col_index = 0
-        for char in quality_column.upper():
+        for char in quality_column.upper():  # type: ignore[union-attr]
             col_index = col_index * 26 + (ord(char) - ord("A") + 1)
         col_index -= 1  # Convert to 0-based index
         row_index_zero_based = row_number - 1
 
         # Gets the sheet ID for the project tab
         # noinspection PyUnresolvedReferences
-        sheet_metadata = self._service.spreadsheets().get(spreadsheetId=self._sheet_id).execute()
+        sheet_metadata = (
+            self._service.spreadsheets()  # type: ignore[attr-defined]
+            .get(spreadsheetId=self._sheet_id)
+            .execute()
+        )
         sheet_id = None
         for sheet in sheet_metadata.get("sheets", []):
             if sheet["properties"]["title"] == self._project_name:
@@ -555,7 +559,7 @@ class SurgeryLog:
                 }
             ]
             # noinspection PyUnresolvedReferences
-            self._service.spreadsheets().batchUpdate(
+            self._service.spreadsheets().batchUpdate(  # type: ignore[attr-defined]
                 spreadsheetId=self._sheet_id,
                 body={"requests": requests},
             ).execute()
@@ -782,44 +786,29 @@ class WaterLog:
         # Gets the date column letter
         date_column = self._headers["date"]
 
-        while True:
-            # Retrieves all dates from the date column (row 3 and below)
-            # noinspection PyUnresolvedReferences
-            date_data = (
-                self._service.spreadsheets()
-                .values()
-                .get(spreadsheetId=self._sheet_id, range=f"'{self._animal_id}'!{date_column}3:{date_column}")
-                .execute()
-            )
-            date_values = date_data.get("values", [])
+        # Retrieves all dates from the date column (row 3 and below)
+        # noinspection PyUnresolvedReferences
+        date_data = (
+            self._service.spreadsheets()  # type: ignore[attr-defined]
+            .values()
+            .get(spreadsheetId=self._sheet_id, range=f"'{self._animal_id}'!{date_column}3:{date_column}")
+            .execute()
+        )
+        date_values = date_data.get("values", [])
 
-            # Finds the row with the target date
-            row_index = -1
-            for i, date_cell in enumerate(date_values):
-                # Checks if the cell has a value matching the target date
-                if date_cell and date_cell[0] == target_date:
-                    # Adds 3 to account for 0-indexing and the fact we started from row 3
-                    row_index = i + 3
-                    break
-            else:
-                message = (
-                    f"Unable to find the row for the target date {target_date} inside the water restriction and "
-                    f"animal interaction log file for the animal {self._animal_id}. Update the log to include the "
-                    f"specified date and repeat the date resolution procedure."
-                )
-                console.echo(message=message, level=LogLevel.WARNING)
-                response = input("Enter anything to retry. Enter 'a' to abort: ").lower()
-                if response == "a":
-                    message = (
-                        f"Unable to find the row for the target date {target_date} inside the water restriction and "
-                        f"animal interaction log file for the animal {self._animal_id}."
-                    )
-                    console.error(message, error=ValueError)  # Aborts with an error
-                    raise ValueError(message)  # Fallback to appease mypy, should not be reachable.
-                continue  # Cycles the while loop if the user chooses to retry
-            break  # Breaks the while loop if the row is found
-
-        return row_index
+        # Finds the row with the target date
+        for i, date_cell in enumerate(date_values):
+            # Checks if the cell has a value matching the target date
+            if date_cell and date_cell[0] == target_date:
+                # Adds 3 to account for 0-indexing and the fact we started from row 3
+                return i + 3
+        message = (
+            f"Unable to find the row for the target date {target_date} inside the water restriction and "
+            f"animal interaction log file for the animal {self._animal_id}. Update the log to include the "
+            f"specified date and rerun the command that caused this error."
+        )
+        console.error(message, error=ValueError)  # Aborts with an error
+        raise ValueError(message)  # Fallback to appease mypy, should not be reachable.
 
     def _write_value(self, column_name: str, row_index: int, value: float | str) -> None:
         """Writes the input value to the target log's cell based on the column name and row index.
@@ -843,7 +832,7 @@ class WaterLog:
         # Writes the value to the target cell
         body = {"values": [[formatted_value]]}
         # noinspection PyUnresolvedReferences
-        self._service.spreadsheets().values().update(
+        self._service.spreadsheets().values().update(  # type: ignore[attr-defined]
             spreadsheetId=self._sheet_id,
             range=f"'{self._animal_id}'!{cell_range}",
             valueInputOption="USER_ENTERED",
@@ -875,7 +864,7 @@ class WaterLog:
             }
         ]
         # noinspection PyUnresolvedReferences
-        self._service.spreadsheets().batchUpdate(
+        self._service.spreadsheets().batchUpdate(  # type: ignore[attr-defined]
             spreadsheetId=self._sheet_id,
             body={"requests": requests},
         ).execute()
