@@ -135,7 +135,7 @@ class EncoderInterface(ModuleInterface):
         """Disconnects from the instance's shared memory buffer."""
         self._distance_tracker.disconnect()
 
-    def process_received_data(self, message: ModuleData) -> None:
+    def process_received_data(self, message: ModuleData) -> None:  # type: ignore[override]
         """Updates the distance data stored in the instance's shared memory buffer based on the messages received from
         the microcontroller.
         """
@@ -301,14 +301,14 @@ class LickInterface(ModuleInterface):
         """Disconnects from the instance's shared memory buffer."""
         self._lick_tracker.disconnect()
 
-    def process_received_data(self, message: ModuleData) -> None:
+    def process_received_data(self, message: ModuleData) -> None:  # type: ignore[override]
         """Updates the lick event data stored in the instance's shared memory buffer based on the messages received from
         the microcontroller.
         """
         # Currently, only code 51 ModuleData messages are passed to this method. From each, extracts the detected
         # voltage level.
         # noinspection PyTypeChecker
-        detected_voltage: np.uint16 = message.data_object
+        detected_voltage: np.uint16 = message.data_object  # type: ignore[assignment]
 
         # Since the sensor is pulled to 0 to indicate the lack of tongue contact, a zero-readout necessarily means no
         # lick. Sets the zero-tracker to 1 to indicate that a zero-state has been encountered.
@@ -767,7 +767,11 @@ class ValveInterface(ModuleInterface):
 
         # Fits the power-law model to the input calibration data and saves the fit parameters to instance attributes
         # noinspection PyTupleAssignmentBalance
-        parameters, _ = curve_fit(f=_power_law_model, xdata=pulse_durations, ydata=fluid_volumes)
+        parameters, _ = curve_fit(
+            f=_power_law_model,  # type: ignore[arg-type]
+            xdata=pulse_durations,
+            ydata=fluid_volumes,
+        )
         scale_coefficient, nonlinearity_exponent = parameters
         self._scale_coefficient: np.float64 = np.round(a=np.float64(scale_coefficient), decimals=8)
         self._nonlinearity_exponent: np.float64 = np.round(a=np.float64(nonlinearity_exponent), decimals=8)
@@ -829,14 +833,14 @@ class ValveInterface(ModuleInterface):
         if message.event == _valve_open_code and not self._previous_module_state:
             # Resets the cycle timer each time the valve transitions to an open state.
             self._previous_module_state = True
-            self._cycle_timer.reset()
+            self._cycle_timer.reset()  # type: ignore[union-attr]
 
         elif message.event == _valve_closed_code and self._previous_module_state:
             # Each time the valve transitions to a closed state, records the period of time the valve was open and uses
             # it to estimate the volume of fluid delivered through the valve. Accumulates the total volume in the
             # tracker array.
             self._previous_module_state = False
-            open_duration = self._cycle_timer.elapsed
+            open_duration = self._cycle_timer.elapsed  # type: ignore[union-attr]
 
             # Accumulates delivered water volumes into the tracker.
             delivered_volume = self._scale_coefficient * np.power(open_duration, self._nonlinearity_exponent)
@@ -876,13 +880,13 @@ class ValveInterface(ModuleInterface):
             self._previous_volume = volume
             self._previous_tone_duration = tone_duration
 
-            tone_duration: np.uint32 = np.uint32(
+            tone_duration_us: np.uint32 = np.uint32(
                 round(
                     convert_time(time=tone_duration, from_units=TimeUnits.MILLISECOND, to_units=TimeUnits.MICROSECOND)
                 )
             )
             pulse_duration: np.uint32 = self.get_duration_from_volume(target_volume=volume)
-            self.send_parameters(parameter_data=(pulse_duration, self._calibration_count, tone_duration))
+            self.send_parameters(parameter_data=(pulse_duration, self._calibration_count, tone_duration_us))
 
         self.send_command(command=self._reward, noblock=_FALSE, repetition_delay=_ZERO_UINT32)
 
@@ -902,12 +906,12 @@ class ValveInterface(ModuleInterface):
 
             # Maintains the same pulse duration.
             pulse_duration: np.uint32 = self.get_duration_from_volume(target_volume=self._previous_volume)
-            tone_duration: np.uint32 = np.uint32(
+            tone_duration_us: np.uint32 = np.uint32(
                 round(
                     convert_time(time=tone_duration, from_units=TimeUnits.MILLISECOND, to_units=TimeUnits.MICROSECOND)
                 )
             )
-            self.send_parameters(parameter_data=(pulse_duration, self._calibration_count, tone_duration))
+            self.send_parameters(parameter_data=(pulse_duration, self._calibration_count, tone_duration_us))
 
         self.send_command(command=self._tone, noblock=_FALSE, repetition_delay=_ZERO_UINT32)
 
@@ -1056,3 +1060,8 @@ class ScreenInterface(ModuleInterface):
 
         self.send_command(command=self._toggle, noblock=_FALSE, repetition_delay=_ZERO_UINT32)
         self._enabled = state
+
+    @property
+    def state(self) -> bool:
+        """Returns True if the screens are currently powered on; False otherwise."""
+        return self._enabled

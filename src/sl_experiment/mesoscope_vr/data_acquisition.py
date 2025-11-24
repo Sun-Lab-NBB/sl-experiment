@@ -13,7 +13,7 @@ import tempfile
 from dataclasses import field, dataclass
 
 from tqdm import tqdm
-from numba import njit
+from numba import njit  # type: ignore[import-untyped]
 import numpy as np
 from numpy.typing import NDArray
 from ataraxis_time import PrecisionTimer, TimerPrecisions, TimestampFormats, convert_time, get_timestamp
@@ -317,7 +317,8 @@ def _setup_mesoscope(session_data: SessionData, mesoscope_data: MesoscopeData) -
         message = (
             f"Unable to prepare the Mesoscope for the data acquisition runtime. The preparation requires the shared "
             f"'mesoscope_data' ScanImagePC directory to be empty, but the directory contains the following unexpected "
-            f"files: {','.join(existing_files)}. Clear the directory from all existing files before proceeding."
+            f"files: {','.join([file.name for file in existing_files])}. Clear the directory from all existing files "
+            f"before proceeding."
         )
         console.echo(message=message, level=LogLevel.ERROR)
         _response_delay_timer.delay(delay=_RESPONSE_DELAY, block=False)
@@ -951,7 +952,7 @@ class _MesoscopeVRSystem:
         self._logger.start()
 
         # Generates and logs the onset timestamp for the Mesoscope-VR system.
-        onset: NDArray[np.uint8] = get_timestamp(output_format=TimestampFormats.BYTES)
+        onset: NDArray[np.uint8] = get_timestamp(output_format=TimestampFormats.BYTES)  # type: ignore[assignment]
         self._timestamp_timer.reset()  # Immediately resets the timer to align it with the onset timestamp.
         self._logger.input_queue.put(
             LogPackage(source_id=self._source_id, acquisition_time=np.uint64(0), serialized_data=onset)
@@ -1165,7 +1166,7 @@ class _MesoscopeVRSystem:
                 valve_scale_coefficient=float(self._microcontrollers.valve.scale_coefficient),
                 valve_nonlinearity_exponent=float(self._microcontrollers.valve.nonlinearity_exponent),
                 torque_per_adc_unit=float(self._microcontrollers.torque.torque_per_adc_unit),
-                screens_initially_on=self._microcontrollers.screens.initially_on,
+                screens_initially_on=self._microcontrollers.screens.state,
                 recorded_mesoscope_ttl=True,
                 system_state_codes=_MesoscopeVRStates.to_dict(),
             )
@@ -1268,7 +1269,7 @@ class _MesoscopeVRSystem:
 
             # Extracts the name of the scene running in Unity.
             scene_name: str = json.loads(payload.decode("utf-8"))["name"]
-            expected_scene_name: str = self._experiment_configuration.unity_scene_name
+            expected_scene_name: str = self._experiment_configuration.unity_scene_name  # type: ignore[union-attr]
 
             if scene_name == expected_scene_name:
                 # If the scene name matches the expected name, advances to the next stage.
@@ -1473,7 +1474,7 @@ class _MesoscopeVRSystem:
                 a sequence of trials.
         """
         # Extracts all trial data in a single pass to avoid redundant iterations.
-        trials = list(self._experiment_configuration.trial_structures.values())
+        trials = list(self._experiment_configuration.trial_structures.values())  # type: ignore[union-attr]
         trial_motifs = []
         trial_distances = []
         trial_rewards = []
@@ -2710,10 +2711,7 @@ def lick_training_logic(
     # Validates the maximum unconsumed rewards parameter. If the maximum unconsumed reward count is below 1, disables
     # the feature by deferring the assignment until after the total number of rewards is calculated. This ensures that
     # the feature can be properly disabled by setting the limit equal to the total reward count.
-    if descriptor.maximum_unconsumed_rewards < 1:
-        _disable_unconsumed_limit = True
-    else:
-        _disable_unconsumed_limit = False
+    _disable_unconsumed_limit = descriptor.maximum_unconsumed_rewards < 1
 
     # Initializes the timer used to enforce reward delays
     delay_timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
@@ -2728,7 +2726,8 @@ def lick_training_logic(
     )
 
     # Generates samples from a uniform distribution within delay bounds
-    samples = np.random.uniform(descriptor.minimum_reward_delay_s, descriptor.maximum_reward_delay_s, num_samples)
+    rng = np.random.default_rng()
+    samples = rng.uniform(descriptor.minimum_reward_delay_s, descriptor.maximum_reward_delay_s, num_samples)
 
     # Calculates cumulative training time for each sampled delay. This communicates the total time passed when each
     # reward is delivered to the animal
@@ -2775,7 +2774,7 @@ def lick_training_logic(
             # termination.
             message = "The session was terminated early due to user request."
             console.echo(message=message, level=LogLevel.SUCCESS)
-            raise RecursionError
+            raise RecursionError  # noqa: TRY301
 
         # Marks the session as fully initialized. This prevents session data from being automatically removed by
         # 'purge' runtimes.
@@ -3028,10 +3027,7 @@ def run_training_logic(
     # Validates the maximum unconsumed rewards parameter. If the maximum unconsumed reward count is below 1, disables
     # the feature by deferring the assignment until after the maximum number of deliverable rewards is calculated. This
     # ensures that the feature can be properly disabled by setting the limit equal to the total reward count.
-    if descriptor.maximum_unconsumed_rewards < 1:
-        _disable_unconsumed_limit = True
-    else:
-        _disable_unconsumed_limit = False
+    _disable_unconsumed_limit = descriptor.maximum_unconsumed_rewards < 1
 
     # Validates the increase threshold parameter. The way 'increase_threshold' is used requires it to be greater than
     # 0. So if a threshold of 0 is passed, the system sets it to a very small number instead, which functions similar
@@ -3108,7 +3104,7 @@ def run_training_logic(
             # termination.
             message = "The session was terminated early due to user request."
             console.echo(message=message, level=LogLevel.SUCCESS)
-            raise RecursionError
+            raise RecursionError  # noqa: TRY301
 
         # Marks the session as fully initialized. This prevents session data from being automatically removed by
         # 'purge' runtimes.
@@ -3457,7 +3453,7 @@ def experiment_logic(
             # termination.
             message = "The session was terminated early due to user request."
             console.echo(message=message, level=LogLevel.SUCCESS)
-            raise RecursionError
+            raise RecursionError  # noqa: TRY301
 
         # Marks the session as fully initialized. This prevents session data from being automatically removed by
         # 'purge' runtimes.
@@ -3475,9 +3471,9 @@ def experiment_logic(
             previous_seconds = 0
 
             # Resolves and sets the Mesoscope-VR system state
-            if state.system_state_code == 1:
+            if state.system_state_code == _MesoscopeVRStates.REST:
                 system.rest()
-            elif state.system_state_code == 2:
+            elif state.system_state_code == _MesoscopeVRStates.RUN:
                 system.run()
             else:
                 message = (
@@ -3590,7 +3586,9 @@ def maintenance_logic() -> None:
 
             # Initializes the interface for the Actor MicroController.
             valve: ValveInterface = ValveInterface(
-                valve_calibration_data=system_configuration.microcontrollers.valve_calibration_data,
+                valve_calibration_data=(
+                    system_configuration.microcontrollers.valve_calibration_data  # type: ignore[arg-type]
+                ),
             )
             wheel: BrakeInterface = BrakeInterface(
                 minimum_brake_strength=system_configuration.microcontrollers.minimum_brake_strength_g_cm,

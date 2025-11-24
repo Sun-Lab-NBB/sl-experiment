@@ -3,7 +3,7 @@ acquisition system managed by the host-machine.
 """
 
 import click
-from natsort_rs import natsort as natsorted
+from natsort_rs import natsort as natsorted  # type: ignore[import-untyped]
 from sl_shared_assets import (
     get_system_configuration_data,
 )

@@ -16,7 +16,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from tqdm import tqdm
 import numpy as np
 import tifffile
-from natsort_rs import natsort as natsorted
+from natsort_rs import natsort as natsorted  # type: ignore[import-untyped]
 from sl_shared_assets import (
     SessionData,
     SurgeryData,
@@ -122,7 +122,7 @@ def _process_stack(
 
         # Loops over each page in the stack and extracts the metadata associated with each frame
         for i, page in enumerate(stack.pages):
-            metadata = page.tags["ImageDescription"].value
+            metadata = page.tags["ImageDescription"].value  # type: ignore[union-attr]
 
             # The metadata is returned as a 'newline'-delimited string of key=value pairs. This preprocessing header
             # splits the string into separate key=value pairs. Then, each pair is further separated and processed as
@@ -231,10 +231,11 @@ def _process_invariant_metadata(frame_stack_path: Path, ops_path: Path, metadata
         json.dump(metadata, json_file, separators=(",", ":"), indent=None)  # Maximizes data compression
 
     # Extracts the mesoscope frame_rate from metadata.
-    frame_rate = float(metadata["FrameData"]["SI.hRoiManager.scanVolumeRate"])
-    plane_number = int(metadata["FrameData"]["SI.hStackManager.actualNumSlices"])
-    channel_number = int(metadata["FrameData"]["SI.hChannels.channelsActive"])
-    si_rois: list[dict[str, Any]] | dict[str, Any] = metadata["RoiGroups"]["imagingRoiGroup"]["rois"]
+    frame_rate = float(metadata["FrameData"]["SI.hRoiManager.scanVolumeRate"])  # type: ignore[index]
+    plane_number = int(metadata["FrameData"]["SI.hStackManager.actualNumSlices"])  # type: ignore[index]
+    channel_number = int(metadata["FrameData"]["SI.hChannels.channelsActive"])  # type: ignore[index]
+    si_rois: list[dict[str, Any]] | dict[str, Any]
+    si_rois = metadata["RoiGroups"]["imagingRoiGroup"]["rois"]  # type: ignore[index]
 
     # If the acquisition only uses a single ROI, si_rois is a single dictionary. Converts it to a list for the code
     # below to work for this acquisition mode.
@@ -610,8 +611,8 @@ def _preprocess_google_sheet_data(session_data: SessionData, sheets_data: Mesosc
         raise ValueError(message)  # pragma: no cover
 
     # Loads the session's descriptor data.
-    descriptor_class = descriptor_loaders[session_type]
-    descriptor = descriptor_class.from_yaml(descriptor_path)
+    descriptor_class = descriptor_loaders[session_type]  # type: ignore[index]
+    descriptor = descriptor_class.from_yaml(descriptor_path)  # type: ignore[attr-defined]
 
     # Caches a copy of the animal's surgery log entry to the session's directory as a surgery_metadata.yaml file.
     sl_sheet = SurgeryLog(

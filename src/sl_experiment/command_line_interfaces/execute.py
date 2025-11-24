@@ -61,27 +61,11 @@ def maintain_acquisition_system() -> None:
     "-w",
     "--animal_weight",
     type=float,
+    required=True,
     help="The weight of the animal, in grams, at the beginning of the session.",
 )
-@click.option(
-    "-ur",
-    "--unconsumed_rewards",
-    type=int,
-    help=(
-        "The maximum number of rewards that can be delivered without the animal consuming them. If the unconsumed "
-        "reward count exceeds this threshold, the system stops delivering new water rewards until the animal consumes "
-        "the already delivered rewards. Set to 0 to disable enforcing reward consumption."
-    ),
-)
 @click.pass_context
-def session(
-    ctx: click.Context,
-    user: str,
-    project: str,
-    animal: str,
-    animal_weight: float | None,
-    unconsumed_rewards: int | None,
-) -> None:  # pragma: no cover
+def session(ctx: click.Context, user: str, project: str, animal: str, animal_weight: float) -> None:  # pragma: no cover
     """Runs the specified data acquisition session for the target animal and project combination."""
     # Store common parameters in the context dictionary to be accessible from the subcommands.
     ctx.ensure_object(dict)
@@ -89,7 +73,6 @@ def session(
     ctx.obj["project"] = project
     ctx.obj["animal"] = animal
     ctx.obj["animal_weight"] = animal_weight
-    ctx.obj["unconsumed_rewards"] = unconsumed_rewards
 
 
 # noinspection PyUnresolvedReferences
@@ -100,7 +83,7 @@ def check_window(ctx: click.Context) -> None:
 
     The primary purpose of the cranial window quality checking session is to ensure that the animal is suitable for
     collecting high-quality brain activity data. Additionally, the session is used to generate the animal-specific data
-    acquisition system configuration reused during all future data acquisition systems to fine-tune the system
+    acquisition system configuration reused during all future data acquisition sessions to fine-tune the system
     to work for the target animal.
     """
     window_checking_logic(
@@ -123,19 +106,29 @@ def check_window(ctx: click.Context) -> None:
     "-min",
     "--minimum_delay",
     type=int,
-    help="The minimum number of seconds that has to pass between two consecutive reward deliveries during training. If not provided, will be restored from memory.",
+    help="The minimum number of seconds that has to pass between two consecutive reward deliveries during training.",
 )
 @click.option(
     "-max",
     "--maximum_delay",
     type=int,
-    help="The maximum number of seconds that can pass between two consecutive reward deliveries during training. If not provided, will be restored from memory.",
+    help="The maximum number of seconds that can pass between two consecutive reward deliveries during training.",
 )
 @click.option(
     "-v",
     "--maximum_volume",
     type=float,
-    help="The maximum volume of water, in milliliters, that can be delivered during training. If not provided, will be restored from memory.",
+    help="The maximum volume of water, in milliliters, that can be delivered during training.",
+)
+@click.option(
+    "-ur",
+    "--unconsumed_rewards",
+    type=int,
+    help=(
+        "The maximum number of rewards that can be delivered without the animal consuming them. If the unconsumed "
+        "reward count exceeds this threshold, the system stops delivering new water rewards until the animal consumes "
+        "the already delivered rewards. Setting this argument to 0 disables the reward consumption tracking."
+    ),
 )
 @click.pass_context
 def lick_training(
@@ -144,12 +137,13 @@ def lick_training(
     minimum_delay: int | None,
     maximum_delay: int | None,
     maximum_volume: float | None,
+    unconsumed_rewards: int | None,
 ) -> None:
-    """Runs the lick training session for the specified animal and project combination.
+    """Runs the lick training session.
 
-    Lick training is the first phase of preparing the animal to run experiment runtimes in the lab, and is usually
-    carried out over the first two days of head-fixed training. Primarily, this training is designed to teach the
-    animal to operate the lick-port and associate licking at the port with water delivery.
+    Lick training is the first phase of preparing the animal for experiment sessions, and is usually
+    carried out over the first two days of the pre-experiment training sequence. This session teaches the animal to
+    operate the lick-port and associate licking at the port with water delivery.
     """
     lick_training_logic(
         experimenter=ctx.obj["user"],
@@ -160,7 +154,7 @@ def lick_training(
         maximum_reward_delay=maximum_delay,
         maximum_water_volume=maximum_volume,
         maximum_training_time=maximum_time,
-        maximum_unconsumed_rewards=ctx.obj["unconsumed_rewards"],
+        maximum_unconsumed_rewards=unconsumed_rewards,
     )
 
 
@@ -178,7 +172,7 @@ def lick_training(
     "--initial_speed",
     type=float,
     default=None,
-    help="The initial speed, in centimeters per second, the animal must maintain to obtain water rewards. If not provided, will be restored from memory.",
+    help="The initial speed, in centimeters per second, the animal must maintain to obtain water rewards.",
 )
 @click.option(
     "-id",
@@ -187,7 +181,7 @@ def lick_training(
     default=None,
     help=(
         "The initial duration, in seconds, the animal must maintain above-threshold running speed to obtain water "
-        "rewards. If not provided, will be restored from memory."
+        "rewards."
     ),
 )
 @click.option(
@@ -198,7 +192,7 @@ def lick_training(
     help=(
         "The volume of water delivered to the animal, in milliliters, after which the speed and duration thresholds "
         "are increased by the specified step-sizes. This is used to make the training progressively harder for the "
-        "animal over the course of the training session. If not provided, will be restored from memory."
+        "animal over the course of the training session."
     ),
 )
 @click.option(
@@ -208,7 +202,7 @@ def lick_training(
     default=None,
     help=(
         "The amount, in centimeters per second, to increase the speed threshold each time the animal receives the "
-        "volume of water specified by the 'increase-threshold' parameter. If not provided, will be restored from memory."
+        "volume of water specified by the 'increase-threshold' parameter."
     ),
 )
 @click.option(
@@ -218,7 +212,7 @@ def lick_training(
     default=None,
     help=(
         "The amount, in seconds, to increase the duration threshold each time the animal receives the volume of water "
-        "specified by the 'increase-threshold' parameter. If not provided, will be restored from memory."
+        "specified by the 'increase-threshold' parameter."
     ),
 )
 @click.option(
@@ -226,7 +220,7 @@ def lick_training(
     "--maximum_volume",
     type=float,
     default=None,
-    help="The maximum volume of water, in milliliters, that can be delivered during training. If not provided, will be restored from memory.",
+    help="The maximum volume of water, in milliliters, that can be delivered during training.",
 )
 @click.option(
     "-mit",
@@ -234,9 +228,19 @@ def lick_training(
     type=float,
     default=None,
     help=(
-        "The maximum time, in seconds, the animal is allowed to maintain speed that is below the speed threshold, to "
-        "still be rewarded. Set to 0 to disable allowing the animal to temporarily dip below running speed threshold. "
-        "If not provided, will be restored from memory."
+        "The maximum time, in seconds, the animal is allowed to maintain the speed that is below the speed threshold "
+        "and still receive the water reward. Setting this argument to 0 forces the animal to maintain the "
+        "above-threshold speed at all times."
+    ),
+)
+@click.option(
+    "-ur",
+    "--unconsumed_rewards",
+    type=int,
+    help=(
+        "The maximum number of rewards that can be delivered without the animal consuming them. If the unconsumed "
+        "reward count exceeds this threshold, the system stops delivering new water rewards until the animal consumes "
+        "the already delivered rewards. Setting this argument to 0 disables the reward consumption tracking."
     ),
 )
 @click.pass_context
@@ -250,14 +254,15 @@ def run_training(
     duration_step: float | None,
     maximum_volume: float | None,
     maximum_idle_time: float | None,
+    unconsumed_rewards: int | None,
 ) -> None:
-    """Runs the run training session for the specified animal and project combination.
+    """Runs the run training session.
 
-    Run training is the second phase of preparing the animal to run experiment runtimes in the lab, and is usually
-    carried out over the five days following the lick training sessions. Primarily, this training is designed to teach
-    the animal how to run the wheel treadmill while being head-fixed and associate getting water rewards with running
-    on the treadmill. Over the course of training, the task requirements are adjusted to ensure the animal performs as
-    many laps as possible during experiment sessions lasting ~60 minutes.
+    Run training is the second phase of preparing the animal for experiment sessions, and is usually carried out over
+    the five days following the lick training sessions. This session teaches the animal to run on the wheel treadmill
+    while being head-fixed and associate getting water rewards with running on the treadmill. Over the course of
+    training, the task requirements are adjusted to prepare the animal to perform as many laps as possible during
+    experiment sessions lasting ~60 minutes.
     """
     run_training_logic(
         experimenter=ctx.obj["user"],
@@ -271,7 +276,7 @@ def run_training(
         increase_threshold=increase_threshold,
         maximum_water_volume=maximum_volume,
         maximum_training_time=maximum_time,
-        maximum_unconsumed_rewards=ctx.obj["unconsumed_rewards"],
+        maximum_unconsumed_rewards=unconsumed_rewards,
         maximum_idle_time=maximum_idle_time,
     )
 
@@ -285,18 +290,23 @@ def run_training(
     required=True,
     help="The name of the experiment to carry out during runtime.",
 )
+@click.option(
+    "-ur",
+    "--unconsumed_rewards",
+    type=int,
+    help=(
+        "The maximum number of rewards that can be delivered without the animal consuming them. If the unconsumed "
+        "reward count exceeds this threshold, the system stops delivering new water rewards until the animal consumes "
+        "the already delivered rewards. Setting this argument to 0 disables the reward consumption tracking."
+    ),
+)
 @click.pass_context
-def run_experiment(
-    ctx: click.Context,
-    experiment: str,
-) -> None:
-    """Runs the requested experiment session for the specified animal and project combination.
+def run_experiment(ctx: click.Context, experiment: str, unconsumed_rewards: int | None) -> None:
+    """Runs the specified experiment session.
 
-    Experiment runtimes are carried out after the lick and run training sessions. Unlike training session commands, this
-    command can be used to run different experiments. Each experiment runtime is configured via the user-defined
-    configuration .yaml file, which should be stored inside the 'configuration' directory of the target project. The
-    experiments are discovered by name, allowing a single project to have multiple different experiments. To create a
-    new experiment configuration, use the 'sl-create-experiment' CLI command.
+    Experiment runtimes are carried out after the lick and run training sessions. This command allows running any valid
+    Sun lab experiment supported by the data acquisition system managed by the host-machine. To create a
+    new experiment configuration for the local adata-acquisition system, use the 'sl-configure experiment' CLI command.
     """
     experiment_logic(
         experimenter=ctx.obj["user"],
@@ -304,5 +314,5 @@ def run_experiment(
         experiment_name=experiment,
         animal_id=ctx.obj["animal"],
         animal_weight=ctx.obj["animal_weight"],
-        maximum_unconsumed_rewards=ctx.obj["unconsumed_rewards"],
+        maximum_unconsumed_rewards=unconsumed_rewards,
     )

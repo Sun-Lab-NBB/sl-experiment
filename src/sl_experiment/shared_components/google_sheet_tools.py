@@ -352,7 +352,7 @@ class SurgeryLog:
         # Retrieves the entire row of data for the target animal
         # noinspection PyUnresolvedReferences
         row_data = (
-            self._service.spreadsheets()
+            self._service.spreadsheets()  # type: ignore[attr-defined]
             .values()
             .get(spreadsheetId=self._sheet_id, range=f"'{self._project_name}'!{row_number}:{row_number}")
             .execute()
@@ -513,7 +513,7 @@ class SurgeryLog:
         cell_range = f"{quality_column}{row_number}"
         body = {"values": [[quality]]}
         # noinspection PyUnresolvedReferences
-        self._service.spreadsheets().values().update(
+        self._service.spreadsheets().values().update(  # type: ignore[attr-defined]
             spreadsheetId=self._sheet_id,
             range=f"'{self._project_name}'!{cell_range}",
             valueInputOption="USER_ENTERED",
@@ -523,14 +523,18 @@ class SurgeryLog:
         # Transforms the column letter and the row index to the format necessary to apply formatting to the newly
         # written value.
         col_index = 0
-        for char in quality_column.upper():
+        for char in quality_column.upper():  # type: ignore[union-attr]
             col_index = col_index * 26 + (ord(char) - ord("A") + 1)
         col_index -= 1  # Convert to 0-based index
         row_index_zero_based = row_number - 1
 
         # Gets the sheet ID for the project tab
         # noinspection PyUnresolvedReferences
-        sheet_metadata = self._service.spreadsheets().get(spreadsheetId=self._sheet_id).execute()
+        sheet_metadata = (
+            self._service.spreadsheets()  # type: ignore[attr-defined]
+            .get(spreadsheetId=self._sheet_id)
+            .execute()
+        )
         sheet_id = None
         for sheet in sheet_metadata.get("sheets", []):
             if sheet["properties"]["title"] == self._project_name:
@@ -555,7 +559,7 @@ class SurgeryLog:
                 }
             ]
             # noinspection PyUnresolvedReferences
-            self._service.spreadsheets().batchUpdate(
+            self._service.spreadsheets().batchUpdate(  # type: ignore[attr-defined]
                 spreadsheetId=self._sheet_id,
                 body={"requests": requests},
             ).execute()
@@ -785,7 +789,7 @@ class WaterLog:
         # Retrieves all dates from the date column (row 3 and below)
         # noinspection PyUnresolvedReferences
         date_data = (
-            self._service.spreadsheets()
+            self._service.spreadsheets()  # type: ignore[attr-defined]
             .values()
             .get(spreadsheetId=self._sheet_id, range=f"'{self._animal_id}'!{date_column}3:{date_column}")
             .execute()
@@ -828,7 +832,7 @@ class WaterLog:
         # Writes the value to the target cell
         body = {"values": [[formatted_value]]}
         # noinspection PyUnresolvedReferences
-        self._service.spreadsheets().values().update(
+        self._service.spreadsheets().values().update(  # type: ignore[attr-defined]
             spreadsheetId=self._sheet_id,
             range=f"'{self._animal_id}'!{cell_range}",
             valueInputOption="USER_ENTERED",
@@ -860,7 +864,7 @@ class WaterLog:
             }
         ]
         # noinspection PyUnresolvedReferences
-        self._service.spreadsheets().batchUpdate(
+        self._service.spreadsheets().batchUpdate(  # type: ignore[attr-defined]
             spreadsheetId=self._sheet_id,
             body={"requests": requests},
         ).execute()

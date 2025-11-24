@@ -410,7 +410,7 @@ class MicroControllerInterfaces:
             maximum_brake_strength=self._configuration.maximum_brake_strength_g_cm,
         )
         self.valve = ValveInterface(
-            valve_calibration_data=self._configuration.valve_calibration_data,
+            valve_calibration_data=self._configuration.valve_calibration_data,  # type: ignore[arg-type]
         )
         self.screens = ScreenInterface()
 
@@ -501,7 +501,7 @@ class MicroControllerInterfaces:
         )
 
         # Screen Interface
-        screen_pulse_duration: np.float64 = convert_time(
+        screen_pulse_duration: np.float64 = convert_time(  # type: ignore[assignment]
             time=self._configuration.screen_trigger_pulse_duration_ms,
             from_units="ms",
             to_units="us",
