@@ -2480,9 +2480,6 @@ def window_checking_logic(
             else None
         )
 
-        # Establishes communication with Zaber motors
-        zaber_motors = ZaberMotors(zaber_positions=zaber_positions, zaber_configuration=system_configuration.assets)
-
         # Initializes the data logger. This initialization follows the same procedure as the _MesoscopeVRSystem class
         logger: DataLogger = DataLogger(
             output_directory=session_data.raw_data.raw_data_path,
@@ -2514,6 +2511,9 @@ def window_checking_logic(
         console.echo(message=message, level=LogLevel.WARNING)
         _response_delay_timer.delay(delay=_RESPONSE_DELAY, block=False)
         input("Enter anything to continue: ")
+
+        # Establishes communication with Zaber motors
+        zaber_motors = ZaberMotors(zaber_positions=zaber_positions, zaber_configuration=system_configuration.assets)
 
         # Removes the nk.bin marker to avoid automatic session cleanup during post-processing.
         session_data.runtime_initialized()

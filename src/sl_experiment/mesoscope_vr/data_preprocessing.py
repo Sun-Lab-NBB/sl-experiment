@@ -448,7 +448,7 @@ def _preprocess_mesoscope_directory(
 
     # Sorts files naturally. Since all files use the _acquisition#_stack# format, this procedure should naturally
     # sort the data in the order of acquisition.
-    tiff_files = natsorted(tiff_files)
+    tiff_files = natsorted(tiff_files, key=lambda p: p.name)
 
     # Validates and prepares TIFF stacks for processing. Filters out invalid files and determines frame numbering.
     valid_stacks: list[tuple[Path, int]] = []  # List of (file_path, starting_frame_number) tuples

@@ -132,7 +132,7 @@ def get_cameras() -> None:
                     f"frame_rate={camera_data.acquisition_frame_rate} frames / second."
                 )
             )
-    except Exception:
+    except FileNotFoundError:
         console.echo(
             message=(
                 "Unable to discover Harvesters-compatible cameras, as the library has not been provided with a CTI "
