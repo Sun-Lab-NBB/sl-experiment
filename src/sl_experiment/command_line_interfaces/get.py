@@ -2,6 +2,8 @@
 acquisition system managed by the host-machine.
 """
 
+import sl_experiment.command_line_interfaces  # noqa: F401 # Ensures the warning filter is applied before other imports.
+
 import click
 from natsort_rs import natsort as natsorted  # type: ignore[import-untyped]
 from sl_shared_assets import (
