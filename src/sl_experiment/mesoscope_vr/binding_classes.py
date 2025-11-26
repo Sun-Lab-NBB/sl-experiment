@@ -615,20 +615,19 @@ class VideoSystems:
         )
 
         # Initializes the body camera system.
-        # self._body_camera: VideoSystem = VideoSystem(
-        #     system_id=np.uint8(62),
-        #     data_logger=data_logger,
-        #     output_directory=output_directory,
-        #     camera_index=camera_configuration.body_camera_index,
-        #     camera_interface=CameraInterfaces.HARVESTERS,
-        #     display_frame_rate=25,
-        #     video_encoder=VideoEncoders.H265,
-        #     gpu=0,
-        #     encoder_speed_preset=EncoderSpeedPresets(camera_configuration.body_camera_preset),
-        #     output_pixel_format=OutputPixelFormats.YUV420,  # Monochrome videos do not require chrominance sampling.
-        #     quantization_parameter=camera_configuration.body_camera_quantization,
-        # )
-        self._body_camera = None
+        self._body_camera: VideoSystem = VideoSystem(
+            system_id=np.uint8(62),
+            data_logger=data_logger,
+            output_directory=output_directory,
+            camera_index=camera_configuration.body_camera_index,
+            camera_interface=CameraInterfaces.HARVESTERS,
+            display_frame_rate=25,
+            video_encoder=VideoEncoders.H265,
+            gpu=0,
+            encoder_speed_preset=EncoderSpeedPresets(camera_configuration.body_camera_preset),
+            output_pixel_format=OutputPixelFormats.YUV420,  # Monochrome videos do not require chrominance sampling.
+            quantization_parameter=camera_configuration.body_camera_quantization,
+        )
 
     def __del__(self) -> None:
         """Ensures that all consumer and producer processes are terminated when the instance is garbage-collected."""
@@ -663,7 +662,7 @@ class VideoSystems:
             saving the acquired frames to disk.
         """
         # Prevents executing this method if the body camera frame acquisition is already running
-        if self._body_camera is None or self._body_camera_started:
+        if self._body_camera_started:
             return
 
         message = "Initializing body camera frame acquisition..."
@@ -684,8 +683,6 @@ class VideoSystems:
 
     def save_body_camera_frames(self) -> None:
         """Starts saving the frames acquired by the body camera to disk as an .MP4 video file."""
-        if self._body_camera is None:
-            return
         self._body_camera.start_frame_saving()
         message = "Body camera frame saving: Started."
         console.echo(message=message, level=LogLevel.SUCCESS)
