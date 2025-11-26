@@ -56,7 +56,7 @@ dependencies = [
     "ataraxis-data-structures==5.0.0",
     "ataraxis-transport-layer-pc==3.0.0",
     "ataraxis-communication-interface==4.0.1",
-    "ataraxis-video-system==2.1.0",
+    "ataraxis-video-system==2.1.1",
     "tifffile==2025.10.16",
     "imagecodecs==2025.11.11",
     "tqdm==4.67.1",
