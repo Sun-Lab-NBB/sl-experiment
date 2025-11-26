@@ -4,27 +4,26 @@ The warning filter is applied at module level before any other imports to ensure
 are suppressed during the import phase.
 """
 
-import warnings
-
-warnings.filterwarnings("ignore", category=DeprecationWarning)
+import warnings as wa
+wa.warn_explicit = wa.warn = lambda *_, **__: None
 
 
 def get_cli() -> None:
     """Entry point for the 'sl-get' CLI command."""
-    from sl_experiment.command_line_interfaces.get import get
+    from ..command_line_interfaces.get import get
 
     get()
 
 
 def manage_cli() -> None:
     """Entry point for the 'sl-manage' CLI command."""
-    from sl_experiment.command_line_interfaces.manage import manage
+    from ..command_line_interfaces.manage import manage
 
     manage()
 
 
 def run_cli() -> None:
     """Entry point for the 'sl-run' CLI command."""
-    from sl_experiment.command_line_interfaces.execute import run
+    from ..command_line_interfaces.execute import run
 
     run()
