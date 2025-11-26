@@ -55,17 +55,20 @@ class MaintenanceControlUI:
 class _MaintenanceUIWindow(QMainWindow):
     _data_array: SharedMemoryArray
     _valve_tracker: SharedMemoryArray
+    _previous_dispensed_volume: float
+    _reward_in_progress: bool
+    _calibration_in_progress: bool
+    _referencing_in_progress: bool
     def __init__(self, data_array: SharedMemoryArray, valve_tracker: SharedMemoryArray) -> None: ...
     valve_open_btn: Incomplete
     valve_close_btn: Incomplete
     volume_spinbox: Incomplete
     valve_reward_btn: Incomplete
-    valve_reference_btn: Incomplete
     valve_status_label: Incomplete
-    valve_volume_label: Incomplete
-    valve_calibration_label: Incomplete
+    valve_reference_btn: Incomplete
     pulse_duration_spinbox: Incomplete
     calibrate_btn: Incomplete
+    calibration_status_label: Incomplete
     brake_lock_btn: Incomplete
     brake_unlock_btn: Incomplete
     brake_status_label: Incomplete
