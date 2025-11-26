@@ -2,7 +2,7 @@
 
 from typing import Any
 from dataclasses import field, dataclass
-from collections.abc import Callable
+from collections.abc import Callable  # noqa: TC003
 
 from crc import Calculator, Configuration
 from tabulate import tabulate

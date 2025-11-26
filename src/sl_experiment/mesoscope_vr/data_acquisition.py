@@ -15,7 +15,7 @@ from dataclasses import field, dataclass
 from tqdm import tqdm
 from numba import njit  # type: ignore[import-untyped]
 import numpy as np
-from numpy.typing import NDArray
+from numpy.typing import NDArray  # noqa: TC002
 from ataraxis_time import PrecisionTimer, TimerPrecisions, TimestampFormats, convert_time, get_timestamp
 from sl_shared_assets import (
     SessionData,

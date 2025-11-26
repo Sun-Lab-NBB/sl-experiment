@@ -2,7 +2,7 @@
 Zaber motors).
 """
 
-from pathlib import Path
+from pathlib import Path  # noqa: TC003
 
 import numpy as np
 from sl_shared_assets import ZaberPositions, MesoscopeCameras, MesoscopeExternalAssets, MesoscopeMicroControllers
@@ -14,7 +14,7 @@ from ataraxis_video_system import (
     EncoderSpeedPresets,
 )
 from ataraxis_base_utilities import LogLevel, console
-from ataraxis_data_structures import DataLogger
+from ataraxis_data_structures import DataLogger  # noqa: TC002
 from ataraxis_time.time_helpers import TimeUnits, convert_time
 from ataraxis_communication_interface import MicroControllerInterface
 
