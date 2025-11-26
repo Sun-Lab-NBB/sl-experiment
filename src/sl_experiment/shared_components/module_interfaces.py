@@ -6,7 +6,7 @@ https://github.com/Sun-Lab-NBB/sl-micro-controllers.
 import math
 
 import numpy as np
-from numpy.typing import NDArray
+from numpy.typing import NDArray  # noqa: TC002
 from ataraxis_time import TimeUnits, PrecisionTimer, convert_time
 from scipy.optimize import curve_fit
 from ataraxis_base_utilities import console

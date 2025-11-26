@@ -10,7 +10,7 @@ version = "4.0.0rc1"
 description = "Provides the assets for acquiring and preprocessing scientific data in the Sun (NeuroAI) lab."
 readme = "README.md"
 license = { file = "LICENSE" }
-requires-python = ">=3.13, <3.14"  # Limited to 3.13 until numba supports 3.14+
+requires-python = ">=3.14, <3.15"
 authors = [
     { name = "Ivan Kondratyev" },
     { name = "Kushaan Gupta" },
@@ -47,15 +47,15 @@ dependencies = [
     "tabulate2==1.10.2",
     "click==8.3.1",
     "numpy==2.3.5",
-    "numba==0.62.1",
+    "numba==0.63.0rc1",
     "intel-cmplr-lib-rt==2025.3.1; platform_system != 'Darwin'",
     "scipy==1.16.3",
     "matplotlib==3.10.7",
     "ataraxis-time==5.0.0",
     "ataraxis-base-utilities==5.0.0",
     "ataraxis-data-structures==5.0.0",
-    "ataraxis-transport-layer-pc==3.0.0",
-    "ataraxis-communication-interface==4.0.1",
+    "ataraxis-transport-layer-pc==3.1.0rc1",
+    "ataraxis-communication-interface==4.1.0rc1",
     "ataraxis-video-system==2.1.1",
     "tifffile==2025.10.16",
     "imagecodecs==2025.11.11",
@@ -65,7 +65,7 @@ dependencies = [
     "pyqt6==6.10.0",
     "importlib_metadata==8.7.0",
     "natsort-rs==0.1.15",
-    "sl-shared-assets==6.0.1rc6",
+    "sl-shared-assets==6.0.1rc7",
 ]
 
 [project.urls]
@@ -112,7 +112,7 @@ packages = ["src/sl_experiment"]
 [tool.ruff]
 line-length = 120         # The maximum column length is set to 120 for this project.
 indent-width = 4          # Same as black, indents are 4 spaces
-target-version = "py313"  # Targets the lowest supported version of python
+target-version = "py314"  # Targets the lowest supported version of python
 src = ["src"]             # The name of the source directory
 
 # Excludes 'service' .py files, such as the sphinx configuration file, from linting.

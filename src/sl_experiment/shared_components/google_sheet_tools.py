@@ -2,7 +2,7 @@
 
 import re
 from typing import Any
-from pathlib import Path
+from pathlib import Path  # noqa: TC003
 from datetime import (
     UTC,
     datetime,
