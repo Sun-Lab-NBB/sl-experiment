@@ -493,6 +493,11 @@ class MicroControllerInterfaces:
         self._sensor.start()
         self._encoder.start()
 
+        self.wheel_encoder.initialize_local_assets()
+        self.valve.initialize_local_assets()
+        self.mesoscope_frame.initialize_local_assets()
+        self.lick.initialize_local_assets()
+
         # Wheel Encoder
         self.wheel_encoder.set_parameters(
             report_cw=np.bool(self._configuration.wheel_encoder_report_cw),
