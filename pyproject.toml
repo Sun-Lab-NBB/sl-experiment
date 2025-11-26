@@ -56,7 +56,7 @@ dependencies = [
     "ataraxis-data-structures==5.0.0",
     "ataraxis-transport-layer-pc==3.0.0",
     "ataraxis-communication-interface==4.0.1",
-    "ataraxis-video-system==2.1.0",
+    "ataraxis-video-system==2.1.1",
     "tifffile==2025.10.16",
     "imagecodecs==2025.11.11",
     "tqdm==4.67.1",
@@ -96,9 +96,9 @@ dev = [
 # Currently, the library is intended to be interfaced with more or less exclusively through the CLI commands exported
 # below.
 [project.scripts]
-sl-get = "sl_experiment.command_line_interfaces.get:get"
-sl-manage = "sl_experiment.command_line_interfaces.manage:manage"
-sl-run = "sl_experiment.command_line_interfaces.execute:run"
+sl-get = "sl_experiment.command_line_interfaces.entry_points:get_cli"
+sl-manage = "sl_experiment.command_line_interfaces.entry_points:manage_cli"
+sl-run = "sl_experiment.command_line_interfaces.entry_points:run_cli"
 
 # Specifies files that should not be included in the source-code distribution but are also not part of gitignore.
 [tool.hatch.build.targets.sdist]
