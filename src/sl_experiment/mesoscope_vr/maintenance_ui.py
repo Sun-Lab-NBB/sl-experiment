@@ -232,6 +232,10 @@ class _MaintenanceUIWindow(QMainWindow):
             and other runtime processes.
         _valve_tracker: The SharedMemoryArray instance used by the ValveModule to export the valve's state to other
             processes during runtime.
+        _previous_dispensed_volume: Tracks the previous dispensed volume to detect when water delivery completes.
+        _reward_in_progress: Tracks whether a reward delivery is in progress.
+        _calibration_in_progress: Tracks whether a calibration procedure is in progress.
+        _referencing_in_progress: Tracks whether a referencing procedure is in progress.
     """
 
     def __init__(self, data_array: SharedMemoryArray, valve_tracker: SharedMemoryArray) -> None:
@@ -239,6 +243,15 @@ class _MaintenanceUIWindow(QMainWindow):
 
         self._data_array: SharedMemoryArray = data_array
         self._valve_tracker: SharedMemoryArray = valve_tracker
+
+        # Tracks the previous dispensed volume to detect when water delivery completes.
+        self._previous_dispensed_volume: float = 0.0
+        # Tracks whether a reward delivery is in progress.
+        self._reward_in_progress: bool = False
+        # Tracks whether a calibration procedure is in progress.
+        self._calibration_in_progress: bool = False
+        # Tracks whether a referencing procedure is in progress.
+        self._referencing_in_progress: bool = False
 
         self.setWindowTitle("Mesoscope-VR Maintenance Panel")
         self.setFixedSize(550, 600)
@@ -317,18 +330,8 @@ class _MaintenanceUIWindow(QMainWindow):
 
         valve_layout.addLayout(volume_reward_layout)
 
-        # Reference button
-        self.valve_reference_btn = QPushButton("🔄 Reference (200 x 5 μL)")
-        self.valve_reference_btn.setToolTip("Run reference valve calibration (200 pulses x 5 μL)")
-        # noinspection PyUnresolvedReferences
-        self.valve_reference_btn.clicked.connect(self._valve_reference)
-        self.valve_reference_btn.setObjectName("referenceButton")
-        self.valve_reference_btn.setMinimumHeight(35)
-        self.valve_reference_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        valve_layout.addWidget(self.valve_reference_btn)
-
         # Valve status
-        self.valve_status_label = QLabel("Valve Status: Awaiting Commands")
+        self.valve_status_label = QLabel("Valve: Closed")
         self.valve_status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         status_font = QFont()
         status_font.setPointSize(12)
@@ -337,32 +340,22 @@ class _MaintenanceUIWindow(QMainWindow):
         self.valve_status_label.setStyleSheet("QLabel { color: #7f8c8d; font-weight: bold; }")
         valve_layout.addWidget(self.valve_status_label)
 
-        # Valve info display (dispensed volume and calibration state)
-        valve_info_layout = QHBoxLayout()
-        valve_info_layout.setSpacing(10)
-
-        self.valve_volume_label = QLabel("Dispensed: 0.0 μL")
-        self.valve_volume_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        info_font = QFont()
-        info_font.setPointSize(10)
-        self.valve_volume_label.setFont(info_font)
-        self.valve_volume_label.setStyleSheet("QLabel { color: #34495e; }")
-        valve_info_layout.addWidget(self.valve_volume_label)
-
-        self.valve_calibration_label = QLabel("Status: Ready")
-        self.valve_calibration_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        self.valve_calibration_label.setFont(info_font)
-        self.valve_calibration_label.setStyleSheet("QLabel { color: #27ae60; }")
-        valve_info_layout.addWidget(self.valve_calibration_label)
-
-        valve_layout.addLayout(valve_info_layout)
-
         main_layout.addWidget(valve_group)
 
         # Calibration Group
         calibration_group = QGroupBox("Valve Calibration")
         calibration_layout = QVBoxLayout(calibration_group)
         calibration_layout.setSpacing(6)
+
+        # Reference button
+        self.valve_reference_btn = QPushButton("🔄 Reference (200 x 5 μL)")
+        self.valve_reference_btn.setToolTip("Run reference valve calibration (200 pulses x 5 μL)")
+        # noinspection PyUnresolvedReferences
+        self.valve_reference_btn.clicked.connect(self._valve_reference)
+        self.valve_reference_btn.setObjectName("referenceButton")
+        self.valve_reference_btn.setMinimumHeight(35)
+        self.valve_reference_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        calibration_layout.addWidget(self.valve_reference_btn)
 
         # Pulse duration control
         pulse_duration_layout = QHBoxLayout()
@@ -396,6 +389,13 @@ class _MaintenanceUIWindow(QMainWindow):
         pulse_duration_layout.addWidget(self.calibrate_btn)
 
         calibration_layout.addLayout(pulse_duration_layout)
+
+        # Calibration status label
+        self.calibration_status_label = QLabel("Calibration: Idle")
+        self.calibration_status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.calibration_status_label.setFont(status_font)
+        self.calibration_status_label.setStyleSheet("QLabel { color: #7f8c8d; font-weight: bold; }")
+        calibration_layout.addWidget(self.calibration_status_label)
 
         main_layout.addWidget(calibration_group)
 
@@ -693,27 +693,32 @@ class _MaintenanceUIWindow(QMainWindow):
         self.monitor_timer.start(100)  # Check every 100ms
 
     def _check_external_state(self) -> None:
-        """Checks for external termination signal and updates the valve status box."""
+        """Checks for external termination signal and updates valve and calibration status."""
         # noinspection PyBroadException
         try:
-            # Check for termination
+            # Checks for termination.
             if self._data_array[_DataArrayIndex.TERMINATION] == 1:
                 self.close()
 
-            # Update valve info display
+            # Reads valve tracker state.
             dispensed_volume = float(self._valve_tracker[0])
             is_calibrating = float(self._valve_tracker[1]) == 0.0
 
-            # Update dispensed volume label
-            self.valve_volume_label.setText(f"Dispensed: {dispensed_volume:.1f} μL")
+            # Detects when reward delivery completes (dispensed volume increased while reward was in progress).
+            if self._reward_in_progress and dispensed_volume > self._previous_dispensed_volume:
+                self._reward_in_progress = False
+                self.valve_status_label.setText("Valve: Closed")
+                self.valve_status_label.setStyleSheet("QLabel { color: #e67e22; font-weight: bold; }")
 
-            # Update calibration status label
-            if is_calibrating:
-                self.valve_calibration_label.setText("Status: ⏳ Calibrating...")
-                self.valve_calibration_label.setStyleSheet("QLabel { color: #f39c12; }")
-            else:
-                self.valve_calibration_label.setText("Status: ✓ Ready")
-                self.valve_calibration_label.setStyleSheet("QLabel { color: #27ae60; }")
+            # Detects when calibration or referencing completes (valve_tracker indicates no longer calibrating).
+            if (self._calibration_in_progress or self._referencing_in_progress) and not is_calibrating:
+                self._calibration_in_progress = False
+                self._referencing_in_progress = False
+                self.calibration_status_label.setText("Calibration: Idle")
+                self.calibration_status_label.setStyleSheet("QLabel { color: #7f8c8d; font-weight: bold; }")
+
+            # Updates previous dispensed volume for the next check.
+            self._previous_dispensed_volume = dispensed_volume
 
         except Exception:
             self.close()
@@ -736,51 +741,35 @@ class _MaintenanceUIWindow(QMainWindow):
     def _valve_open(self) -> None:
         """Signals to open the valve."""
         self._data_array[_DataArrayIndex.VALVE_OPEN] = 1
-        self.valve_status_label.setText("Valve: 🔓 Opening...")
+        self.valve_status_label.setText("Valve: Open")
         self.valve_status_label.setStyleSheet("QLabel { color: #27ae60; font-weight: bold; }")
-        QTimer.singleShot(1000, lambda: self.valve_status_label.setText("Valve: 🔓 Open"))
 
     def _valve_close(self) -> None:
         """Signals to close the valve."""
         self._data_array[_DataArrayIndex.VALVE_CLOSE] = 1
-        self.valve_status_label.setText("Valve: 🔒 Closing...")
+        self.valve_status_label.setText("Valve: Closed")
         self.valve_status_label.setStyleSheet("QLabel { color: #e67e22; font-weight: bold; }")
-        QTimer.singleShot(1000, lambda: self.valve_status_label.setText("Valve: 🔒 Closed"))
 
     def _valve_reward(self) -> None:
         """Signals to deliver a water reward."""
-        volume = int(self.volume_spinbox.value())
         self._data_array[_DataArrayIndex.VALVE_REWARD] = 1
-        self.valve_status_label.setText(f"Reward: 💧 Delivering {volume} μL...")
+        self._reward_in_progress = True
+        self.valve_status_label.setText("Valve: Delivering Reward")
         self.valve_status_label.setStyleSheet("QLabel { color: #3498db; font-weight: bold; }")
-        QTimer.singleShot(2000, lambda: self.valve_status_label.setText("Reward: ✓ Complete"))
-        QTimer.singleShot(
-            4000, lambda: self.valve_status_label.setStyleSheet("QLabel { color: #7f8c8d; font-weight: bold; }")
-        )
-        QTimer.singleShot(4000, lambda: self.valve_status_label.setText("Valve Status: Awaiting Commands"))
 
     def _valve_reference(self) -> None:
         """Signals to run the valve referencing procedure."""
         self._data_array[_DataArrayIndex.VALVE_REFERENCE] = 1
-        self.valve_status_label.setText("Reference: 🔄 Running (200 x 5 μL)...")
-        self.valve_status_label.setStyleSheet("QLabel { color: #9b59b6; font-weight: bold; }")
-        QTimer.singleShot(5000, lambda: self.valve_status_label.setText("Reference: ✓ Complete"))
-        QTimer.singleShot(7000, lambda: self.valve_status_label.setText("Valve Status: Awaiting Commands"))
-        QTimer.singleShot(
-            7000, lambda: self.valve_status_label.setStyleSheet("QLabel { color: #7f8c8d; font-weight: bold; }")
-        )
+        self._referencing_in_progress = True
+        self.calibration_status_label.setText("Calibration: Referencing")
+        self.calibration_status_label.setStyleSheet("QLabel { color: #9b59b6; font-weight: bold; }")
 
     def _calibrate(self) -> None:
         """Signals to run the valve calibration procedure for the currently set pulse duration."""
-        pulse_duration = int(self.pulse_duration_spinbox.value())
         self._data_array[_DataArrayIndex.VALVE_CALIBRATE] = 1
-        self.valve_status_label.setText(f"Calibration: 📊 Running ({pulse_duration} ms)...")
-        self.valve_status_label.setStyleSheet("QLabel { color: #16a085; font-weight: bold; }")
-        QTimer.singleShot(3000, lambda: self.valve_status_label.setText("Calibration: ✓ Complete"))
-        QTimer.singleShot(5000, lambda: self.valve_status_label.setText("Valve Status: Awaiting Commands"))
-        QTimer.singleShot(
-            5000, lambda: self.valve_status_label.setStyleSheet("QLabel { color: #7f8c8d; font-weight: bold; }")
-        )
+        self._calibration_in_progress = True
+        self.calibration_status_label.setText("Calibration: Calibrating")
+        self.calibration_status_label.setStyleSheet("QLabel { color: #16a085; font-weight: bold; }")
 
     def _brake_lock(self) -> None:
         """Signals to lock the brake."""
