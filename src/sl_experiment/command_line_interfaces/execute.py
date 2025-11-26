@@ -2,8 +2,6 @@
 maintenance sessions supported by the data acquisition system managed by the host-machine.
 """
 
-import sl_experiment.command_line_interfaces  # noqa: F401 # Ensures the warning filter is applied before other imports.
-
 import click
 
 from ..mesoscope_vr import (
