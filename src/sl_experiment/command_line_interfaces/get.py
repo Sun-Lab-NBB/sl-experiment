@@ -7,7 +7,7 @@ from natsort_rs import natsort as natsorted  # type: ignore[import-untyped]
 from sl_shared_assets import (
     get_system_configuration_data,
 )
-from ataraxis_video_system import get_opencv_ids, get_harvesters_ids
+from ataraxis_video_system import CameraInterfaces, discover_camera_ids
 from ataraxis_base_utilities import LogLevel, console
 from ataraxis_transport_layer_pc import print_available_ports
 from ataraxis_communication_interface import print_microcontroller_ids
@@ -87,15 +87,17 @@ def get_experiments(project: str) -> None:
 @get.command("cameras")
 def get_cameras() -> None:
     """Identifies the cameras accessible to the data acquisition system."""
-    # Discovers compatible OpenCV cameras
-    opencv_cameras = get_opencv_ids()
+    # Discovers all compatible cameras from both interfaces.
+    all_cameras = discover_camera_ids()
 
-    # If no cameras are discovered, displays an error message and advances to Harvesters verification.
+    # Separates cameras by interface for display purposes.
+    opencv_cameras = [cam for cam in all_cameras if cam.interface == CameraInterfaces.OPENCV]
+    harvesters_cameras = [cam for cam in all_cameras if cam.interface == CameraInterfaces.HARVESTERS]
+
+    # Displays OpenCV camera information.
     if len(opencv_cameras) == 0:
         console.echo(message="No OpenCV-compatible cameras discovered.", level=LogLevel.WARNING)
-
     else:
-        # Otherwise, lists the data for all discovered cameras.
         console.echo(
             message=(
                 "Warning! Currently, it is impossible to resolve camera models or serial numbers through the "
@@ -113,15 +115,13 @@ def get_cameras() -> None:
                     f"frame_rate={camera_data.acquisition_frame_rate} frames / second."
                 )
             )
-    try:
-        harvesters_cameras = get_harvesters_ids()
 
-        if len(harvesters_cameras) == 0:
-            console.echo(message="No Harvesters-compatible cameras discovered.", level=LogLevel.WARNING)
-            return
-
+    # Displays Harvesters camera information.
+    if len(harvesters_cameras) == 0:
+        console.echo(message="No Harvesters-compatible cameras discovered.", level=LogLevel.WARNING)
+    else:
         # Note, Harvesters interface supports identifying the camera's model and serial number, which makes it easy to
-        # mao discovered indices to physical hardware.
+        # map discovered indices to physical hardware.
         console.echo("Available Harvesters cameras:", level=LogLevel.SUCCESS)
         for num, camera_data in enumerate(harvesters_cameras, start=1):
             console.echo(
@@ -132,15 +132,6 @@ def get_cameras() -> None:
                     f"frame_rate={camera_data.acquisition_frame_rate} frames / second."
                 )
             )
-    except FileNotFoundError:
-        console.echo(
-            message=(
-                "Unable to discover Harvesters-compatible cameras, as the library has not been provided with a CTI "
-                "interface file. Use the 'axvs cti' command to set the path to the CTI file before calling this "
-                "command."
-            ),
-            level=LogLevel.ERROR,
-        )
 
 
 @get.command("controllers")

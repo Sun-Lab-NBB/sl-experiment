@@ -1,6 +1,6 @@
 # Defines the build system used for the project.
 [build-system]
-requires = ["hatchling==1.27.0"]
+requires = ["hatchling==1.28.0"]
 build-backend = "hatchling.build"
 
 # Project metdata section. Provides the genral ID information about the project.
@@ -55,8 +55,8 @@ dependencies = [
     "ataraxis-base-utilities==5.0.0",
     "ataraxis-data-structures==5.0.0",
     "ataraxis-transport-layer-pc==3.1.0rc1",
-    "ataraxis-communication-interface==4.1.0rc1",
-    "ataraxis-video-system==2.1.1",
+    "ataraxis-communication-interface==4.1.0rc2",
+    "ataraxis-video-system==2.2.0",
     "tifffile==2025.10.16",
     "imagecodecs==2025.11.11",
     "tqdm==4.67.1",
