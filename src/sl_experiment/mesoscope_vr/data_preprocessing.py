@@ -685,14 +685,9 @@ def _push_data(
         mesoscope_data.destinations.server_data_path.joinpath("raw_data"),
     )
 
-    # Validates that all destinations are accessible before starting transfers.
+    # Ensures all destination directories exist before starting transfers.
     for destination in destinations:
-        if not destination.parent.exists():
-            message = (
-                f"Unable to transfer the {session_data.session_name} session's data to the long-term storage "
-                f"destinations, as the {destination.parent} destination directory is not accessible (does not exist)."
-            )
-            console.error(message=message, error=RuntimeError)
+        ensure_directory_exists(destination)
 
     # Computes the xxHash3-128 checksum for the source directory before moving it to the destination directories.
     calculate_directory_checksum(directory=source, num_processes=None, save_checksum=True, progress=True)
