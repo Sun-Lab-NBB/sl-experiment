@@ -171,11 +171,6 @@ class _VRPCDestinations:
     server_data_path: Path
     """The path to the session's data directory on the BioHPC server."""
 
-    def __post_init__(self) -> None:
-        """Resolves the managed directory layout, creating any missing directory components."""
-        # Ensures all destination directories exist
-        ensure_directory_exists(self.nas_data_path)
-        ensure_directory_exists(self.server_data_path)
 
 
 class MesoscopeData:

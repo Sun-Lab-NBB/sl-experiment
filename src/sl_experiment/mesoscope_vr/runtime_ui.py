@@ -64,7 +64,7 @@ class RuntimeControlUI:
     def __init__(self) -> None:
         # Defines the prototype array for the SharedMemoryArray initialization and sets the array elements to the
         # desired default state
-        prototype = np.zeros(shape=11, dtype=np.uint32)
+        prototype = np.zeros(shape=11, dtype=np.int32)
         prototype[_DataArrayIndex.PAUSE_STATE] = 1  # Ensures all runtimes start in a paused state
         prototype[_DataArrayIndex.GUIDANCE_ENABLED] = 0  # Initially disables guidance for all runtimes
         prototype[_DataArrayIndex.SHOW_REWARD] = 0  # Defaults to not showing reward collision boundary

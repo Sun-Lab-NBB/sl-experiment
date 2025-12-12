@@ -536,13 +536,26 @@ class ZaberDevice:
         unsafe_flag: bool = bool(self._controller.settings.get(setting=_ZaberSettings.unsafe_flag))
         if not shutdown_flag and unsafe_flag:
             message = (
-                f"Unable to initialize ZaberDevice class instance for the {self._controller.label} "
-                f"({self._controller.name}) device, as it was not properly shutdown during the previous runtime. Since "
-                f"the device is marked as 'unsafe,' it is not possible to reset the device automatically. Ensure that "
-                f"the device is positioned correctly for homing procedure and manually set the value of the shutdown "
-                f"tracker to 1. The non-volatile memory variable used to store this data is USER_DATA_1."
+                f"The {self._controller.label} ({self._controller.name}) device was not properly shutdown during the "
+                f"previous runtime. Since the device is marked as 'unsafe,' it is not possible to reset the device "
+                f"in the unsupervised mode. Ensure that the device is positioned correctly for homing procedure before "
+                f"proceeding. Do you want to proceed with initializing this motor?"
             )
-            console.error(message=message, error=ValueError)
+            console.echo(message=message, level=LogLevel.WARNING)
+
+            # Blocks until a valid answer is received from the user.
+            while True:
+                answer = input("Enter 'yes' or 'no': ").lower()
+                if answer and answer[0] == "n":
+                    message = (
+                        f"Unsafe automatic reset procedure for the {self._controller.label} "
+                        f"({self._controller.name}) device: Declined. Manually set the value of the shutdown tracker "
+                        f"to 1 after ensuring the device is positioned correctly for homing. The non-volatile memory "
+                        f"variable used to store this data is USER_DATA_1."
+                    )
+                    console.error(message=message, error=ValueError)
+                if answer and answer[0] == "y":
+                    break
 
         # Sets the device's shutdown tracker to 0. This tracker is used to detect when a device is not properly shut
         # down, which may have implications for the use of the device, such as the ability to home the device.
