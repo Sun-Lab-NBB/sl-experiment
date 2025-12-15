@@ -39,6 +39,10 @@ class _DataArrayIndex(IntEnum):
     BRAKE_UNLOCK = 7
     REWARD_VOLUME = 8
     CALIBRATION_PULSE_DURATION = 9
+    GAS_VALVE_OPEN = 10
+    GAS_VALVE_CLOSE = 11
+    GAS_VALVE_PULSE = 12
+    GAS_VALVE_PULSE_DURATION = 13
 
 
 class MaintenanceControlUI:
@@ -54,20 +58,25 @@ class MaintenanceControlUI:
     Args:
         valve_tracker: The SharedMemoryArray instance used by the ValveModule to export the valve's state to other
             processes.
+        gas_puff_tracker: The SharedMemoryArray instance used by the GasPuffValveInterface to export the gas puff
+            count to other processes.
 
     Attributes:
         _data_array: The SharedMemoryArray instance used to bidirectionally transfer data between the UI process
             and the maintenance runtime process.
         _valve_tracker: The SharedMemoryArray instance used by the ValveModule to export the valve's state to other
             processes.
+        _gas_puff_tracker: The SharedMemoryArray instance used by the GasPuffValveInterface to export the gas puff
+            count to other processes.
         _ui_process: The Process instance running the GUI cycle.
         _started: Tracks whether the UI process is running.
     """
 
-    def __init__(self, valve_tracker: SharedMemoryArray) -> None:
+    def __init__(self, valve_tracker: SharedMemoryArray, gas_puff_tracker: SharedMemoryArray) -> None:
         # Defines the prototype array for SharedMemoryArray initialization
-        prototype = np.zeros(shape=10, dtype=np.uint32)
+        prototype = np.zeros(shape=14, dtype=np.uint32)
         prototype[_DataArrayIndex.TERMINATION] = 0
+        prototype[_DataArrayIndex.GAS_VALVE_PULSE_DURATION] = 100  # Default gas puff duration: 100 ms
         prototype[_DataArrayIndex.REWARD_VOLUME] = 5  # Default 5 uL
         prototype[_DataArrayIndex.CALIBRATION_PULSE_DURATION] = 30  # Default 30 ms
 
@@ -76,8 +85,9 @@ class MaintenanceControlUI:
             name="maintenance_control_ui", prototype=prototype, exists_ok=True
         )
 
-        # Caches ValveTracker to class attributes
+        # Caches tracker references to class attributes
         self._valve_tracker = valve_tracker
+        self._gas_puff_tracker = gas_puff_tracker
 
         # Defines but does not automatically start the UI process
         self._ui_process = Process(target=self._run_ui_process, daemon=True)
@@ -86,10 +96,11 @@ class MaintenanceControlUI:
     def __del__(self) -> None:
         """Terminates the UI process and releases the instance's shared memory buffers when garbage-collected."""
         self.shutdown()
-        # Clean up valve tracker connection
+        # Clean up tracker connections
         with contextlib.suppress(Exception):
             self._valve_tracker.disconnect()
-            # Note: Does not destroy the valve tracker as it's owned by ValveInterface
+            self._gas_puff_tracker.disconnect()
+            # Note: Does not destroy the trackers as they're owned by their respective interfaces
 
     def start(self) -> None:
         """Starts the remote UI process."""
@@ -100,8 +111,9 @@ class MaintenanceControlUI:
         self._data_array.connect()
         self._data_array.enable_buffer_destruction()
 
-        # Connect to valve tracker to monitor valve state
+        # Connects to trackers to monitor valve and gas puff states
         self._valve_tracker.connect()
+        self._gas_puff_tracker.connect()
 
         self._started = True
 
@@ -118,9 +130,10 @@ class MaintenanceControlUI:
         self._data_array.disconnect()
         self._data_array.destroy()
 
-        # Disconnects from the valve tracker (but does not destroy it - it's owned by ValveInterface)
+        # Disconnects from the trackers (but does not destroy them - they're owned by their respective interfaces)
         with contextlib.suppress(Exception):
             self._valve_tracker.disconnect()
+            self._gas_puff_tracker.disconnect()
 
         self._started = False
 
@@ -128,6 +141,7 @@ class MaintenanceControlUI:
         """Runs UI management cycle in a parallel process."""
         self._data_array.connect()
         self._valve_tracker.connect()
+        self._gas_puff_tracker.connect()
 
         try:
             app = QApplication(sys.argv)
@@ -135,7 +149,7 @@ class MaintenanceControlUI:
             app.setOrganizationName("SunLab")
             app.setStyle("Fusion")
 
-            window = _MaintenanceUIWindow(self._data_array, self._valve_tracker)
+            window = _MaintenanceUIWindow(self._data_array, self._valve_tracker, self._gas_puff_tracker)
             window.show()
 
             app.exec()
@@ -148,6 +162,7 @@ class MaintenanceControlUI:
         finally:
             self._data_array.disconnect()
             self._valve_tracker.disconnect()
+            self._gas_puff_tracker.disconnect()
 
     @property
     def exit_signal(self) -> bool:
@@ -214,14 +229,30 @@ class MaintenanceControlUI:
         return int(self._data_array[_DataArrayIndex.CALIBRATION_PULSE_DURATION])
 
     @property
-    def valve_dispensed_volume(self) -> float:
-        """Returns the total volume of water (in μL) dispensed by the valve since runtime onset."""
-        return float(self._valve_tracker[0])
+    def gas_valve_open_signal(self) -> bool:
+        """Returns True if the user has requested to open the gas puff valve."""
+        signal = bool(self._data_array[_DataArrayIndex.GAS_VALVE_OPEN])
+        self._data_array[_DataArrayIndex.GAS_VALVE_OPEN] = 0
+        return signal
 
     @property
-    def valve_is_calibrating(self) -> bool:
-        """Returns True if the valve is currently performing a calibration cycle."""
-        return float(self._valve_tracker[1]) == 0.0
+    def gas_valve_close_signal(self) -> bool:
+        """Returns True if the user has requested to close the gas puff valve."""
+        signal = bool(self._data_array[_DataArrayIndex.GAS_VALVE_CLOSE])
+        self._data_array[_DataArrayIndex.GAS_VALVE_CLOSE] = 0
+        return signal
+
+    @property
+    def gas_valve_pulse_signal(self) -> bool:
+        """Returns True if the user has requested to pulse the gas puff valve."""
+        signal = bool(self._data_array[_DataArrayIndex.GAS_VALVE_PULSE])
+        self._data_array[_DataArrayIndex.GAS_VALVE_PULSE] = 0
+        return signal
+
+    @property
+    def gas_valve_pulse_duration(self) -> int:
+        """Returns the current user-defined gas puff pulse duration in milliseconds."""
+        return int(self._data_array[_DataArrayIndex.GAS_VALVE_PULSE_DURATION])
 
 
 class _MaintenanceUIWindow(QMainWindow):
@@ -232,17 +263,24 @@ class _MaintenanceUIWindow(QMainWindow):
             and other runtime processes.
         _valve_tracker: The SharedMemoryArray instance used by the ValveModule to export the valve's state to other
             processes during runtime.
+        _gas_puff_tracker: The SharedMemoryArray instance used by the GasPuffValveInterface to export the gas puff
+            count to other processes during runtime.
         _previous_dispensed_volume: Tracks the previous dispensed volume to detect when water delivery completes.
         _reward_in_progress: Tracks whether a reward delivery is in progress.
         _calibration_in_progress: Tracks whether a calibration procedure is in progress.
         _referencing_in_progress: Tracks whether a referencing procedure is in progress.
+        _previous_puff_count: Tracks the previous gas puff count to detect when puff delivery completes.
+        _puff_in_progress: Tracks whether a gas puff delivery is in progress.
     """
 
-    def __init__(self, data_array: SharedMemoryArray, valve_tracker: SharedMemoryArray) -> None:
+    def __init__(
+        self, data_array: SharedMemoryArray, valve_tracker: SharedMemoryArray, gas_puff_tracker: SharedMemoryArray
+    ) -> None:
         super().__init__()
 
         self._data_array: SharedMemoryArray = data_array
         self._valve_tracker: SharedMemoryArray = valve_tracker
+        self._gas_puff_tracker: SharedMemoryArray = gas_puff_tracker
 
         # Tracks the previous dispensed volume to detect when water delivery completes.
         self._previous_dispensed_volume: float = 0.0
@@ -252,6 +290,10 @@ class _MaintenanceUIWindow(QMainWindow):
         self._calibration_in_progress: bool = False
         # Tracks whether a referencing procedure is in progress.
         self._referencing_in_progress: bool = False
+        # Tracks the previous gas puff count to detect when puff delivery completes.
+        self._previous_puff_count: int = 0
+        # Tracks whether a gas puff delivery is in progress.
+        self._puff_in_progress: bool = False
 
         self.setWindowTitle("Mesoscope-VR Maintenance Panel")
         self.setFixedSize(550, 600)
@@ -433,6 +475,74 @@ class _MaintenanceUIWindow(QMainWindow):
         brake_layout.addWidget(self.brake_status_label)
 
         main_layout.addWidget(brake_group)
+
+        # Gas Puff Valve Control Group
+        gas_valve_group = QGroupBox("Gas Puff Valve Control")
+        gas_valve_layout = QVBoxLayout(gas_valve_group)
+        gas_valve_layout.setSpacing(6)
+
+        # Open/Close buttons
+        gas_valve_buttons_layout = QHBoxLayout()
+
+        self.gas_valve_open_btn = QPushButton("🔓 Open")
+        self.gas_valve_open_btn.setToolTip("Open the gas puff valve")
+        # noinspection PyUnresolvedReferences
+        self.gas_valve_open_btn.clicked.connect(self._gas_valve_open)
+        self.gas_valve_open_btn.setObjectName("gasValveOpenButton")
+
+        self.gas_valve_close_btn = QPushButton("🔒 Close")
+        self.gas_valve_close_btn.setToolTip("Close the gas puff valve")
+        # noinspection PyUnresolvedReferences
+        self.gas_valve_close_btn.clicked.connect(self._gas_valve_close)
+        self.gas_valve_close_btn.setObjectName("gasValveCloseButton")
+
+        for btn in [self.gas_valve_open_btn, self.gas_valve_close_btn]:
+            btn.setMinimumHeight(35)
+            btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            gas_valve_buttons_layout.addWidget(btn)
+
+        gas_valve_layout.addLayout(gas_valve_buttons_layout)
+
+        # Puff duration control and puff button
+        puff_layout = QHBoxLayout()
+        puff_layout.setSpacing(6)
+
+        gas_puff_label = QLabel("Puff duration:")
+        gas_puff_label.setObjectName("volumeLabel")
+
+        self.gas_puff_duration_spinbox = QDoubleSpinBox()
+        self.gas_puff_duration_spinbox.setRange(10, 1000)
+        self.gas_puff_duration_spinbox.setValue(100)
+        self.gas_puff_duration_spinbox.setDecimals(0)
+        self.gas_puff_duration_spinbox.setSuffix(" ms")
+        self.gas_puff_duration_spinbox.setToolTip("Sets gas puff duration. Accepts values between 10 and 1000 ms.")
+        self.gas_puff_duration_spinbox.setMinimumHeight(30)
+        # noinspection PyUnresolvedReferences
+        self.gas_puff_duration_spinbox.valueChanged.connect(self._update_gas_puff_duration)
+
+        puff_layout.addWidget(gas_puff_label)
+        puff_layout.addWidget(self.gas_puff_duration_spinbox)
+
+        self.gas_valve_puff_btn = QPushButton("💨 Puff")
+        self.gas_valve_puff_btn.setToolTip("Deliver a gas puff with specified duration")
+        # noinspection PyUnresolvedReferences
+        self.gas_valve_puff_btn.clicked.connect(self._gas_valve_puff)
+        self.gas_valve_puff_btn.setObjectName("gasPuffButton")
+        self.gas_valve_puff_btn.setMinimumHeight(35)
+        self.gas_valve_puff_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+        puff_layout.addWidget(self.gas_valve_puff_btn)
+
+        gas_valve_layout.addLayout(puff_layout)
+
+        # Gas valve status
+        self.gas_valve_status_label = QLabel("Gas Valve: Closed")
+        self.gas_valve_status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.gas_valve_status_label.setFont(status_font)
+        self.gas_valve_status_label.setStyleSheet("QLabel { color: #7f8c8d; font-weight: bold; }")
+        gas_valve_layout.addWidget(self.gas_valve_status_label)
+
+        main_layout.addWidget(gas_valve_group)
 
         # Terminate Button
         self.terminate_btn = QPushButton("✖ Terminate Maintenance")
@@ -693,7 +803,7 @@ class _MaintenanceUIWindow(QMainWindow):
         self.monitor_timer.start(100)  # Check every 100ms
 
     def _check_external_state(self) -> None:
-        """Checks for external termination signal and updates valve and calibration status."""
+        """Checks for external termination signal and updates valve, calibration, and gas puff status."""
         # noinspection PyBroadException
         try:
             # Checks for termination.
@@ -703,6 +813,9 @@ class _MaintenanceUIWindow(QMainWindow):
             # Reads valve tracker state.
             dispensed_volume = float(self._valve_tracker[0])
             is_calibrating = float(self._valve_tracker[1]) == 0.0
+
+            # Reads gas puff tracker state.
+            puff_count = int(self._gas_puff_tracker[0])
 
             # Detects when reward delivery completes (dispensed volume increased while reward was in progress).
             if self._reward_in_progress and dispensed_volume > self._previous_dispensed_volume:
@@ -717,8 +830,15 @@ class _MaintenanceUIWindow(QMainWindow):
                 self.calibration_status_label.setText("Calibration: Idle")
                 self.calibration_status_label.setStyleSheet("QLabel { color: #7f8c8d; font-weight: bold; }")
 
-            # Updates previous dispensed volume for the next check.
+            # Detects when gas puff delivery completes (puff count increased while puff was in progress).
+            if self._puff_in_progress and puff_count > self._previous_puff_count:
+                self._puff_in_progress = False
+                self.gas_valve_status_label.setText("Gas Valve: Closed")
+                self.gas_valve_status_label.setStyleSheet("QLabel { color: #e67e22; font-weight: bold; }")
+
+            # Updates previous values for the next check.
             self._previous_dispensed_volume = dispensed_volume
+            self._previous_puff_count = puff_count
 
         except Exception:
             self.close()
@@ -782,6 +902,29 @@ class _MaintenanceUIWindow(QMainWindow):
         self._data_array[_DataArrayIndex.BRAKE_UNLOCK] = 1
         self.brake_status_label.setText("Brake: 🔓 Unlocked")
         self.brake_status_label.setStyleSheet("QLabel { color: #27ae60; font-weight: bold; }")
+
+    def _update_gas_puff_duration(self) -> None:
+        """Updates the gas puff duration to match the current GUI configuration."""
+        self._data_array[_DataArrayIndex.GAS_VALVE_PULSE_DURATION] = int(self.gas_puff_duration_spinbox.value())
+
+    def _gas_valve_open(self) -> None:
+        """Signals to open the gas puff valve."""
+        self._data_array[_DataArrayIndex.GAS_VALVE_OPEN] = 1
+        self.gas_valve_status_label.setText("Gas Valve: Open")
+        self.gas_valve_status_label.setStyleSheet("QLabel { color: #27ae60; font-weight: bold; }")
+
+    def _gas_valve_close(self) -> None:
+        """Signals to close the gas puff valve."""
+        self._data_array[_DataArrayIndex.GAS_VALVE_CLOSE] = 1
+        self.gas_valve_status_label.setText("Gas Valve: Closed")
+        self.gas_valve_status_label.setStyleSheet("QLabel { color: #e67e22; font-weight: bold; }")
+
+    def _gas_valve_puff(self) -> None:
+        """Signals to deliver a gas puff."""
+        self._data_array[_DataArrayIndex.GAS_VALVE_PULSE] = 1
+        self._puff_in_progress = True
+        self.gas_valve_status_label.setText("Gas Valve: Puffing")
+        self.gas_valve_status_label.setStyleSheet("QLabel { color: #3498db; font-weight: bold; }")
 
     def _terminate_runtime(self) -> None:
         """Signals to terminate the maintenance runtime."""

@@ -43,6 +43,7 @@ from .binding_classes import ZaberMotors, VideoSystems, MicroControllerInterface
 from ..shared_components import (
     BrakeInterface,
     ValveInterface,
+    GasPuffValveInterface,
     get_version_data,
     get_animal_project,
     get_project_experiments,
@@ -689,8 +690,6 @@ class _UnityState:
     True, the system enters an emergency pause state to allow the user to restart Unity."""
     guidance_enabled: bool = False
     """Tracks the state of the session's task guidance mode."""
-    reward_boundary_visible: bool = False
-    """Tracks whether the session's task guidance trigger boundary is visible to the animal."""
 
 
 class _MesoscopeVRSystem:
@@ -926,7 +925,11 @@ class _MesoscopeVRSystem:
 
         # Initializes but does not start the assets used by all runtimes. These assets need to be started in a
         # specific order, which is handled by the start() method.
-        self._ui: RuntimeControlUI = RuntimeControlUI()
+        # noinspection PyProtectedMember
+        self._ui: RuntimeControlUI = RuntimeControlUI(
+            valve_tracker=self._microcontrollers.valve._valve_tracker,  # noqa: SLF001
+            gas_puff_tracker=self._microcontrollers.gas_puff_valve._puff_tracker,  # noqa: SLF001
+        )
         self._visualizer: BehaviorVisualizer = BehaviorVisualizer()
 
     def start(self) -> None:
@@ -1004,9 +1007,7 @@ class _MesoscopeVRSystem:
         # entering the checkpoint loop.
         if self._session_data.session_type == SessionTypes.MESOSCOPE_EXPERIMENT:
             self._unity_state.guidance_enabled = self._ui.enable_guidance
-            self._unity_state.reward_boundary_visible = self._ui.show_reward
             self._toggle_lick_guidance(enable_guidance=self._unity_state.guidance_enabled)
-            self._toggle_show_reward(show_reward=self._unity_state.reward_boundary_visible)
 
         # Initializes the runtime visualizer. This HAS to be initialized after cameras and the UI to prevent collisions
         # in the QT backend, which is used by all three assets.
@@ -1722,12 +1723,18 @@ class _MesoscopeVRSystem:
             if self._ui.close_valve:
                 self._microcontrollers.valve.set_state(state=False)
 
+            if self._ui.gas_valve_open_signal:
+                self._microcontrollers.gas_puff_valve.set_state(state=True)
+
+            if self._ui.gas_valve_close_signal:
+                self._microcontrollers.gas_puff_valve.set_state(state=False)
+
+            if self._ui.gas_valve_puff_signal:
+                self._microcontrollers.gas_puff_valve.deliver_puff(duration_ms=self._ui.gas_valve_puff_duration)
+
             if self._session_data.session_type == SessionTypes.MESOSCOPE_EXPERIMENT:
                 if self._ui.enable_guidance != self._unity_state.guidance_enabled:
                     self._toggle_lick_guidance(enable_guidance=self._ui.enable_guidance)
-
-                if self._ui.show_reward != self._unity_state.reward_boundary_visible:
-                    self._toggle_show_reward(show_reward=self._ui.show_reward)
 
             if self._ui.exit_signal:
                 self._terminate_runtime()
@@ -1759,28 +1766,6 @@ class _MesoscopeVRSystem:
 
         # Updates the unity state tracker.
         self._unity_state.guidance_enabled = enable_guidance
-
-    def _toggle_show_reward(self, *, show_reward: bool) -> None:
-        """Sets the visibility of the Virtual Reality task guidance mode's collision boundary.
-
-        Args:
-            show_reward: Determines the visibility of the Virtual Reality task guidance mode's collision boundary.
-        """
-        if not show_reward:
-            self._unity.send_data(topic=_MesoscopeVRMQTTTopics.HIDE_REWARD_ZONE_BOUNDARY)
-        else:
-            self._unity.send_data(topic=_MesoscopeVRMQTTTopics.SHOW_REWARD_ZONE_BOUNDARY)
-
-        # Logs the collision boundary visibility change.
-        log_package = LogPackage(
-            source_id=self._source_id,
-            acquisition_time=np.uint64(self._timestamp_timer.elapsed),
-            serialized_data=np.array([_MesoscopeVRLogMessageCodes.SHOW_REWARD, show_reward], dtype=np.uint8),
-        )
-        self._logger.input_queue.put(log_package)
-
-        # Updates the unity state tracker.
-        self._unity_state.reward_boundary_visible = show_reward
 
     def _change_system_state(self, new_state: int) -> None:
         """Updates and logs the new Mesoscope-VR system state.
@@ -2191,14 +2176,20 @@ class _MesoscopeVRSystem:
             if self._paused:
                 self._unconsumed_reward_count = 0
 
+        # Handles gas valve control signals.
+        if self._ui.gas_valve_open_signal:
+            self._microcontrollers.gas_puff_valve.set_state(state=True)
+
+        if self._ui.gas_valve_close_signal:
+            self._microcontrollers.gas_puff_valve.set_state(state=False)
+
+        if self._ui.gas_valve_puff_signal:
+            self._microcontrollers.gas_puff_valve.deliver_puff(duration_ms=self._ui.gas_valve_puff_duration)
+
         if self._session_data.session_type == SessionTypes.MESOSCOPE_EXPERIMENT:
             # Synchronizes guidance state with UI.
             if self._ui.enable_guidance != self._unity_state.guidance_enabled:
                 self._toggle_lick_guidance(enable_guidance=self._ui.enable_guidance)
-
-            # Synchronizes reward boundary visibility with UI.
-            if self._ui.show_reward != self._unity_state.reward_boundary_visible:
-                self._toggle_show_reward(show_reward=self._ui.show_reward)
 
     def _mesoscope_cycle(self) -> None:
         """Checks whether mesoscope frame acquisition is active and, if not, emergency pauses the runtime."""
@@ -3590,6 +3581,7 @@ def maintenance_logic() -> None:
                     system_configuration.microcontrollers.valve_calibration_data  # type: ignore[arg-type]
                 ),
             )
+            gas_puff_valve: GasPuffValveInterface = GasPuffValveInterface()
             wheel: BrakeInterface = BrakeInterface(
                 minimum_brake_strength=system_configuration.microcontrollers.minimum_brake_strength_g_cm,
                 maximum_brake_strength=system_configuration.microcontrollers.maximum_brake_strength_g_cm,
@@ -3599,7 +3591,7 @@ def maintenance_logic() -> None:
                 buffer_size=8192,
                 port=system_configuration.microcontrollers.actor_port,
                 data_logger=logger,
-                module_interfaces=(valve, wheel),
+                module_interfaces=(valve, gas_puff_valve, wheel),
             )
             controller.start()
 
@@ -3635,7 +3627,10 @@ def maintenance_logic() -> None:
 
             # Initializes the maintenance GUI
             # noinspection PyProtectedMember
-            ui = MaintenanceControlUI(valve_tracker=valve._valve_tracker)  # noqa: SLF001
+            ui = MaintenanceControlUI(
+                valve_tracker=valve._valve_tracker,  # noqa: SLF001
+                gas_puff_tracker=gas_puff_valve._puff_tracker,  # noqa: SLF001
+            )
             ui.start()
 
             # Notifies the user that the runtime is initialized.
@@ -3673,6 +3668,18 @@ def maintenance_logic() -> None:
                 # Unlocks the wheel brake
                 if ui.brake_unlock_signal:
                     wheel.set_state(state=False)
+
+                # Opens the gas puff valve
+                if ui.gas_valve_open_signal:
+                    gas_puff_valve.set_state(state=True)
+
+                # Closes the gas puff valve
+                if ui.gas_valve_close_signal:
+                    gas_puff_valve.set_state(state=False)
+
+                # Delivers a gas puff
+                if ui.gas_valve_pulse_signal:
+                    gas_puff_valve.deliver_puff(duration_ms=ui.gas_valve_pulse_duration)
 
                 # Delays for 5 milliseconds to avoid busy-waiting
                 delay_timer.delay(delay=5, block=False)

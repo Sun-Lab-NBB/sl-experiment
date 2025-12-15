@@ -9,12 +9,14 @@ from .module_interfaces import (
     ScreenInterface,
     TorqueInterface,
     EncoderInterface,
+    GasPuffValveInterface,
 )
 from .google_sheet_tools import WaterLog, SurgeryLog
 
 __all__ = [
     "BrakeInterface",
     "EncoderInterface",
+    "GasPuffValveInterface",
     "LickInterface",
     "ScreenInterface",
     "SurgeryLog",

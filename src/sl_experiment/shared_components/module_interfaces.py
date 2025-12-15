@@ -640,7 +640,9 @@ class BrakeInterface(ModuleInterface):
         _maximum_brake_strength: The maximum torque, in N cm, the brake delivers at maximum voltage.
         _engage: The code for the EnableBrake module command.
         _disengage: The code for the DisableBrake module command.
+        _pulse: The code for the SendPulse module command.
         _enabled: Tracks the current state of the managed brake.
+        _previous_pulse_duration: Tracks the pulse duration used during the previous send_pulse() call.
     """
 
     def __init__(
@@ -670,10 +672,14 @@ class BrakeInterface(ModuleInterface):
         # Statically computes command code objects
         self._engage: np.uint8 = np.uint8(1)
         self._disengage: np.uint8 = np.uint8(2)
+        self._pulse: np.uint8 = np.uint8(4)
 
         # Tracks whether the managed brake is currently engaged. The brake starts in the normally engaged state, so it
         # is ON at class initialization.
         self._enabled: bool = True
+
+        # Tracks the pulse duration used by the previous send_pulse() call.
+        self._previous_pulse_duration: int = 0
 
     def initialize_remote_assets(self) -> None:
         """Not used."""
@@ -701,6 +707,21 @@ class BrakeInterface(ModuleInterface):
             command=self._engage if state else self._disengage, noblock=_FALSE, repetition_delay=_ZERO_UINT32
         )
         self._enabled = state
+
+    def send_pulse(self, duration_ms: int) -> None:
+        """Briefly engages the brake at full strength for the specified duration then automatically disengages.
+
+        Args:
+            duration_ms: The duration, in milliseconds, to engage the brake.
+        """
+        # Only updates the module parameters if the pulse duration changed compared to the previous call. This ensures
+        # parameters are only updated when necessary, reducing communication overhead.
+        if duration_ms != self._previous_pulse_duration:
+            self._previous_pulse_duration = duration_ms
+            duration_us = np.uint32(duration_ms * 1000)
+            self.send_parameters(parameter_data=(duration_us,))
+
+        self.send_command(command=self._pulse, noblock=_FALSE, repetition_delay=_ZERO_UINT32)
 
     @property
     def maximum_brake_strength(self) -> np.float64:
@@ -1065,3 +1086,105 @@ class ScreenInterface(ModuleInterface):
     def state(self) -> bool:
         """Returns True if the screens are currently powered on; False otherwise."""
         return self._enabled
+
+
+class GasPuffValveInterface(ModuleInterface):
+    """Interfaces with specialized ValveModule instances designed to operate gas valves.
+
+    Notes:
+        Type code 5.
+
+        Unlike the water reward valve, gas valves do not require calibration as precise gas volume control is not
+        critical. This interface provides direct duration-based control without volume conversion.
+
+    Attributes:
+        _pulse: The code for the Pulse module command.
+        _open: The code for the Open module command.
+        _close: The code for the Close module command.
+        _configured_state: Tracks the current state of the valve (Open or Closed) set through this interface instance.
+        _previous_duration: Tracks the pulse duration used during the previous deliver_puff() call.
+        _puff_tracker: The SharedMemoryArray instance that tracks the number of gas puffs delivered by the module.
+    """
+
+    def __init__(self) -> None:
+        data_codes: set[np.uint8] = {np.uint8(51), np.uint8(52)}  # kOpen, kClosed
+
+        super().__init__(
+            module_type=np.uint8(5),
+            module_id=np.uint8(2),
+            data_codes=data_codes,
+            error_codes=None,
+        )
+
+        # Statically computes command code objects
+        self._pulse: np.uint8 = np.uint8(1)
+        self._open: np.uint8 = np.uint8(2)
+        self._close: np.uint8 = np.uint8(3)
+
+        # Tracks the state of the managed valve
+        self._configured_state: bool = False
+
+        # Tracks the pulse duration used by the previous deliver_puff() call
+        self._previous_duration: int = 0
+
+        # Creates a SharedMemoryArray used to track and share the number of gas puffs delivered by the instance
+        self._puff_tracker: SharedMemoryArray = SharedMemoryArray.create_array(
+            name=f"{self._module_type}_{self._module_id}_puff_tracker",
+            prototype=np.zeros(shape=1, dtype=np.uint32),
+            exists_ok=True,
+        )
+
+    def initialize_remote_assets(self) -> None:
+        """Connects to the puff tracker shared memory array from the remote process."""
+        self._puff_tracker.connect()
+        self._puff_tracker.enable_buffer_destruction()
+
+    def terminate_remote_assets(self) -> None:
+        """Disconnects from and destroys the puff tracker shared memory array."""
+        self._puff_tracker.disconnect()
+        self._puff_tracker.destroy()
+
+    def initialize_local_assets(self) -> None:
+        """Connects to the puff tracker shared memory array from the local process."""
+        self._puff_tracker.connect()
+
+    def process_received_data(self, _message: ModuleData | ModuleState) -> None:
+        """Not used, as the module currently does not require any real-time data processing."""
+        return
+
+    def set_state(self, *, state: bool) -> None:
+        """Sets the managed valve to the desired state.
+
+        Args:
+            state: The desired state of the valve. True means the valve is open; False means the valve is closed.
+        """
+        # If the valve is already in the desired state, aborts the runtime early.
+        if state == self._configured_state:
+            return
+
+        self.send_command(command=self._open if state else self._close, noblock=_FALSE, repetition_delay=_ZERO_UINT32)
+        self._configured_state = state
+
+    def deliver_puff(self, duration_ms: int = 100) -> None:
+        """Opens the valve for the specified duration to deliver a gas puff.
+
+        Args:
+            duration_ms: The duration, in milliseconds, to keep the valve open.
+        """
+        # Only updates the module parameters if the pulse duration changed compared to the previous call. This ensures
+        # parameters are only updated when necessary, reducing communication overhead.
+        if duration_ms != self._previous_duration:
+            self._previous_duration = duration_ms
+            duration_us = np.uint32(duration_ms * 1000)
+            # Parameters: pulse_duration, calibration_count (unused), tone_duration (unused)
+            self.send_parameters(parameter_data=(duration_us, np.uint16(1), _ZERO_UINT32))
+
+        self.send_command(command=self._pulse, noblock=_FALSE, repetition_delay=_ZERO_UINT32)
+
+        # Increments the puff count tracker
+        self._puff_tracker[0] += 1
+
+    @property
+    def puff_count(self) -> int:
+        """Returns the total number of gas puffs delivered since runtime onset."""
+        return int(self._puff_tracker[0])
