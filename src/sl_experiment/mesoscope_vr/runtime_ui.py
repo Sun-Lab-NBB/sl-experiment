@@ -41,7 +41,10 @@ class _DataArrayIndex(IntEnum):
     CLOSE_VALVE = 7
     REWARD_VOLUME = 8
     GUIDANCE_ENABLED = 9
-    SHOW_REWARD = 10
+    GAS_VALVE_OPEN = 10
+    GAS_VALVE_CLOSE = 11
+    GAS_VALVE_PUFF = 12
+    GAS_VALVE_PUFF_DURATION = 13
 
 
 class RuntimeControlUI:
@@ -54,36 +57,53 @@ class RuntimeControlUI:
         Initializing the class does not start the UI process. Call the start() method before calling any other instance
         methods to start the UI process.
 
+    Args:
+        valve_tracker: The SharedMemoryArray instance used by the ValveModule to export the valve's state to other
+            processes.
+        gas_puff_tracker: The SharedMemoryArray instance used by the GasPuffValveInterface to export the gas puff
+            count to other processes.
+
     Attributes:
         _data_array: The SharedMemoryArray instance used to bidirectionally transfer the data between the UI process
             and other runtime processes.
+        _valve_tracker: The SharedMemoryArray instance used by the ValveModule to export the valve's state to other
+            processes.
+        _gas_puff_tracker: The SharedMemoryArray instance used by the GasPuffValveInterface to export the gas puff
+            count to other processes.
         _ui_process: The Process instance running the GUI cycle.
         _started: Tracks whether the UI process is running.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, valve_tracker: SharedMemoryArray, gas_puff_tracker: SharedMemoryArray) -> None:
         # Defines the prototype array for the SharedMemoryArray initialization and sets the array elements to the
         # desired default state
-        prototype = np.zeros(shape=11, dtype=np.int32)
+        prototype = np.zeros(shape=14, dtype=np.int32)
         prototype[_DataArrayIndex.PAUSE_STATE] = 1  # Ensures all runtimes start in a paused state
         prototype[_DataArrayIndex.GUIDANCE_ENABLED] = 0  # Initially disables guidance for all runtimes
-        prototype[_DataArrayIndex.SHOW_REWARD] = 0  # Defaults to not showing reward collision boundary
         prototype[_DataArrayIndex.REWARD_VOLUME] = 5  # Preconfigures reward delivery to use 5 uL rewards
+        prototype[_DataArrayIndex.GAS_VALVE_PUFF_DURATION] = 100  # Default gas puff duration: 100 ms
 
         # Initializes the SharedMemoryArray instance
         self._data_array = SharedMemoryArray.create_array(
             name="runtime_control_ui", prototype=prototype, exists_ok=True
         )
 
+        # Caches tracker references to class attributes
+        self._valve_tracker = valve_tracker
+        self._gas_puff_tracker = gas_puff_tracker
+
         # Defines but does not automatically start the UI process.
         self._ui_process = Process(target=self._run_ui_process, daemon=True)
         self._started = False
 
     def __del__(self) -> None:
-        """Terminates the UI process and releases the instance's shared memory buffer when the instance is
-        garbage-collected.
-        """
+        """Terminates the UI process and releases the instance's shared memory buffers when garbage-collected."""
         self.shutdown()
+        # Cleans up tracker connections
+        with contextlib.suppress(Exception):
+            self._valve_tracker.disconnect()
+            self._gas_puff_tracker.disconnect()
+            # Note: Does not destroy the trackers as they're owned by their respective interfaces
 
     def start(self) -> None:
         """Starts the remote UI process."""
@@ -98,6 +118,10 @@ class RuntimeControlUI:
         # shared memory buffer in case of an emergency (error) shutdown.
         self._data_array.connect()
         self._data_array.enable_buffer_destruction()
+
+        # Connects to trackers to monitor valve and gas puff states
+        self._valve_tracker.connect()
+        self._gas_puff_tracker.connect()
 
         # Marks the instance as started
         self._started = True
@@ -118,29 +142,29 @@ class RuntimeControlUI:
         self._data_array.disconnect()
         self._data_array.destroy()
 
+        # Disconnects from the trackers (but does not destroy them - they're owned by their respective interfaces)
+        with contextlib.suppress(Exception):
+            self._valve_tracker.disconnect()
+            self._gas_puff_tracker.disconnect()
+
         # Marks the instance as shut down
         self._started = False
 
     def _run_ui_process(self) -> None:
         """Runs UI management cycle in a parallel process."""
-        # Connects to the shared memory array from the remote process
         self._data_array.connect()
+        self._valve_tracker.connect()
+        self._gas_puff_tracker.connect()
 
-        # Creates and runs the Qt6 application in this process's main thread
         try:
-            # Creates the GUI application
             app = QApplication(sys.argv)
             app.setApplicationName("Mesoscope-VR Control Panel")
             app.setOrganizationName("SunLab")
-
-            # Sets Qt6 application-wide style
             app.setStyle("Fusion")
 
-            # Creates the main application window
-            window = _ControlUIWindow(self._data_array)
+            window = _ControlUIWindow(self._data_array, self._valve_tracker, self._gas_puff_tracker)
             window.show()
 
-            # Runs the app
             app.exec()
         except Exception as e:
             message = (
@@ -148,10 +172,10 @@ class RuntimeControlUI:
                 f"Encountered the following error {e}."
             )
             console.error(message=message, error=RuntimeError)
-
-        # Ensures proper UI shutdown when runtime encounters errors
         finally:
             self._data_array.disconnect()
+            self._valve_tracker.disconnect()
+            self._gas_puff_tracker.disconnect()
 
     def set_pause_state(self, *, paused: bool) -> None:
         """Configures the GUI to reflect the current data acquisition session's runtime state.
@@ -223,11 +247,30 @@ class RuntimeControlUI:
         return bool(self._data_array[_DataArrayIndex.GUIDANCE_ENABLED])
 
     @property
-    def show_reward(self) -> bool:
-        """Returns True if the user has enabled showing the Virtual Reality task guidance mode collision box to the
-        animal.
-        """
-        return bool(self._data_array[_DataArrayIndex.SHOW_REWARD])
+    def gas_valve_open_signal(self) -> bool:
+        """Returns True if the user has requested to open the gas puff valve."""
+        signal = bool(self._data_array[_DataArrayIndex.GAS_VALVE_OPEN])
+        self._data_array[_DataArrayIndex.GAS_VALVE_OPEN] = 0
+        return signal
+
+    @property
+    def gas_valve_close_signal(self) -> bool:
+        """Returns True if the user has requested to close the gas puff valve."""
+        signal = bool(self._data_array[_DataArrayIndex.GAS_VALVE_CLOSE])
+        self._data_array[_DataArrayIndex.GAS_VALVE_CLOSE] = 0
+        return signal
+
+    @property
+    def gas_valve_puff_signal(self) -> bool:
+        """Returns True if the user has requested to deliver a gas puff."""
+        signal = bool(self._data_array[_DataArrayIndex.GAS_VALVE_PUFF])
+        self._data_array[_DataArrayIndex.GAS_VALVE_PUFF] = 0
+        return signal
+
+    @property
+    def gas_valve_puff_duration(self) -> int:
+        """Returns the current user-defined gas puff duration in milliseconds."""
+        return int(self._data_array[_DataArrayIndex.GAS_VALVE_PUFF_DURATION])
 
 
 class _ControlUIWindow(QMainWindow):
@@ -236,19 +279,38 @@ class _ControlUIWindow(QMainWindow):
     Attributes:
         _data_array: The SharedMemoryArray instance used to bidirectionally transfer the data between the UI process
             and other runtime processes.
+        _valve_tracker: The SharedMemoryArray instance used by the ValveModule to export the valve's state to other
+            processes during runtime.
+        _gas_puff_tracker: The SharedMemoryArray instance used by the GasPuffValveInterface to export the gas puff
+            count to other processes during runtime.
         _is_paused: Tracks whether the runtime is paused.
         _guidance_enabled: Tracks whether the Virtual Reality task guidance mode is enabled.
-        _show_reward: Tracks whether the Virtual Reality guidance mode collision box is visible to the animal.
+        _previous_dispensed_volume: Tracks the previous dispensed volume to detect when water delivery completes.
+        _reward_in_progress: Tracks whether a reward delivery is in progress.
+        _previous_puff_count: Tracks the previous gas puff count to detect when puff delivery completes.
+        _puff_in_progress: Tracks whether a gas puff delivery is in progress.
     """
 
-    def __init__(self, data_array: SharedMemoryArray) -> None:
-        super().__init__()  # Initializes the main window superclass
+    def __init__(
+        self, data_array: SharedMemoryArray, valve_tracker: SharedMemoryArray, gas_puff_tracker: SharedMemoryArray
+    ) -> None:
+        super().__init__()
 
-        # Defines internal attributes.
         self._data_array: SharedMemoryArray = data_array
+        self._valve_tracker: SharedMemoryArray = valve_tracker
+        self._gas_puff_tracker: SharedMemoryArray = gas_puff_tracker
+
         self._is_paused: bool = True
         self._guidance_enabled: bool = False
-        self._show_reward: bool = False
+
+        # Tracks the previous dispensed volume to detect when water delivery completes.
+        self._previous_dispensed_volume: float = 0.0
+        # Tracks whether a reward delivery is in progress.
+        self._reward_in_progress: bool = False
+        # Tracks the previous gas puff count to detect when puff delivery completes.
+        self._previous_puff_count: int = 0
+        # Tracks whether a gas puff delivery is in progress.
+        self._puff_in_progress: bool = False
 
         # Configures the window title
         self.setWindowTitle("Mesoscope-VR Control Panel")
@@ -301,15 +363,8 @@ class _ControlUIWindow(QMainWindow):
         self.guidance_btn.clicked.connect(self._toggle_guidance)
         self.guidance_btn.setObjectName("guidanceButton")
 
-        # Show / Hide Reward Collision Boundary
-        self.reward_visibility_btn = QPushButton("👁️ Show Reward")
-        self.reward_visibility_btn.setToolTip("Toggles reward collision boundary visibility on or off.")
-        # noinspection PyUnresolvedReferences
-        self.reward_visibility_btn.clicked.connect(self._toggle_reward_visibility)
-        self.reward_visibility_btn.setObjectName("showRewardButton")
-
         # Configures the buttons to expand when the UI is resized, but use a fixed height of 35 points
-        for btn in [self.exit_btn, self.pause_btn, self.guidance_btn, self.reward_visibility_btn]:
+        for btn in [self.exit_btn, self.pause_btn, self.guidance_btn]:
             btn.setMinimumHeight(35)
             btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
             runtime_control_layout.addWidget(btn)
@@ -401,6 +456,81 @@ class _ControlUIWindow(QMainWindow):
 
         # Adds the valve control box to the UI widget
         main_layout.addWidget(valve_group)
+
+        # Gas Puff Valve Control Group
+        gas_valve_group = QGroupBox("Gas Puff Valve Control")
+        gas_valve_layout = QVBoxLayout(gas_valve_group)
+        gas_valve_layout.setSpacing(6)
+
+        # Arranges gas valve control buttons in a horizontal layout
+        gas_valve_buttons_layout = QHBoxLayout()
+
+        # Gas valve open
+        self.gas_valve_open_btn = QPushButton("🔓 Open")
+        self.gas_valve_open_btn.setToolTip("Opens the gas puff valve.")
+        # noinspection PyUnresolvedReferences
+        self.gas_valve_open_btn.clicked.connect(self._gas_valve_open)
+        self.gas_valve_open_btn.setObjectName("gasValveOpenButton")
+
+        # Gas valve close
+        self.gas_valve_close_btn = QPushButton("🔒 Close")
+        self.gas_valve_close_btn.setToolTip("Closes the gas puff valve.")
+        # noinspection PyUnresolvedReferences
+        self.gas_valve_close_btn.clicked.connect(self._gas_valve_close)
+        self.gas_valve_close_btn.setObjectName("gasValveCloseButton")
+
+        # Gas puff button
+        self.gas_puff_btn = QPushButton("💨 Puff")
+        self.gas_puff_btn.setToolTip("Delivers a gas puff with the specified duration.")
+        # noinspection PyUnresolvedReferences
+        self.gas_puff_btn.clicked.connect(self._gas_valve_puff)
+        self.gas_puff_btn.setObjectName("gasPuffButton")
+
+        # Configures the buttons to expand when the UI is resized, but use a fixed height of 35 points
+        for btn in [self.gas_valve_open_btn, self.gas_valve_close_btn, self.gas_puff_btn]:
+            btn.setMinimumHeight(35)
+            btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            gas_valve_buttons_layout.addWidget(btn)
+
+        gas_valve_layout.addLayout(gas_valve_buttons_layout)
+
+        # Gas valve status and duration control section - horizontal layout
+        gas_valve_status_layout = QHBoxLayout()
+        gas_valve_status_layout.setSpacing(6)
+
+        # Duration control on the left
+        gas_duration_label = QLabel("Puff duration:")
+        gas_duration_label.setObjectName("volumeLabel")
+
+        self.gas_duration_spinbox = QDoubleSpinBox()
+        self.gas_duration_spinbox.setRange(10, 1000)
+        self.gas_duration_spinbox.setValue(100)
+        self.gas_duration_spinbox.setDecimals(0)
+        self.gas_duration_spinbox.setSuffix(" ms")
+        self.gas_duration_spinbox.setToolTip("Sets gas puff duration. Accepts values between 10 and 1000 ms.")
+        self.gas_duration_spinbox.setMinimumHeight(30)
+        # noinspection PyUnresolvedReferences
+        self.gas_duration_spinbox.valueChanged.connect(self._update_gas_puff_duration)
+
+        # Adds duration controls to the left side
+        gas_valve_status_layout.addWidget(gas_duration_label)
+        gas_valve_status_layout.addWidget(self.gas_duration_spinbox)
+
+        # Adds the gas valve status tracker on the right
+        self.gas_valve_status_label = QLabel("Gas Valve: 🔒 Closed")
+        self.gas_valve_status_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        gas_valve_status_font = QFont()
+        gas_valve_status_font.setPointSize(35)
+        gas_valve_status_font.setBold(True)
+        self.gas_valve_status_label.setFont(gas_valve_status_font)
+        self.gas_valve_status_label.setStyleSheet("QLabel { color: #e67e22; font-weight: bold; }")
+        gas_valve_status_layout.addWidget(self.gas_valve_status_label)
+
+        # Adds the horizontal status layout to the main gas valve layout
+        gas_valve_layout.addLayout(gas_valve_status_layout)
+
+        # Adds the gas valve control box to the UI widget
+        main_layout.addWidget(gas_valve_group)
 
         # Adds Run Training controls in a horizontal layout
         controls_layout = QHBoxLayout()
@@ -753,28 +883,41 @@ class _ControlUIWindow(QMainWindow):
                         background-color: #7f8c8d;
                         border-color: #6c7b7d;
                     }
-                    QPushButton#hideRewardButton {
-                        background-color: #e74c3c;
-                        color: white;
-                        border-color: #c0392b;
-                        font-weight: bold;
-                    }
 
-                    QPushButton#hideRewardButton:hover {
-                        background-color: #c0392b;
-                        border-color: #a93226;
-                    }
-
-                    QPushButton#showRewardButton {
+                    QPushButton#gasValveOpenButton {
                         background-color: #27ae60;
                         color: white;
                         border-color: #229954;
                         font-weight: bold;
                     }
 
-                    QPushButton#showRewardButton:hover {
+                    QPushButton#gasValveOpenButton:hover {
                         background-color: #229954;
                         border-color: #1e8449;
+                    }
+
+                    QPushButton#gasValveCloseButton {
+                        background-color: #e67e22;
+                        color: white;
+                        border-color: #d35400;
+                        font-weight: bold;
+                    }
+
+                    QPushButton#gasValveCloseButton:hover {
+                        background-color: #d35400;
+                        border-color: #ba4a00;
+                    }
+
+                    QPushButton#gasPuffButton {
+                        background-color: #3498db;
+                        color: white;
+                        border-color: #2980b9;
+                        font-weight: bold;
+                    }
+
+                    QPushButton#gasPuffButton:hover {
+                        background-color: #2980b9;
+                        border-color: #21618c;
                     }
                 """)
 
@@ -810,6 +953,29 @@ class _ControlUIWindow(QMainWindow):
                 # External guidance state changed, update UI accordingly
                 self._guidance_enabled = external_guidance_state
                 self._update_guidance_ui()
+
+            # Reads valve tracker state.
+            dispensed_volume = float(self._valve_tracker[0])
+
+            # Reads gas puff tracker state.
+            puff_count = int(self._gas_puff_tracker[0])
+
+            # Detects when reward delivery completes (dispensed volume increased while reward was in progress).
+            if self._reward_in_progress and dispensed_volume > self._previous_dispensed_volume:
+                self._reward_in_progress = False
+                self.valve_status_label.setText("Valve: 🔒 Closed")
+                self.valve_status_label.setStyleSheet("QLabel { color: #e67e22; font-weight: bold; }")
+
+            # Detects when gas puff delivery completes (puff count increased while puff was in progress).
+            if self._puff_in_progress and puff_count > self._previous_puff_count:
+                self._puff_in_progress = False
+                self.gas_valve_status_label.setText("Gas Valve: 🔒 Closed")
+                self.gas_valve_status_label.setStyleSheet("QLabel { color: #e67e22; font-weight: bold; }")
+
+            # Updates previous values for the next check.
+            self._previous_dispensed_volume = dispensed_volume
+            self._previous_puff_count = puff_count
+
         except Exception:
             self.close()
 
@@ -847,18 +1013,10 @@ class _ControlUIWindow(QMainWindow):
 
     def _deliver_reward(self) -> None:
         """Instructs the system to deliver a water reward to the animal."""
-        # Sends the reward command via the SharedMemoryArray and temporarily sets the statsu to indicate that the
-        # reward is sent.
         self._data_array[_DataArrayIndex.REWARD_SIGNAL] = 1
-        self.valve_status_label.setText("Reward: 🟢 Sent")
+        self._reward_in_progress = True
+        self.valve_status_label.setText("Valve: 💧 Delivering")
         self.valve_status_label.setStyleSheet("QLabel { color: #3498db; font-weight: bold; }")
-
-        # Resets the status to 'closed' after 1 second using the Qt6 single shot timer. This is realistically the
-        # longest time the system would take to start and finish delivering the reward
-        QTimer.singleShot(2000, lambda: self.valve_status_label.setText("Valve: 🔒 Closed"))
-        QTimer.singleShot(
-            2000, lambda: self.valve_status_label.setStyleSheet("QLabel { color: #e67e22; font-weight: bold; }")
-        )
 
     def _open_valve(self) -> None:
         """Instructs the system to open the water delivery valve."""
@@ -933,17 +1091,25 @@ class _ControlUIWindow(QMainWindow):
         # Refresh styles after object name change
         self._refresh_button_style(button=self.pause_btn)
 
-    def _toggle_reward_visibility(self) -> None:
-        """Instructs the system to show or hide the Virtual Reality guidance mode collision box."""
-        self._show_reward = not self._show_reward
-        if self._show_reward:
-            self._data_array[_DataArrayIndex.SHOW_REWARD] = 1
-            self.reward_visibility_btn.setText("🙈 Hide Reward")
-            self.reward_visibility_btn.setObjectName("hideRewardButton")
-        else:
-            self._data_array[_DataArrayIndex.SHOW_REWARD] = 0
-            self.reward_visibility_btn.setText("👁️ Show Reward")
-            self.reward_visibility_btn.setObjectName("showRewardButton")
+    def _update_gas_puff_duration(self) -> None:
+        """Updates the gas puff duration to match the current GUI configuration."""
+        self._data_array[_DataArrayIndex.GAS_VALVE_PUFF_DURATION] = int(self.gas_duration_spinbox.value())
 
-        # Refreshes styles after object name change
-        self._refresh_button_style(button=self.reward_visibility_btn)
+    def _gas_valve_open(self) -> None:
+        """Instructs the system to open the gas puff valve."""
+        self._data_array[_DataArrayIndex.GAS_VALVE_OPEN] = 1
+        self.gas_valve_status_label.setText("Gas Valve: 🔓 Opened")
+        self.gas_valve_status_label.setStyleSheet("QLabel { color: #27ae60; font-weight: bold; }")
+
+    def _gas_valve_close(self) -> None:
+        """Instructs the system to close the gas puff valve."""
+        self._data_array[_DataArrayIndex.GAS_VALVE_CLOSE] = 1
+        self.gas_valve_status_label.setText("Gas Valve: 🔒 Closed")
+        self.gas_valve_status_label.setStyleSheet("QLabel { color: #e67e22; font-weight: bold; }")
+
+    def _gas_valve_puff(self) -> None:
+        """Instructs the system to deliver a gas puff."""
+        self._data_array[_DataArrayIndex.GAS_VALVE_PUFF] = 1
+        self._puff_in_progress = True
+        self.gas_valve_status_label.setText("Gas Valve: 💨 Puffing")
+        self.gas_valve_status_label.setStyleSheet("QLabel { color: #3498db; font-weight: bold; }")

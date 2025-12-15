@@ -27,6 +27,7 @@ from ..shared_components import (
     ScreenInterface,
     TorqueInterface,
     EncoderInterface,
+    GasPuffValveInterface,
 )
 
 
@@ -373,6 +374,7 @@ class MicroControllerInterfaces:
         _configuration: Stores the managed microcontrollers' configuration parameters.
         brake: The interface that controls the electromagnetic particle brake attached to the running wheel.
         valve: The interface that controls the solenoid water valve.
+        gas_puff_valve: The interface that controls the gas puff valve.
         screens: The interface that controls the power state of the Virtual Reality display screens.
         _actor: The main interface for the 'Actor' Ataraxis Micro Controller (AMC) device.
         mesoscope_frame: The interface that monitors frame acquisition timestamp signals sent by the mesoscope.
@@ -412,6 +414,7 @@ class MicroControllerInterfaces:
         self.valve = ValveInterface(
             valve_calibration_data=self._configuration.valve_calibration_data,  # type: ignore[arg-type]
         )
+        self.gas_puff_valve = GasPuffValveInterface()
         self.screens = ScreenInterface()
 
         # Main interface:
@@ -420,7 +423,7 @@ class MicroControllerInterfaces:
             buffer_size=8192,
             port=self._configuration.actor_port,
             data_logger=data_logger,
-            module_interfaces=(self.brake, self.valve, self.screens),
+            module_interfaces=(self.brake, self.valve, self.gas_puff_valve, self.screens),
             keepalive_interval=self._configuration.keepalive_interval_ms,
         )
 

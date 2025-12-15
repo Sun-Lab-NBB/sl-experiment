@@ -172,7 +172,6 @@ class _VRPCDestinations:
     """The path to the session's data directory on the BioHPC server."""
 
 
-
 class MesoscopeData:
     """Defines the Mesoscope-VR data acquisition system's filesystem layout used to acquire and preprocess the target
     session's data.
