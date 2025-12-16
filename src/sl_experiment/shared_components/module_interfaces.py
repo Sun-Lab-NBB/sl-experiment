@@ -49,8 +49,6 @@ class EncoderInterface(ModuleInterface):
             encoder.
 
     Attributes:
-        _motion_topic: The MQTT topic used to transfer the collected motion data to the Virtual Reality environment
-            manager.
         _ppr: The resolution of the managed quadrature encoder.
         _wheel_diameter: The diameter of the running wheel connected to the encoder.
         _cm_per_pulse: The conversion factor that translates encoder pulses into centimeters.
@@ -81,7 +79,6 @@ class EncoderInterface(ModuleInterface):
         )
 
         # Saves additional data to class attributes.
-        self._motion_topic: str = "LinearTreadmill/Data"
         self._ppr: int = encoder_ppr
         self._wheel_diameter: float = wheel_diameter
 
@@ -198,13 +195,6 @@ class EncoderInterface(ModuleInterface):
             self._monitoring = False
 
     @property
-    def mqtt_topic(self) -> str:
-        """Returns the MQTT topic used to transfer the motion (distance) data from the interface to the Virtual Reality
-        manager (Unity).
-        """
-        return self._motion_topic
-
-    @property
     def cm_per_pulse(self) -> np.float64:
         """Returns the conversion factor that translates the raw encoder pulse counts to traveled centimeters."""
         return self._cm_per_pulse
@@ -238,8 +228,6 @@ class LickInterface(ModuleInterface):
             sensor.
 
     Attributes:
-        _sensor_topic: The MQTT topic used to transfer the collected lick event data to the Virtual Reality environment
-            manager.
         _lick_threshold: The threshold voltage for detecting lick events.
         _polling_frequency: The frequency, in microseconds, at which to check the lick sensor's state when monitoring
             the sensor.
@@ -261,7 +249,6 @@ class LickInterface(ModuleInterface):
             error_codes=None,
         )
 
-        self._sensor_topic: str = "LickPort/"
         self._lick_threshold: np.uint16 = np.uint16(lick_threshold)
         self._polling_frequency = np.uint32(polling_frequency)
 
@@ -363,13 +350,6 @@ class LickInterface(ModuleInterface):
         else:
             self.reset_command_queue()
             self._monitoring = False
-
-    @property
-    def mqtt_topic(self) -> str:
-        """Returns the MQTT topic used to transfer the lick event data from the interface to the Virtual Reality
-        manager (Unity).
-        """
-        return self._sensor_topic
 
     @property
     def lick_count(self) -> np.uint64:
@@ -749,8 +729,6 @@ class ValveInterface(ModuleInterface):
             calibration data.
         _nonlinearity_exponent: The intercept derived from the fitting the power law model to the valve's
             calibration data.
-        _reward_topic: The MQTT topic used to transfer the reward delivery instructions from the Virtual Reality
-            environment manager to the interface.
         _valve_tracker: The SharedMemoryArray instance that transfers the reward data collected by the module from
             the communication process to other runtime processes.
         _reward: The code for the Pulse module command.
@@ -796,10 +774,6 @@ class ValveInterface(ModuleInterface):
         scale_coefficient, nonlinearity_exponent = parameters
         self._scale_coefficient: np.float64 = np.round(a=np.float64(scale_coefficient), decimals=8)
         self._nonlinearity_exponent: np.float64 = np.round(a=np.float64(nonlinearity_exponent), decimals=8)
-
-        # Stores the MQTT topic used to transfer reward delivery triggers from the Virtual Reality (VR) environment
-        # manager (Unity) to the interface.
-        self._reward_topic: str = "Gimbl/Reward/"
 
         # Pre-creates a shared memory array used to track and share valve state data. Index 0 tracks the total amount of
         # water dispensed by the valve during runtime. Index 1 tracks the current valve calibration state (0 -
@@ -992,13 +966,6 @@ class ValveInterface(ModuleInterface):
         pulse_duration = (target_volume / self._scale_coefficient) ** (1.0 / self._nonlinearity_exponent)
 
         return np.uint32(np.round(pulse_duration))
-
-    @property
-    def mqtt_topic(self) -> str:
-        """Returns the MQTT topic used by the Virtual Reality environment manager (Unity) to send reward triggers to
-        the module.
-        """
-        return self._reward_topic
 
     @property
     def scale_coefficient(self) -> np.float64:

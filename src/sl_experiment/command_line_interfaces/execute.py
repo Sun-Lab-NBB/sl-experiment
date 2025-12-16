@@ -99,8 +99,8 @@ def check_window(ctx: click.Context) -> None:
     "-t",
     "--maximum_time",
     type=int,
-    required=True,
-    help="The maximum time to run the training session, in minutes.",
+    default=20,
+    help="The maximum time to run the training session, in minutes. Defaults to 20 minutes.",
 )
 @click.option(
     "-min",
@@ -164,8 +164,8 @@ def lick_training(
     "-t",
     "--maximum_time",
     type=int,
-    required=True,
-    help="The maximum time to run the training session, in minutes.",
+    default=40,
+    help="The maximum time to run the training session, in minutes. Defaults to 40 minutes.",
 )
 @click.option(
     "-is",

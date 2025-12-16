@@ -40,11 +40,12 @@ class _DataArrayIndex(IntEnum):
     OPEN_VALVE = 6
     CLOSE_VALVE = 7
     REWARD_VOLUME = 8
-    GUIDANCE_ENABLED = 9
-    GAS_VALVE_OPEN = 10
-    GAS_VALVE_CLOSE = 11
-    GAS_VALVE_PUFF = 12
-    GAS_VALVE_PUFF_DURATION = 13
+    REINFORCING_GUIDANCE_ENABLED = 9
+    AVERSIVE_GUIDANCE_ENABLED = 10
+    GAS_VALVE_OPEN = 11
+    GAS_VALVE_CLOSE = 12
+    GAS_VALVE_PUFF = 13
+    GAS_VALVE_PUFF_DURATION = 14
 
 
 class RuntimeControlUI:
@@ -77,9 +78,10 @@ class RuntimeControlUI:
     def __init__(self, valve_tracker: SharedMemoryArray, gas_puff_tracker: SharedMemoryArray) -> None:
         # Defines the prototype array for the SharedMemoryArray initialization and sets the array elements to the
         # desired default state
-        prototype = np.zeros(shape=14, dtype=np.int32)
+        prototype = np.zeros(shape=15, dtype=np.int32)
         prototype[_DataArrayIndex.PAUSE_STATE] = 1  # Ensures all runtimes start in a paused state
-        prototype[_DataArrayIndex.GUIDANCE_ENABLED] = 0  # Initially disables guidance for all runtimes
+        prototype[_DataArrayIndex.REINFORCING_GUIDANCE_ENABLED] = 0  # Initially disables reinforcing guidance
+        prototype[_DataArrayIndex.AVERSIVE_GUIDANCE_ENABLED] = 0  # Initially disables aversive guidance
         prototype[_DataArrayIndex.REWARD_VOLUME] = 5  # Preconfigures reward delivery to use 5 uL rewards
         prototype[_DataArrayIndex.GAS_VALVE_PUFF_DURATION] = 100  # Default gas puff duration: 100 ms
 
@@ -185,13 +187,21 @@ class RuntimeControlUI:
         """
         self._data_array[_DataArrayIndex.PAUSE_STATE] = 1 if paused else 0
 
-    def set_guidance_state(self, *, enabled: bool) -> None:
-        """Configures the GUI to reflect the data acquisition session's Virtual Reality task guidance state.
+    def set_reinforcing_guidance_state(self, *, enabled: bool) -> None:
+        """Configures the GUI to reflect the data acquisition session's reinforcing trial guidance state.
 
         Args:
-            enabled: Determines whether the guidance mode is currently enabled.
+            enabled: Determines whether the reinforcing guidance mode is currently enabled.
         """
-        self._data_array[_DataArrayIndex.GUIDANCE_ENABLED] = 1 if enabled else 0
+        self._data_array[_DataArrayIndex.REINFORCING_GUIDANCE_ENABLED] = 1 if enabled else 0
+
+    def set_aversive_guidance_state(self, *, enabled: bool) -> None:
+        """Configures the GUI to reflect the data acquisition session's aversive trial guidance state.
+
+        Args:
+            enabled: Determines whether the aversive guidance mode is currently enabled.
+        """
+        self._data_array[_DataArrayIndex.AVERSIVE_GUIDANCE_ENABLED] = 1 if enabled else 0
 
     @property
     def exit_signal(self) -> bool:
@@ -242,9 +252,14 @@ class RuntimeControlUI:
         return int(self._data_array[_DataArrayIndex.REWARD_VOLUME])
 
     @property
-    def enable_guidance(self) -> bool:
-        """Returns True if the user has enabled the Virtual Reality task guidance mode."""
-        return bool(self._data_array[_DataArrayIndex.GUIDANCE_ENABLED])
+    def enable_reinforcing_guidance(self) -> bool:
+        """Returns True if the user has enabled the reinforcing trial guidance mode."""
+        return bool(self._data_array[_DataArrayIndex.REINFORCING_GUIDANCE_ENABLED])
+
+    @property
+    def enable_aversive_guidance(self) -> bool:
+        """Returns True if the user has enabled the aversive trial guidance mode."""
+        return bool(self._data_array[_DataArrayIndex.AVERSIVE_GUIDANCE_ENABLED])
 
     @property
     def gas_valve_open_signal(self) -> bool:
@@ -284,7 +299,8 @@ class _ControlUIWindow(QMainWindow):
         _gas_puff_tracker: The SharedMemoryArray instance used by the GasPuffValveInterface to export the gas puff
             count to other processes during runtime.
         _is_paused: Tracks whether the runtime is paused.
-        _guidance_enabled: Tracks whether the Virtual Reality task guidance mode is enabled.
+        _reinforcing_guidance_enabled: Tracks whether reinforcing trial guidance is enabled.
+        _aversive_guidance_enabled: Tracks whether aversive trial guidance is enabled.
         _previous_dispensed_volume: Tracks the previous dispensed volume to detect when water delivery completes.
         _reward_in_progress: Tracks whether a reward delivery is in progress.
         _previous_puff_count: Tracks the previous gas puff count to detect when puff delivery completes.
@@ -301,7 +317,8 @@ class _ControlUIWindow(QMainWindow):
         self._gas_puff_tracker: SharedMemoryArray = gas_puff_tracker
 
         self._is_paused: bool = True
-        self._guidance_enabled: bool = False
+        self._reinforcing_guidance_enabled: bool = False
+        self._aversive_guidance_enabled: bool = False
 
         # Tracks the previous dispensed volume to detect when water delivery completes.
         self._previous_dispensed_volume: float = 0.0
@@ -316,7 +333,7 @@ class _ControlUIWindow(QMainWindow):
         self.setWindowTitle("Mesoscope-VR Control Panel")
 
         # Uses fixed size
-        self.setFixedSize(450, 550)
+        self.setFixedSize(450, 700)
 
         # Sets up the interactive UI
         self._setup_ui()
@@ -355,16 +372,28 @@ class _ControlUIWindow(QMainWindow):
         self.pause_btn.clicked.connect(self._toggle_pause)
         self.pause_btn.setObjectName("resumeButton")
 
-        # Lick Guidance
-        # Ensures the array is also set to the default value
-        self.guidance_btn = QPushButton("🎯 Enable Guidance")
-        self.guidance_btn.setToolTip("Toggles lick guidance mode on or off.")
-        # noinspection PyUnresolvedReferences
-        self.guidance_btn.clicked.connect(self._toggle_guidance)
-        self.guidance_btn.setObjectName("guidanceButton")
+        # Configures the main control buttons
+        for btn in [self.exit_btn, self.pause_btn]:
+            btn.setMinimumHeight(35)
+            btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            runtime_control_layout.addWidget(btn)
 
-        # Configures the buttons to expand when the UI is resized, but use a fixed height of 35 points
-        for btn in [self.exit_btn, self.pause_btn, self.guidance_btn]:
+        # Reinforcing Guidance button
+        self.reinforcing_guidance_btn = QPushButton("🎯 Enable Reinforcing Guidance")
+        self.reinforcing_guidance_btn.setToolTip("Toggles reinforcing trial guidance mode on or off.")
+        # noinspection PyUnresolvedReferences
+        self.reinforcing_guidance_btn.clicked.connect(self._toggle_reinforcing_guidance)
+        self.reinforcing_guidance_btn.setObjectName("reinforcingGuidanceButton")
+
+        # Aversive Guidance button
+        self.aversive_guidance_btn = QPushButton("🎯 Enable Aversive Guidance")
+        self.aversive_guidance_btn.setToolTip("Toggles aversive trial guidance mode on or off.")
+        # noinspection PyUnresolvedReferences
+        self.aversive_guidance_btn.clicked.connect(self._toggle_aversive_guidance)
+        self.aversive_guidance_btn.setObjectName("aversiveGuidanceButton")
+
+        # Configures guidance buttons
+        for btn in [self.reinforcing_guidance_btn, self.aversive_guidance_btn]:
             btn.setMinimumHeight(35)
             btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
             runtime_control_layout.addWidget(btn)
@@ -382,8 +411,8 @@ class _ControlUIWindow(QMainWindow):
         # Adds the runtime control box to the UI widget
         main_layout.addWidget(runtime_control_group)
 
-        # Valve Control Group
-        valve_group = QGroupBox("Valve Control")
+        # Reward Valve Control Group
+        valve_group = QGroupBox("Reward Valve Control")
         valve_layout = QVBoxLayout(valve_group)
         valve_layout.setSpacing(6)
 
@@ -517,7 +546,7 @@ class _ControlUIWindow(QMainWindow):
         gas_valve_status_layout.addWidget(self.gas_duration_spinbox)
 
         # Adds the gas valve status tracker on the right
-        self.gas_valve_status_label = QLabel("Gas Valve: 🔒 Closed")
+        self.gas_valve_status_label = QLabel("Valve: 🔒 Closed")
         self.gas_valve_status_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         gas_valve_status_font = QFont()
         gas_valve_status_font.setPointSize(35)
@@ -860,26 +889,50 @@ class _ControlUIWindow(QMainWindow):
                         border-radius: 4px;
                     }
 
-                    QPushButton#guidanceButton {
-                    background-color: #9b59b6;
-                    color: white;
-                    border-color: #8e44ad;
-                    font-weight: bold;
+                    QPushButton#reinforcingGuidanceButton {
+                        background-color: #3498db;
+                        color: white;
+                        border-color: #2980b9;
+                        font-weight: bold;
                     }
 
-                    QPushButton#guidanceButton:hover {
-                        background-color: #8e44ad;
-                        border-color: #7d3c98;
+                    QPushButton#reinforcingGuidanceButton:hover {
+                        background-color: #2980b9;
+                        border-color: #1f6dad;
                     }
 
-                    QPushButton#guidanceDisableButton {
+                    QPushButton#reinforcingGuidanceDisableButton {
                         background-color: #95a5a6;
                         color: white;
                         border-color: #7f8c8d;
                         font-weight: bold;
                     }
 
-                    QPushButton#guidanceDisableButton:hover {
+                    QPushButton#reinforcingGuidanceDisableButton:hover {
+                        background-color: #7f8c8d;
+                        border-color: #6c7b7d;
+                    }
+
+                    QPushButton#aversiveGuidanceButton {
+                        background-color: #9b59b6;
+                        color: white;
+                        border-color: #8e44ad;
+                        font-weight: bold;
+                    }
+
+                    QPushButton#aversiveGuidanceButton:hover {
+                        background-color: #8e44ad;
+                        border-color: #7d3c98;
+                    }
+
+                    QPushButton#aversiveGuidanceDisableButton {
+                        background-color: #95a5a6;
+                        color: white;
+                        border-color: #7f8c8d;
+                        font-weight: bold;
+                    }
+
+                    QPushButton#aversiveGuidanceDisableButton:hover {
                         background-color: #7f8c8d;
                         border-color: #6c7b7d;
                     }
@@ -946,13 +999,17 @@ class _ControlUIWindow(QMainWindow):
                 self._is_paused = external_pause_state
                 self._update_pause_ui()
 
-            # Checks for external guidance state changes and, if necessary, updates the GUI to reflect the current
-            # guidance state (enabled or disabled).
-            external_guidance_state = bool(self._data_array[_DataArrayIndex.GUIDANCE_ENABLED])
-            if external_guidance_state != self._guidance_enabled:
-                # External guidance state changed, update UI accordingly
-                self._guidance_enabled = external_guidance_state
-                self._update_guidance_ui()
+            # Checks for external reinforcing guidance state changes and, if necessary, updates the GUI.
+            external_reinforcing_guidance = bool(self._data_array[_DataArrayIndex.REINFORCING_GUIDANCE_ENABLED])
+            if external_reinforcing_guidance != self._reinforcing_guidance_enabled:
+                self._reinforcing_guidance_enabled = external_reinforcing_guidance
+                self._update_reinforcing_guidance_ui()
+
+            # Checks for external aversive guidance state changes and, if necessary, updates the GUI.
+            external_aversive_guidance = bool(self._data_array[_DataArrayIndex.AVERSIVE_GUIDANCE_ENABLED])
+            if external_aversive_guidance != self._aversive_guidance_enabled:
+                self._aversive_guidance_enabled = external_aversive_guidance
+                self._update_aversive_guidance_ui()
 
             # Reads valve tracker state.
             dispensed_volume = float(self._valve_tracker[0])
@@ -969,7 +1026,7 @@ class _ControlUIWindow(QMainWindow):
             # Detects when gas puff delivery completes (puff count increased while puff was in progress).
             if self._puff_in_progress and puff_count > self._previous_puff_count:
                 self._puff_in_progress = False
-                self.gas_valve_status_label.setText("Gas Valve: 🔒 Closed")
+                self.gas_valve_status_label.setText("Valve: 🔒 Closed")
                 self.gas_valve_status_label.setStyleSheet("QLabel { color: #e67e22; font-weight: bold; }")
 
             # Updates previous values for the next check.
@@ -1057,23 +1114,41 @@ class _ControlUIWindow(QMainWindow):
         button.style().polish(button)  # type: ignore[union-attr]
         button.update()
 
-    def _update_guidance_ui(self) -> None:
-        """Updates the GUI to reflect the current Virtual Reality task guidance state."""
-        if self._guidance_enabled:
-            self.guidance_btn.setText("🚫 Disable Guidance")
-            self.guidance_btn.setObjectName("guidanceDisableButton")
+    def _update_reinforcing_guidance_ui(self) -> None:
+        """Updates the GUI to reflect the current reinforcing trial guidance state."""
+        if self._reinforcing_guidance_enabled:
+            self.reinforcing_guidance_btn.setText("🚫 Disable Reinforcing Guidance")
+            self.reinforcing_guidance_btn.setObjectName("reinforcingGuidanceDisableButton")
         else:
-            self.guidance_btn.setText("🎯 Enable Guidance")
-            self.guidance_btn.setObjectName("guidanceButton")
+            self.reinforcing_guidance_btn.setText("🎯 Enable Reinforcing Guidance")
+            self.reinforcing_guidance_btn.setObjectName("reinforcingGuidanceButton")
 
         # Refreshes styles after object name change
-        self._refresh_button_style(button=self.guidance_btn)
+        self._refresh_button_style(button=self.reinforcing_guidance_btn)
 
-    def _toggle_guidance(self) -> None:
-        """Instructs the system to enable or disable the Virtual Reality task guidance mode."""
-        self._guidance_enabled = not self._guidance_enabled
-        self._data_array[_DataArrayIndex.GUIDANCE_ENABLED] = 1 if self._guidance_enabled else 0
-        self._update_guidance_ui()
+    def _update_aversive_guidance_ui(self) -> None:
+        """Updates the GUI to reflect the current aversive trial guidance state."""
+        if self._aversive_guidance_enabled:
+            self.aversive_guidance_btn.setText("🚫 Disable Aversive Guidance")
+            self.aversive_guidance_btn.setObjectName("aversiveGuidanceDisableButton")
+        else:
+            self.aversive_guidance_btn.setText("🎯 Enable Aversive Guidance")
+            self.aversive_guidance_btn.setObjectName("aversiveGuidanceButton")
+
+        # Refreshes styles after object name change
+        self._refresh_button_style(button=self.aversive_guidance_btn)
+
+    def _toggle_reinforcing_guidance(self) -> None:
+        """Instructs the system to enable or disable the reinforcing trial guidance mode."""
+        self._reinforcing_guidance_enabled = not self._reinforcing_guidance_enabled
+        self._data_array[_DataArrayIndex.REINFORCING_GUIDANCE_ENABLED] = 1 if self._reinforcing_guidance_enabled else 0
+        self._update_reinforcing_guidance_ui()
+
+    def _toggle_aversive_guidance(self) -> None:
+        """Instructs the system to enable or disable the aversive trial guidance mode."""
+        self._aversive_guidance_enabled = not self._aversive_guidance_enabled
+        self._data_array[_DataArrayIndex.AVERSIVE_GUIDANCE_ENABLED] = 1 if self._aversive_guidance_enabled else 0
+        self._update_aversive_guidance_ui()
 
     def _update_pause_ui(self) -> None:
         """Updates the GUI to reflect the current data acquisition runtime pause state."""
@@ -1098,18 +1173,18 @@ class _ControlUIWindow(QMainWindow):
     def _gas_valve_open(self) -> None:
         """Instructs the system to open the gas puff valve."""
         self._data_array[_DataArrayIndex.GAS_VALVE_OPEN] = 1
-        self.gas_valve_status_label.setText("Gas Valve: 🔓 Opened")
+        self.gas_valve_status_label.setText("Valve: 🔓 Opened")
         self.gas_valve_status_label.setStyleSheet("QLabel { color: #27ae60; font-weight: bold; }")
 
     def _gas_valve_close(self) -> None:
         """Instructs the system to close the gas puff valve."""
         self._data_array[_DataArrayIndex.GAS_VALVE_CLOSE] = 1
-        self.gas_valve_status_label.setText("Gas Valve: 🔒 Closed")
+        self.gas_valve_status_label.setText("Valve: 🔒 Closed")
         self.gas_valve_status_label.setStyleSheet("QLabel { color: #e67e22; font-weight: bold; }")
 
     def _gas_valve_puff(self) -> None:
         """Instructs the system to deliver a gas puff."""
         self._data_array[_DataArrayIndex.GAS_VALVE_PUFF] = 1
         self._puff_in_progress = True
-        self.gas_valve_status_label.setText("Gas Valve: 💨 Puffing")
+        self.gas_valve_status_label.setText("Valve: 💨 Puffing")
         self.gas_valve_status_label.setStyleSheet("QLabel { color: #3498db; font-weight: bold; }")

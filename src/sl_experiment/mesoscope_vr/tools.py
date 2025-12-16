@@ -56,7 +56,6 @@ class _DataArrayIndex(IntEnum):
     CLOSE_VALVE = 7
     REWARD_VOLUME = 8
     GUIDANCE_ENABLED = 9
-    SHOW_REWARD = 10
 
 
 @dataclass()

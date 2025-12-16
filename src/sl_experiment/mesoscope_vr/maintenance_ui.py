@@ -296,7 +296,7 @@ class _MaintenanceUIWindow(QMainWindow):
         self._puff_in_progress: bool = False
 
         self.setWindowTitle("Mesoscope-VR Maintenance Panel")
-        self.setFixedSize(550, 600)
+        self.setFixedSize(550, 750)
 
         self._setup_ui()
         self._setup_monitoring()
@@ -311,8 +311,8 @@ class _MaintenanceUIWindow(QMainWindow):
         main_layout.setSpacing(12)
         main_layout.setContentsMargins(15, 15, 15, 15)
 
-        # Valve Control Group
-        valve_group = QGroupBox("Valve Control")
+        # Reward Valve Control Group
+        valve_group = QGroupBox("Reward Valve Control")
         valve_layout = QVBoxLayout(valve_group)
         valve_layout.setSpacing(6)
 
@@ -342,7 +342,9 @@ class _MaintenanceUIWindow(QMainWindow):
         volume_reward_layout = QHBoxLayout()
         volume_reward_layout.setSpacing(6)
 
-        # Volume control on the left
+        # Volume control on the left (same width as Open button)
+        volume_sub_layout = QHBoxLayout()
+        volume_sub_layout.setSpacing(6)
         volume_label = QLabel("Reward volume:")
         volume_label.setObjectName("volumeLabel")
 
@@ -352,23 +354,23 @@ class _MaintenanceUIWindow(QMainWindow):
         self.volume_spinbox.setDecimals(0)
         self.volume_spinbox.setSuffix(" μL")
         self.volume_spinbox.setToolTip("Sets water reward volume. Accepts values between 1 and 20 μL.")
-        self.volume_spinbox.setMinimumHeight(30)
+        self.volume_spinbox.setMinimumHeight(35)
         # noinspection PyUnresolvedReferences
         self.volume_spinbox.valueChanged.connect(self._update_reward_volume)
 
-        volume_reward_layout.addWidget(volume_label)
-        volume_reward_layout.addWidget(self.volume_spinbox)
+        volume_sub_layout.addWidget(volume_label)
+        volume_sub_layout.addWidget(self.volume_spinbox)
 
-        # Reward button on the right
-        self.valve_reward_btn = QPushButton("● Reward")
+        # Reward button on the right (same width as Close button)
+        self.valve_reward_btn = QPushButton("💧 Reward")
         self.valve_reward_btn.setToolTip("Deliver water reward with specified volume")
         # noinspection PyUnresolvedReferences
         self.valve_reward_btn.clicked.connect(self._valve_reward)
         self.valve_reward_btn.setObjectName("rewardButton")
         self.valve_reward_btn.setMinimumHeight(35)
-        self.valve_reward_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
-        volume_reward_layout.addWidget(self.valve_reward_btn)
+        volume_reward_layout.addLayout(volume_sub_layout, stretch=1)
+        volume_reward_layout.addWidget(self.valve_reward_btn, stretch=1)
 
         valve_layout.addLayout(volume_reward_layout)
 
@@ -488,13 +490,13 @@ class _MaintenanceUIWindow(QMainWindow):
         self.gas_valve_open_btn.setToolTip("Open the gas puff valve")
         # noinspection PyUnresolvedReferences
         self.gas_valve_open_btn.clicked.connect(self._gas_valve_open)
-        self.gas_valve_open_btn.setObjectName("gasValveOpenButton")
+        self.gas_valve_open_btn.setObjectName("valveOpenButton")
 
         self.gas_valve_close_btn = QPushButton("🔒 Close")
         self.gas_valve_close_btn.setToolTip("Close the gas puff valve")
         # noinspection PyUnresolvedReferences
         self.gas_valve_close_btn.clicked.connect(self._gas_valve_close)
-        self.gas_valve_close_btn.setObjectName("gasValveCloseButton")
+        self.gas_valve_close_btn.setObjectName("valveCloseButton")
 
         for btn in [self.gas_valve_open_btn, self.gas_valve_close_btn]:
             btn.setMinimumHeight(35)
@@ -507,6 +509,9 @@ class _MaintenanceUIWindow(QMainWindow):
         puff_layout = QHBoxLayout()
         puff_layout.setSpacing(6)
 
+        # Duration control on the left (same width as Open button)
+        puff_sub_layout = QHBoxLayout()
+        puff_sub_layout.setSpacing(6)
         gas_puff_label = QLabel("Puff duration:")
         gas_puff_label.setObjectName("volumeLabel")
 
@@ -516,27 +521,28 @@ class _MaintenanceUIWindow(QMainWindow):
         self.gas_puff_duration_spinbox.setDecimals(0)
         self.gas_puff_duration_spinbox.setSuffix(" ms")
         self.gas_puff_duration_spinbox.setToolTip("Sets gas puff duration. Accepts values between 10 and 1000 ms.")
-        self.gas_puff_duration_spinbox.setMinimumHeight(30)
+        self.gas_puff_duration_spinbox.setMinimumHeight(35)
         # noinspection PyUnresolvedReferences
         self.gas_puff_duration_spinbox.valueChanged.connect(self._update_gas_puff_duration)
 
-        puff_layout.addWidget(gas_puff_label)
-        puff_layout.addWidget(self.gas_puff_duration_spinbox)
+        puff_sub_layout.addWidget(gas_puff_label)
+        puff_sub_layout.addWidget(self.gas_puff_duration_spinbox)
 
+        # Puff button on the right (same width as Close button)
         self.gas_valve_puff_btn = QPushButton("💨 Puff")
         self.gas_valve_puff_btn.setToolTip("Deliver a gas puff with specified duration")
         # noinspection PyUnresolvedReferences
         self.gas_valve_puff_btn.clicked.connect(self._gas_valve_puff)
-        self.gas_valve_puff_btn.setObjectName("gasPuffButton")
+        self.gas_valve_puff_btn.setObjectName("rewardButton")
         self.gas_valve_puff_btn.setMinimumHeight(35)
-        self.gas_valve_puff_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
-        puff_layout.addWidget(self.gas_valve_puff_btn)
+        puff_layout.addLayout(puff_sub_layout, stretch=1)
+        puff_layout.addWidget(self.gas_valve_puff_btn, stretch=1)
 
         gas_valve_layout.addLayout(puff_layout)
 
         # Gas valve status
-        self.gas_valve_status_label = QLabel("Gas Valve: Closed")
+        self.gas_valve_status_label = QLabel("Valve: Closed")
         self.gas_valve_status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.gas_valve_status_label.setFont(status_font)
         self.gas_valve_status_label.setStyleSheet("QLabel { color: #7f8c8d; font-weight: bold; }")
@@ -833,7 +839,7 @@ class _MaintenanceUIWindow(QMainWindow):
             # Detects when gas puff delivery completes (puff count increased while puff was in progress).
             if self._puff_in_progress and puff_count > self._previous_puff_count:
                 self._puff_in_progress = False
-                self.gas_valve_status_label.setText("Gas Valve: Closed")
+                self.gas_valve_status_label.setText("Valve: Closed")
                 self.gas_valve_status_label.setStyleSheet("QLabel { color: #e67e22; font-weight: bold; }")
 
             # Updates previous values for the next check.
@@ -910,20 +916,20 @@ class _MaintenanceUIWindow(QMainWindow):
     def _gas_valve_open(self) -> None:
         """Signals to open the gas puff valve."""
         self._data_array[_DataArrayIndex.GAS_VALVE_OPEN] = 1
-        self.gas_valve_status_label.setText("Gas Valve: Open")
+        self.gas_valve_status_label.setText("Valve: Open")
         self.gas_valve_status_label.setStyleSheet("QLabel { color: #27ae60; font-weight: bold; }")
 
     def _gas_valve_close(self) -> None:
         """Signals to close the gas puff valve."""
         self._data_array[_DataArrayIndex.GAS_VALVE_CLOSE] = 1
-        self.gas_valve_status_label.setText("Gas Valve: Closed")
+        self.gas_valve_status_label.setText("Valve: Closed")
         self.gas_valve_status_label.setStyleSheet("QLabel { color: #e67e22; font-weight: bold; }")
 
     def _gas_valve_puff(self) -> None:
         """Signals to deliver a gas puff."""
         self._data_array[_DataArrayIndex.GAS_VALVE_PULSE] = 1
         self._puff_in_progress = True
-        self.gas_valve_status_label.setText("Gas Valve: Puffing")
+        self.gas_valve_status_label.setText("Valve: Puffing")
         self.gas_valve_status_label.setStyleSheet("QLabel { color: #3498db; font-weight: bold; }")
 
     def _terminate_runtime(self) -> None:
@@ -931,3 +937,51 @@ class _MaintenanceUIWindow(QMainWindow):
         self._data_array[_DataArrayIndex.TERMINATION] = 1
         self.terminate_btn.setText("✖ Termination Requested")
         self.terminate_btn.setEnabled(False)
+
+
+if __name__ == "__main__":
+    # Creates mock SharedMemoryArrays for testing the UI
+    data_prototype = np.zeros(shape=14, dtype=np.uint32)
+    data_prototype[_DataArrayIndex.GAS_VALVE_PULSE_DURATION] = 100
+    data_prototype[_DataArrayIndex.REWARD_VOLUME] = 5
+
+    data_array = SharedMemoryArray.create_array(
+        name="maintenance_ui_test_data",
+        prototype=data_prototype,
+        exists_ok=True,
+    )
+    data_array.connect()
+
+    valve_tracker = SharedMemoryArray.create_array(
+        name="maintenance_ui_test_valve",
+        prototype=np.zeros(shape=2, dtype=np.float64),
+        exists_ok=True,
+    )
+    valve_tracker.connect()
+
+    gas_puff_tracker = SharedMemoryArray.create_array(
+        name="maintenance_ui_test_gas_puff",
+        prototype=np.zeros(shape=1, dtype=np.uint32),
+        exists_ok=True,
+    )
+    gas_puff_tracker.connect()
+
+    # Creates and runs the UI application
+    app = QApplication(sys.argv)
+    window = _MaintenanceUIWindow(
+        data_array=data_array,
+        valve_tracker=valve_tracker,
+        gas_puff_tracker=gas_puff_tracker,
+    )
+    window.show()
+    exit_code = app.exec()
+
+    # Cleans up shared memory
+    data_array.disconnect()
+    data_array.destroy()
+    valve_tracker.disconnect()
+    valve_tracker.destroy()
+    gas_puff_tracker.disconnect()
+    gas_puff_tracker.destroy()
+
+    sys.exit(exit_code)
