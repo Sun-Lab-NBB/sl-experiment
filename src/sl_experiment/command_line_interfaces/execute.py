@@ -99,26 +99,31 @@ def check_window(ctx: click.Context) -> None:
     "-t",
     "--maximum_time",
     type=int,
-    default=20,
     help="The maximum time to run the training session, in minutes. Defaults to 20 minutes.",
 )
 @click.option(
     "-min",
     "--minimum_delay",
     type=int,
-    help="The minimum number of seconds that has to pass between two consecutive reward deliveries during training.",
+    help=(
+        "The minimum number of seconds that has to pass between two consecutive reward deliveries during training. "
+        "Defaults to 6 seconds."
+    ),
 )
 @click.option(
     "-max",
     "--maximum_delay",
     type=int,
-    help="The maximum number of seconds that can pass between two consecutive reward deliveries during training.",
+    help=(
+        "The maximum number of seconds that can pass between two consecutive reward deliveries during training. "
+        "Defaults to 18 seconds."
+    ),
 )
 @click.option(
     "-v",
     "--maximum_volume",
     type=float,
-    help="The maximum volume of water, in milliliters, that can be delivered during training.",
+    help="The maximum volume of water, in milliliters, that can be delivered during training. Defaults to 1.0 mL.",
 )
 @click.option(
     "-ur",
@@ -127,13 +132,14 @@ def check_window(ctx: click.Context) -> None:
     help=(
         "The maximum number of rewards that can be delivered without the animal consuming them. If the unconsumed "
         "reward count exceeds this threshold, the system stops delivering new water rewards until the animal consumes "
-        "the already delivered rewards. Setting this argument to 0 disables the reward consumption tracking."
+        "the already delivered rewards. Setting this argument to 0 disables the reward consumption tracking. "
+        "Defaults to 1."
     ),
 )
 @click.pass_context
 def lick_training(
     ctx: click.Context,
-    maximum_time: int,
+    maximum_time: int | None,
     minimum_delay: int | None,
     maximum_delay: int | None,
     maximum_volume: float | None,
@@ -164,73 +170,68 @@ def lick_training(
     "-t",
     "--maximum_time",
     type=int,
-    default=40,
     help="The maximum time to run the training session, in minutes. Defaults to 40 minutes.",
 )
 @click.option(
     "-is",
     "--initial_speed",
     type=float,
-    default=None,
-    help="The initial speed, in centimeters per second, the animal must maintain to obtain water rewards.",
+    help=(
+        "The initial speed, in centimeters per second, the animal must maintain to obtain water rewards. "
+        "Defaults to 0.8 cm/s."
+    ),
 )
 @click.option(
     "-id",
     "--initial_duration",
     type=float,
-    default=None,
     help=(
         "The initial duration, in seconds, the animal must maintain above-threshold running speed to obtain water "
-        "rewards."
+        "rewards. Defaults to 1.5 seconds."
     ),
 )
 @click.option(
     "-it",
     "--increase_threshold",
     type=float,
-    default=None,
     help=(
         "The volume of water delivered to the animal, in milliliters, after which the speed and duration thresholds "
         "are increased by the specified step-sizes. This is used to make the training progressively harder for the "
-        "animal over the course of the training session."
+        "animal over the course of the training session. Defaults to 0.1 mL."
     ),
 )
 @click.option(
     "-ss",
     "--speed_step",
     type=float,
-    default=None,
     help=(
         "The amount, in centimeters per second, to increase the speed threshold each time the animal receives the "
-        "volume of water specified by the 'increase-threshold' parameter."
+        "volume of water specified by the 'increase-threshold' parameter. Defaults to 0.1 cm/s."
     ),
 )
 @click.option(
     "-ds",
     "--duration_step",
     type=float,
-    default=None,
     help=(
         "The amount, in seconds, to increase the duration threshold each time the animal receives the volume of water "
-        "specified by the 'increase-threshold' parameter."
+        "specified by the 'increase-threshold' parameter. Defaults to 0.1 seconds."
     ),
 )
 @click.option(
     "-v",
     "--maximum_volume",
     type=float,
-    default=None,
-    help="The maximum volume of water, in milliliters, that can be delivered during training.",
+    help="The maximum volume of water, in milliliters, that can be delivered during training. Defaults to 1.0 mL.",
 )
 @click.option(
     "-mit",
     "--maximum_idle_time",
     type=float,
-    default=None,
     help=(
         "The maximum time, in seconds, the animal is allowed to maintain the speed that is below the speed threshold "
         "and still receive the water reward. Setting this argument to 0 forces the animal to maintain the "
-        "above-threshold speed at all times."
+        "above-threshold speed at all times. Defaults to 0.3 seconds."
     ),
 )
 @click.option(
@@ -240,13 +241,14 @@ def lick_training(
     help=(
         "The maximum number of rewards that can be delivered without the animal consuming them. If the unconsumed "
         "reward count exceeds this threshold, the system stops delivering new water rewards until the animal consumes "
-        "the already delivered rewards. Setting this argument to 0 disables the reward consumption tracking."
+        "the already delivered rewards. Setting this argument to 0 disables the reward consumption tracking. "
+        "Defaults to 1."
     ),
 )
 @click.pass_context
 def run_training(
     ctx: click.Context,
-    maximum_time: int,
+    maximum_time: int | None,
     initial_speed: float | None,
     initial_duration: float | None,
     increase_threshold: float | None,
