@@ -206,7 +206,7 @@ def lick_training(
     type=float,
     help=(
         "The amount, in centimeters per second, to increase the speed threshold each time the animal receives the "
-        "volume of water specified by the 'increase-threshold' parameter. Defaults to 0.1 cm/s."
+        "volume of water specified by the 'increase-threshold' parameter. Defaults to 0.05 cm/s."
     ),
 )
 @click.option(
