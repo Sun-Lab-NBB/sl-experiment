@@ -19,8 +19,10 @@ from numpy.typing import NDArray  # noqa: TC002
 from ataraxis_time import PrecisionTimer, TimerPrecisions, TimestampFormats, convert_time, get_timestamp
 from sl_shared_assets import (
     SessionData,
+    GasPuffTrial,
     SessionTypes,
     ZaberPositions,
+    WaterRewardTrial,
     MesoscopePositions,
     RunTrainingDescriptor,
     LickTrainingDescriptor,
@@ -568,10 +570,14 @@ class _MesoscopeVRMQTTTopics(StrEnum):
     """The topic to which Unity sends the sequence of VR cues used by the current game session."""
     CUE_SEQUENCE_REQUEST = "CueSequenceTrigger/"
     """Requests Unity to send the sequence of VR cues used by the current game session."""
-    DISABLE_GUIDANCE = "MustLick/True/"
-    """Requests Unity to enable the task guidance mode."""
-    ENABLE_GUIDANCE = "MustLick/False/"
-    """Requests Unity to disable the task guidance mode."""
+    DISABLE_LICK_GUIDANCE = "MustLick/True/"
+    """Disables lick guidance for reinforcing trials (animal must lick to trigger reward)."""
+    ENABLE_LICK_GUIDANCE = "MustLick/False/"
+    """Enables lick guidance for reinforcing trials (reward on collision without lick)."""
+    DISABLE_OCCUPANCY_GUIDANCE = "MustWait/True/"
+    """Disables occupancy guidance for aversive trials (animal must meet duration requirement)."""
+    ENABLE_OCCUPANCY_GUIDANCE = "MustWait/False/"
+    """Enables occupancy guidance for aversive trials (brake pulse on early exit)."""
     SHOW_REWARD_ZONE_BOUNDARY = "VisibleMarker/True/"
     """Requests Unity to show the task guidance mode collision box to the animal."""
     HIDE_REWARD_ZONE_BOUNDARY = "VisibleMarker/False/"
@@ -580,6 +586,14 @@ class _MesoscopeVRMQTTTopics(StrEnum):
     """Requests Unity to send the name of the currently used game scene."""
     UNITY_SCENE = "SceneName/"
     """The topic to which Unity sends the name of the currently used game scene."""
+    STIMULUS = "Gimbl/Stimulus/"
+    """The topic used by Unity to notify the runtime when the animal triggers a stimulus (water reward or gas puff)."""
+    TRIGGER_DELAY = "Gimbl/TriggerDelay/"
+    """The topic to which Unity sends the occupancy delay to enforce by briefly pulsing the brake."""
+    ENCODER_DATA = "LinearTreadmill/Data"
+    """Sends animal motion (distance) updates to Unity."""
+    LICK_EVENT = "LickPort/"
+    """Sends lick event notifications to Unity."""
 
 
 class _MesoscopeVRLogMessageCodes(IntEnum):
@@ -591,10 +605,10 @@ class _MesoscopeVRLogMessageCodes(IntEnum):
     """The system has changed its (configuration) state."""
     RUNTIME_STATE = 2
     """The acquired session has changed its (runtime) state."""
-    GUIDANCE_STATE = 3
-    """The system has changed the VR task guidance state."""
-    SHOW_REWARD = 4
-    """The system has changed the visibility opf the VR task guidance bounding box."""
+    REINFORCING_GUIDANCE_STATE = 3
+    """The system has changed the reinforcing (water reward) trial guidance state."""
+    AVERSIVE_GUIDANCE_STATE = 4
+    """The system has changed the aversive (gas puff) trial guidance state."""
     DISTANCE_SNAPSHOT = 5
     """The system has taken a snapshot of the total distance traveled by the animal due to changing the VR wall cue 
     sequence."""
@@ -602,34 +616,52 @@ class _MesoscopeVRLogMessageCodes(IntEnum):
 
 @dataclass
 class _TrialState:
-    """Tracks the state of the Mesoscope-VR-acquired session's task trial.
+    """Tracks the state of the Mesoscope-VR-acquired session's task trials.
 
     This dataclass consolidates all trial-related state tracking attributes used during experiment runtimes to
-    monitor trial progression, manage task guidance modes, and determine reward delivery conditions.
+    monitor trial progression, manage task guidance modes, and determine stimulus delivery conditions. Supports both
+    reinforcing (water reward) and aversive (gas puff) trial types.
     """
 
+    # Overall trial tracking
     completed: int = 0
     """The total number of trials completed by the animal since the last cue sequence reset or runtime onset."""
-    guided_trials: int = 0
-    """The remaining number of trials for which to maintain the task guidance mode before automatically disabling it."""
-    failed_trials: int = 0
-    """The number of consecutive trials for which the animal did not receive a water reward due to failing the trial's 
-    task conditions."""
-    recovery_mode_threshold: int = 0
-    """The number of consecutively failed trials after which the system engages the task guidance recovery mode to 
-    assist the animal in resuming successful task performance.
-    """
-    recovery_trials: int = 0
-    """The number of trials for which the system engages the task guidance mode when the animal repeatedly fails to 
-    perform the task and triggers the recovery mode."""
-    rewarded: bool = False
-    """Tracks whether the currently executed trial has been rewarded."""
     distances: NDArray[np.float64] = field(default_factory=lambda: np.zeros(0, dtype=np.float64))
-    """Stores the total cumulative distance, in centimeters, the animals would travel at the end of each trial 
-    expected to be executed while acquiring the session's data."""
-    rewards: tuple[tuple[float, int], ...] = ((0.0, 0),)
-    """Stores the reward size (volume), in microliters, to be received by the animal for successfully completing trials 
-    during runtime and the duration, in milliseconds, of the auditory tone emitted when delivering each reward."""
+    """Stores the total cumulative distance, in centimeters, the animals would travel at the end of each trial."""
+
+    # Reinforcing (water reward) trial tracking
+    reinforcing_guided_trials: int = 0
+    """The remaining number of reinforcing trials for which to maintain the lick guidance mode."""
+    reinforcing_failed_trials: int = 0
+    """The number of consecutive reinforcing trials for which the animal did not receive a water reward."""
+    reinforcing_recovery_threshold: int = 0
+    """The number of consecutively failed reinforcing trials after which to engage recovery guidance mode."""
+    reinforcing_recovery_trials: int = 0
+    """The number of guided reinforcing trials to use when recovery mode is triggered."""
+    reinforcing_rewarded: bool = False
+    """Tracks whether the current reinforcing trial has been rewarded."""
+    reinforcing_rewards: tuple[tuple[float, int], ...] = ((0.0, 0),)
+    """Stores the reward size (volume in μL) and tone duration (ms) for each reinforcing trial."""
+
+    # Aversive (gas puff) trial tracking
+    aversive_guided_trials: int = 0
+    """The remaining number of aversive trials for which to maintain the occupancy guidance mode."""
+    aversive_failed_trials: int = 0
+    """The number of consecutive aversive trials for which the animal failed to meet occupancy requirements."""
+    aversive_recovery_threshold: int = 0
+    """The number of consecutively failed aversive trials after which to engage recovery guidance mode."""
+    aversive_recovery_trials: int = 0
+    """The number of guided aversive trials to use when recovery mode is triggered."""
+    aversive_succeeded: bool = False
+    """Tracks whether the animal met the occupancy requirement for the current aversive trial."""
+    aversive_puff_durations: tuple[int, ...] = (100,)
+    """Stores the gas puff duration (ms) for each aversive trial."""
+
+    # Trial structure configuration
+    trial_structures: dict[str, WaterRewardTrial | GasPuffTrial] = field(default_factory=dict)
+    """Maps trial structure names to their configuration objects."""
+    current_trial_name: str = ""
+    """The name of the currently active trial structure."""
 
     def trial_completed(self, traveled_distance: float) -> bool:
         """Determines whether the current trial is complete based on the total distance traveled by the animal.
@@ -644,29 +676,60 @@ class _TrialState:
         return traveled_distance > self.distances[self.completed]
 
     def get_current_reward(self) -> tuple[float, int]:
-        """Retrieves the reward parameters for the current trial.
+        """Retrieves the reward parameters for the current reinforcing trial.
 
         Returns:
-            A tuple containing the reward size in microliters and the reward tone duration in milliseconds for the
-            current trial.
+            A tuple containing the reward size in microliters and the reward tone duration in milliseconds.
         """
-        return self.rewards[self.completed]
+        return self.reinforcing_rewards[self.completed]
+
+    def get_current_puff_duration(self) -> int:
+        """Retrieves the gas puff duration for the current aversive trial.
+
+        Returns:
+            The gas puff duration in milliseconds.
+        """
+        return self.aversive_puff_durations[self.completed]
+
+    def get_current_trial_config(self) -> WaterRewardTrial | GasPuffTrial | None:
+        """Retrieves the configuration object for the currently active trial structure.
+
+        Returns:
+            The trial configuration object, or None if no trial is currently active.
+        """
+        return None if not self.current_trial_name else self.trial_structures.get(self.current_trial_name)
+
+    def is_current_trial_aversive(self) -> bool:
+        """Checks whether the current trial is an aversive (gas puff) trial.
+
+        Returns:
+            True if the current trial is a GasPuffTrial, False otherwise.
+        """
+        return isinstance(self.get_current_trial_config(), GasPuffTrial)
 
     def advance_trial(self) -> int:
         """Advances the trial tracking state to the next trial.
 
         Returns:
-            The updated count of consecutively failed trials after advancing to the next trial.
+            The updated count of consecutively failed trials for the current trial type.
         """
-        self.completed += 1  # Statically increments completed trial counter.
-        if not self.rewarded:
-            # Failed trials increment the failed trial tracker.
-            self.failed_trials += 1
+        self.completed += 1
+
+        if self.is_current_trial_aversive():
+            # Aversive trial: success = met occupancy requirement (no puff delivered)
+            if not self.aversive_succeeded:
+                self.aversive_failed_trials += 1
+            else:
+                self.aversive_failed_trials = 0
+            self.aversive_succeeded = False
+            return self.aversive_failed_trials
+        # Reinforcing trial: success = received water reward
+        if not self.reinforcing_rewarded:
+            self.reinforcing_failed_trials += 1
         else:
-            # Any rewarded trial automatically resets the consecutively failed trial tracker.
-            self.failed_trials = 0
-        self.rewarded = False  # Resets the reward state tracker.
-        return self.failed_trials
+            self.reinforcing_failed_trials = 0
+        self.reinforcing_rewarded = False
+        return self.reinforcing_failed_trials
 
 
 @dataclass
@@ -686,10 +749,12 @@ class _UnityState:
     """The sequence of the Virtual Reality environment wall cues used by the session's task environment. This array 
     defines the visual cues displayed to the animal as it progresses through the virtual track."""
     terminated: bool = False
-    """Tracks whether the system has detected that the Unity game engine has unexpectedly terminated its runtime. When 
+    """Tracks whether the system has detected that the Unity game engine has unexpectedly terminated its runtime. When
     True, the system enters an emergency pause state to allow the user to restart Unity."""
-    guidance_enabled: bool = False
-    """Tracks the state of the session's task guidance mode."""
+    reinforcing_guidance_enabled: bool = False
+    """Tracks the state of the reinforcing trial guidance mode."""
+    aversive_guidance_enabled: bool = False
+    """Tracks the state of the aversive trial guidance mode."""
 
 
 class _MesoscopeVRSystem:
@@ -917,7 +982,8 @@ class _MesoscopeVRSystem:
             _MesoscopeVRMQTTTopics.UNITY_TERMINATION,
             _MesoscopeVRMQTTTopics.UNITY_STARTUP,
             _MesoscopeVRMQTTTopics.UNITY_SCENE,
-            self._microcontrollers.valve.mqtt_topic,
+            _MesoscopeVRMQTTTopics.STIMULUS,
+            _MesoscopeVRMQTTTopics.TRIGGER_DELAY,
         )  # The list of topics monitored for the incoming data sent from the Unity game engine.
         self._unity: MQTTCommunication = MQTTCommunication(monitored_topics=monitored_topics)
         self._mesoscope_timer: PrecisionTimer = PrecisionTimer(precision=TimerPrecisions.MILLISECOND)
@@ -1006,8 +1072,10 @@ class _MesoscopeVRSystem:
         # Synchronizes the Unity game engine's state with the initial state of the runtime control's UI before
         # entering the checkpoint loop.
         if self._session_data.session_type == SessionTypes.MESOSCOPE_EXPERIMENT:
-            self._unity_state.guidance_enabled = self._ui.enable_guidance
-            self._toggle_lick_guidance(enable_guidance=self._unity_state.guidance_enabled)
+            self._unity_state.reinforcing_guidance_enabled = self._ui.enable_reinforcing_guidance
+            self._toggle_reinforcing_guidance(enable_guidance=self._unity_state.reinforcing_guidance_enabled)
+            self._unity_state.aversive_guidance_enabled = self._ui.enable_aversive_guidance
+            self._toggle_aversive_guidance(enable_guidance=self._unity_state.aversive_guidance_enabled)
 
         # Initializes the runtime visualizer. This HAS to be initialized after cameras and the UI to prevent collisions
         # in the QT backend, which is used by all three assets.
@@ -1169,6 +1237,9 @@ class _MesoscopeVRSystem:
                 torque_per_adc_unit=float(self._microcontrollers.torque.torque_per_adc_unit),
                 screens_initially_on=self._microcontrollers.screens.state,
                 recorded_mesoscope_ttl=True,
+                delivered_gas_puffs=any(
+                    isinstance(t, GasPuffTrial) for t in self._experiment_configuration.trial_structures.values()
+                ),
                 system_state_codes=_MesoscopeVRStates.to_dict(),
             )
         # Note, lick and run training runtimes only use a subset of all hardware modules.
@@ -1178,6 +1249,7 @@ class _MesoscopeVRSystem:
                 lick_threshold=int(self._microcontrollers.lick.lick_threshold),
                 valve_scale_coefficient=float(self._microcontrollers.valve.scale_coefficient),
                 valve_nonlinearity_exponent=float(self._microcontrollers.valve.nonlinearity_exponent),
+                delivered_gas_puffs=False,
                 system_state_codes=_MesoscopeVRStates.to_dict(),
             )
         elif self._session_data.session_type == SessionTypes.RUN_TRAINING:
@@ -1186,6 +1258,7 @@ class _MesoscopeVRSystem:
                 lick_threshold=int(self._microcontrollers.lick.lick_threshold),
                 valve_scale_coefficient=float(self._microcontrollers.valve.scale_coefficient),
                 valve_nonlinearity_exponent=float(self._microcontrollers.valve.nonlinearity_exponent),
+                delivered_gas_puffs=False,
                 system_state_codes=_MesoscopeVRStates.to_dict(),
             )
         else:
@@ -1310,7 +1383,7 @@ class _MesoscopeVRSystem:
                 # Advances the Unity scene forward by 0.1 Unity unit (~ 10 mm).
                 json_string = dumps(obj={"movement": 0.1})
                 byte_array = json_string.encode("utf-8")
-                self._unity.send_data(topic=self._microcontrollers.wheel_encoder.mqtt_topic, payload=byte_array)
+                self._unity.send_data(topic=_MesoscopeVRMQTTTopics.ENCODER_DATA, payload=byte_array)
 
                 # Parses incoming data from Unity to detect termination.
                 data = self._unity.get_data()
@@ -1475,17 +1548,26 @@ class _MesoscopeVRSystem:
                 a sequence of trials.
         """
         # Extracts all trial data in a single pass to avoid redundant iterations.
-        trials = list(self._experiment_configuration.trial_structures.values())  # type: ignore[union-attr]
+        trial_structures = self._experiment_configuration.trial_structures  # type: ignore[union-attr]
+        trials = list(trial_structures.values())
         trial_motifs = []
         trial_distances = []
-        trial_rewards = []
+        reinforcing_rewards = []
+        aversive_puff_durations = []
 
         for trial in trials:
             trial_motifs.append(np.array(trial.cue_sequence, dtype=np.uint8))
             trial_distances.append(float(trial.trial_length_cm))
-            trial_rewards.append((float(trial.trial_reward_size_ul), int(trial.reward_tone_duration_ms)))
+            if isinstance(trial, WaterRewardTrial):
+                reinforcing_rewards.append((float(trial.reward_size_ul), int(trial.reward_tone_duration_ms)))
+                aversive_puff_durations.append(0)  # Safe placeholder for reinforcing trials
+            else:  # GasPuffTrial
+                reinforcing_rewards.append((0.0, 0))  # Safe placeholder for aversive trials
+                aversive_puff_durations.append(int(trial.puff_duration_ms))
 
-        self._trial_state.rewards = tuple(trial_rewards)
+        self._trial_state.reinforcing_rewards = tuple(reinforcing_rewards)
+        self._trial_state.aversive_puff_durations = tuple(aversive_puff_durations)
+        self._trial_state.trial_structures = trial_structures
 
         # Prepares the flattened motif data using the MotifDecomposer class.
         motifs_flat, motif_starts, motif_lengths, motif_indices, distances_array = (
@@ -1733,8 +1815,10 @@ class _MesoscopeVRSystem:
                 self._microcontrollers.gas_puff_valve.deliver_puff(duration_ms=self._ui.gas_valve_puff_duration)
 
             if self._session_data.session_type == SessionTypes.MESOSCOPE_EXPERIMENT:
-                if self._ui.enable_guidance != self._unity_state.guidance_enabled:
-                    self._toggle_lick_guidance(enable_guidance=self._ui.enable_guidance)
+                if self._ui.enable_reinforcing_guidance != self._unity_state.reinforcing_guidance_enabled:
+                    self._toggle_reinforcing_guidance(enable_guidance=self._ui.enable_reinforcing_guidance)
+                if self._ui.enable_aversive_guidance != self._unity_state.aversive_guidance_enabled:
+                    self._toggle_aversive_guidance(enable_guidance=self._ui.enable_aversive_guidance)
 
             if self._ui.exit_signal:
                 self._terminate_runtime()
@@ -1745,27 +1829,53 @@ class _MesoscopeVRSystem:
         self._paused_water_volume += self._microcontrollers.valve.delivered_volume
         self._unconsumed_reward_count = 0
 
-    def _toggle_lick_guidance(self, *, enable_guidance: bool) -> None:
-        """Sets the Virtual Reality task guidance mode to the input state.
+    def _toggle_reinforcing_guidance(self, *, enable_guidance: bool) -> None:
+        """Sets the reinforcing trial guidance mode.
 
         Args:
-            enable_guidance: Determines whether to enable or disable the Virtual Reality task guidance.
+            enable_guidance: Determines whether to enable or disable reinforcing guidance.
         """
         if not enable_guidance:
-            self._unity.send_data(topic=_MesoscopeVRMQTTTopics.DISABLE_GUIDANCE)
+            self._unity.send_data(topic=_MesoscopeVRMQTTTopics.DISABLE_LICK_GUIDANCE)
         else:
-            self._unity.send_data(topic=_MesoscopeVRMQTTTopics.ENABLE_GUIDANCE)
+            self._unity.send_data(topic=_MesoscopeVRMQTTTopics.ENABLE_LICK_GUIDANCE)
 
-        # Logs the lick guidance state change.
+        # Logs the reinforcing guidance state change.
         log_package = LogPackage(
             source_id=self._source_id,
             acquisition_time=np.uint64(self._timestamp_timer.elapsed),
-            serialized_data=np.array([_MesoscopeVRLogMessageCodes.GUIDANCE_STATE, enable_guidance], dtype=np.uint8),
+            serialized_data=np.array(
+                [_MesoscopeVRLogMessageCodes.REINFORCING_GUIDANCE_STATE, enable_guidance], dtype=np.uint8
+            ),
         )
         self._logger.input_queue.put(log_package)
 
         # Updates the unity state tracker.
-        self._unity_state.guidance_enabled = enable_guidance
+        self._unity_state.reinforcing_guidance_enabled = enable_guidance
+
+    def _toggle_aversive_guidance(self, *, enable_guidance: bool) -> None:
+        """Sets the aversive trial guided mode.
+
+        Args:
+            enable_guidance: Determines whether to enable or disable aversive guidance.
+        """
+        if not enable_guidance:
+            self._unity.send_data(topic=_MesoscopeVRMQTTTopics.DISABLE_OCCUPANCY_GUIDANCE)
+        else:
+            self._unity.send_data(topic=_MesoscopeVRMQTTTopics.ENABLE_OCCUPANCY_GUIDANCE)
+
+        # Logs the aversive guidance state change.
+        log_package = LogPackage(
+            source_id=self._source_id,
+            acquisition_time=np.uint64(self._timestamp_timer.elapsed),
+            serialized_data=np.array(
+                [_MesoscopeVRLogMessageCodes.AVERSIVE_GUIDANCE_STATE, enable_guidance], dtype=np.uint8
+            ),
+        )
+        self._logger.input_queue.put(log_package)
+
+        # Updates the unity state tracker.
+        self._unity_state.aversive_guidance_enabled = enable_guidance
 
     def _change_system_state(self, new_state: int) -> None:
         """Updates and logs the new Mesoscope-VR system state.
@@ -2071,17 +2181,27 @@ class _MesoscopeVRSystem:
                 self._unity_state.position = current_position
                 json_string = dumps(obj={"movement": position_delta})
                 byte_array = json_string.encode("utf-8")
-                self._unity.send_data(topic=self._microcontrollers.wheel_encoder.mqtt_topic, payload=byte_array)
+                self._unity.send_data(topic=_MesoscopeVRMQTTTopics.ENCODER_DATA, payload=byte_array)
 
             # Checks if the animal has completed the current trial.
             if self._trial_state.trial_completed(traveled_distance):
                 failed_count = self._trial_state.advance_trial()
 
-                # Handles recovery mode activation.
-                if failed_count >= self._trial_state.recovery_mode_threshold and self._trial_state.recovery_trials > 0:
-                    self._trial_state.failed_trials = 0
-                    self._trial_state.guided_trials = self._trial_state.recovery_trials
-                    self._ui.set_guidance_state(enabled=True)
+                # Handles recovery mode activation based on trial type.
+                if self._trial_state.is_current_trial_aversive():
+                    threshold = self._trial_state.aversive_recovery_threshold
+                    recovery_trials = self._trial_state.aversive_recovery_trials
+                    if failed_count >= threshold and recovery_trials > 0:
+                        self._trial_state.aversive_failed_trials = 0
+                        self._trial_state.aversive_guided_trials = recovery_trials
+                        self._ui.set_aversive_guidance_state(enabled=True)
+                else:
+                    threshold = self._trial_state.reinforcing_recovery_threshold
+                    recovery_trials = self._trial_state.reinforcing_recovery_trials
+                    if failed_count >= threshold and recovery_trials > 0:
+                        self._trial_state.reinforcing_failed_trials = 0
+                        self._trial_state.reinforcing_guided_trials = recovery_trials
+                        self._ui.set_reinforcing_guidance_state(enabled=True)
 
         # Handles incoming lick data
         lick_count = self._microcontrollers.lick.lick_count
@@ -2091,7 +2211,7 @@ class _MesoscopeVRSystem:
             self._visualizer.add_lick_event()
 
             if self._session_data.session_type == SessionTypes.MESOSCOPE_EXPERIMENT:
-                self._unity.send_data(topic=self._microcontrollers.lick.mqtt_topic, payload=None)
+                self._unity.send_data(topic=_MesoscopeVRMQTTTopics.LICK_EVENT, payload=None)
 
         # Handles water delivery tracking
         dispensed_water = self._microcontrollers.valve.delivered_volume - (
@@ -2116,20 +2236,41 @@ class _MesoscopeVRSystem:
         if data is None:
             return
 
-        # Handles reward delivery commands from Unity.
-        if data[0] == self._microcontrollers.valve.mqtt_topic:
-            reward_size, tone_duration = self._trial_state.get_current_reward()
-            self.resolve_reward(reward_size=reward_size, tone_duration=tone_duration)
+        # Handles stimulus delivery commands from Unity (both water reward and gas puff).
+        if data[0] == _MesoscopeVRMQTTTopics.STIMULUS:
+            if self._trial_state.is_current_trial_aversive():
+                # Aversive trial: deliver gas puff
+                puff_duration = self._trial_state.get_current_puff_duration()
+                self._microcontrollers.gas_puff_valve.deliver_puff(duration_ms=puff_duration)
 
-            # Decrements the guided trial counter.
-            if self._trial_state.guided_trials > 0:
-                self._trial_state.guided_trials -= 1
+                # Decrements the guided trial counter for aversive trials.
+                if self._trial_state.aversive_guided_trials > 0:
+                    self._trial_state.aversive_guided_trials -= 1
+                    if self._trial_state.aversive_guided_trials == 0:
+                        self._ui.set_aversive_guidance_state(enabled=False)
 
-                if self._trial_state.guided_trials == 0:
-                    self._ui.set_guidance_state(enabled=False)
+                # Marks the aversive trial as failed (puff was delivered).
+                self._trial_state.aversive_succeeded = False
+            else:
+                # Reinforcing trial: deliver water reward
+                reward_size, tone_duration = self._trial_state.get_current_reward()
+                self.resolve_reward(reward_size=reward_size, tone_duration=tone_duration)
 
-            # Marks the trial as rewarded.
-            self._trial_state.rewarded = True
+                # Decrements the guided trial counter for reinforcing trials.
+                if self._trial_state.reinforcing_guided_trials > 0:
+                    self._trial_state.reinforcing_guided_trials -= 1
+                    if self._trial_state.reinforcing_guided_trials == 0:
+                        self._ui.set_reinforcing_guidance_state(enabled=False)
+
+                # Marks the reinforcing trial as rewarded.
+                self._trial_state.reinforcing_rewarded = True
+
+        # Handles occupancy guidance delay messages for brake pulsing.
+        if data[0] == _MesoscopeVRMQTTTopics.TRIGGER_DELAY:
+            payload = json.loads(data[1].decode("utf-8"))
+            delay_ms = payload.get("delay_ms", 0)
+            if delay_ms > 0:
+                self._microcontrollers.brake.send_pulse(duration_ms=delay_ms)
 
         # Handles Unity termination messages.
         if data[0] == _MesoscopeVRMQTTTopics.UNITY_TERMINATION:
@@ -2188,8 +2329,10 @@ class _MesoscopeVRSystem:
 
         if self._session_data.session_type == SessionTypes.MESOSCOPE_EXPERIMENT:
             # Synchronizes guidance state with UI.
-            if self._ui.enable_guidance != self._unity_state.guidance_enabled:
-                self._toggle_lick_guidance(enable_guidance=self._ui.enable_guidance)
+            if self._ui.enable_reinforcing_guidance != self._unity_state.reinforcing_guidance_enabled:
+                self._toggle_reinforcing_guidance(enable_guidance=self._ui.enable_reinforcing_guidance)
+            if self._ui.enable_aversive_guidance != self._unity_state.aversive_guidance_enabled:
+                self._toggle_aversive_guidance(enable_guidance=self._ui.enable_aversive_guidance)
 
     def _mesoscope_cycle(self) -> None:
         """Checks whether mesoscope frame acquisition is active and, if not, emergency pauses the runtime."""
@@ -2330,35 +2473,53 @@ class _MesoscopeVRSystem:
             if answer.lower() == "n":
                 return
 
-    def setup_lick_guidance(
+    def setup_reinforcing_guidance(
         self, initial_guided_trials: int = 3, recovery_mode_threshold: int = 9, recovery_guided_trials: int = 3
     ) -> None:
-        """Configures the task performance recover mode for the acquired session.
+        """Configures the guidance mode for reinforcing (water reward) trials.
 
         Notes:
-            Once this method configures the Mesoscope-VR guidance handling logic, the system maintains that logic
-            internally until the session's data acquisition ends or this method is called again to reconfigure the
-            guidance parameters.
+            Once this method configures the guidance handling logic, the system maintains that logic internally until
+            the session's data acquisition ends or this method is called again to reconfigure the guidance parameters.
 
         Args:
-            initial_guided_trials: The number of trials for which to initially enable the task guidance mode.
-            recovery_mode_threshold: The number of consecutively failed trials after which the system must engage the
-                task guidance recovery mode to assist the animal in resuming successful task performance.
-            recovery_guided_trials: The number of trials for which to enable the task guidance mode when the animal
-                repeatedly fails to perform the task and triggers the recovery mode.
-
+            initial_guided_trials: The number of reinforcing trials for which to initially enable guidance mode.
+            recovery_mode_threshold: The number of consecutively failed reinforcing trials after which the system
+                must engage the guidance recovery mode.
+            recovery_guided_trials: The number of guided reinforcing trials to use when recovery mode is triggered.
         """
-        self._trial_state.guided_trials = initial_guided_trials  # Resets the guided trial count.
-        self._trial_state.failed_trials = 0  # Resets the failed trial sequence tracker
+        self._trial_state.reinforcing_guided_trials = initial_guided_trials
+        self._trial_state.reinforcing_failed_trials = 0
+        self._trial_state.reinforcing_recovery_threshold = recovery_mode_threshold
+        self._trial_state.reinforcing_recovery_trials = recovery_guided_trials
 
-        # Updates failed trial threshold and recovery trial count
-        self._trial_state.recovery_mode_threshold = recovery_mode_threshold
-        self._trial_state.recovery_trials = recovery_guided_trials
+        # Enables reinforcing guidance via direct GUI manipulation.
+        if initial_guided_trials > 0:
+            self._ui.set_reinforcing_guidance_state(enabled=True)
 
-        # Enables lick guidance via direct GUI manipulation to run the requested number of initial trials in the
-        # guided mode. If the initial guided trial number is 0, does not activate lick guidance.
-        if self._trial_state.guided_trials > 0:
-            self._ui.set_guidance_state(enabled=True)
+    def setup_aversive_guidance(
+        self, initial_guided_trials: int = 0, recovery_mode_threshold: int = 9, recovery_guided_trials: int = 3
+    ) -> None:
+        """Configures the guidance mode for aversive (gas puff) trials.
+
+        Notes:
+            Once this method configures the guidance handling logic, the system maintains that logic internally until
+            the session's data acquisition ends or this method is called again to reconfigure the guidance parameters.
+
+        Args:
+            initial_guided_trials: The number of aversive trials for which to initially enable guidance mode.
+            recovery_mode_threshold: The number of consecutively failed aversive trials after which the system
+                must engage the guidance recovery mode.
+            recovery_guided_trials: The number of guided aversive trials to use when recovery mode is triggered.
+        """
+        self._trial_state.aversive_guided_trials = initial_guided_trials
+        self._trial_state.aversive_failed_trials = 0
+        self._trial_state.aversive_recovery_threshold = recovery_mode_threshold
+        self._trial_state.aversive_recovery_trials = recovery_guided_trials
+
+        # Enables aversive guidance via direct GUI manipulation.
+        if initial_guided_trials > 0:
+            self._ui.set_aversive_guidance_state(enabled=True)
 
     @property
     def terminated(self) -> bool:
@@ -3474,11 +3635,18 @@ def experiment_logic(
                 )
                 console.error(message=message, error=ValueError)
 
-            # Configures the lick guidance parameters for the executed experiment state (stage).
-            system.setup_lick_guidance(
-                initial_guided_trials=state.initial_guided_trials,
-                recovery_mode_threshold=state.recovery_failed_trial_threshold,
-                recovery_guided_trials=state.recovery_guided_trials,
+            # Configures the reinforcing guidance parameters for the executed experiment state (stage).
+            system.setup_reinforcing_guidance(
+                initial_guided_trials=state.reinforcing_initial_guided_trials,
+                recovery_mode_threshold=state.reinforcing_recovery_failed_threshold,
+                recovery_guided_trials=state.reinforcing_recovery_guided_trials,
+            )
+
+            # Configures the aversive guidance parameters for the executed experiment state (stage).
+            system.setup_aversive_guidance(
+                initial_guided_trials=state.aversive_initial_guided_trials,
+                recovery_mode_threshold=state.aversive_recovery_failed_threshold,
+                recovery_guided_trials=state.aversive_recovery_guided_trials,
             )
 
             # Creates a tqdm progress bar for the current experiment state
