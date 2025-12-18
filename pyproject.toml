@@ -65,7 +65,7 @@ dependencies = [
     "pyqt6==6.10.1",
     "importlib_metadata==8.7.0",
     "natsort-rs==0.1.15",
-    "sl-shared-assets==6.1.0rc3",
+    "sl-shared-assets==6.1.0",
 ]
 
 [project.urls]
