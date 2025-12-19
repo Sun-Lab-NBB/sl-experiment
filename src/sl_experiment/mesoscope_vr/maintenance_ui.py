@@ -258,12 +258,10 @@ class _MaintenanceUIWindow(QMainWindow):
         _valve_tracker: The SharedMemoryArray instance used by the ValveModule to export the valve's state to other
             processes during runtime.
         _gas_puff_tracker: The SharedMemoryArray instance used by the GasPuffValveInterface to export the gas puff
-            count to other processes during runtime.
-        _previous_dispensed_volume: Tracks the previous dispensed volume to detect when water delivery completes.
+            data to other processes during runtime.
         _reward_in_progress: Tracks whether a reward delivery is in progress.
         _calibration_in_progress: Tracks whether a calibration procedure is in progress.
         _referencing_in_progress: Tracks whether a referencing procedure is in progress.
-        _previous_puff_count: Tracks the previous gas puff count to detect when puff delivery completes.
         _puff_in_progress: Tracks whether a gas puff delivery is in progress.
     """
 
@@ -276,16 +274,12 @@ class _MaintenanceUIWindow(QMainWindow):
         self._valve_tracker: SharedMemoryArray = valve_tracker
         self._gas_puff_tracker: SharedMemoryArray = gas_puff_tracker
 
-        # Tracks the previous dispensed volume to detect when water delivery completes.
-        self._previous_dispensed_volume: float = 0.0
         # Tracks whether a reward delivery is in progress.
         self._reward_in_progress: bool = False
         # Tracks whether a calibration procedure is in progress.
         self._calibration_in_progress: bool = False
         # Tracks whether a referencing procedure is in progress.
         self._referencing_in_progress: bool = False
-        # Tracks the previous gas puff count to detect when puff delivery completes.
-        self._previous_puff_count: int = 0
         # Tracks whether a gas puff delivery is in progress.
         self._puff_in_progress: bool = False
 
@@ -810,15 +804,15 @@ class _MaintenanceUIWindow(QMainWindow):
             if self._data_array[_DataArrayIndex.TERMINATION] == 1:
                 self.close()
 
-            # Reads valve tracker state.
-            dispensed_volume = float(self._valve_tracker[0])
+            # Reads valve tracker state (index 1 = calibration state, index 2 = open/close state).
             is_calibrating = float(self._valve_tracker[1]) == 0.0
+            water_valve_state = int(self._valve_tracker[2])
 
-            # Reads gas puff tracker state.
-            puff_count = int(self._gas_puff_tracker[0])
+            # Reads gas puff tracker state (index 1 = open/close state).
+            gas_valve_state = int(self._gas_puff_tracker[1])
 
-            # Detects when reward delivery completes (dispensed volume increased while reward was in progress).
-            if self._reward_in_progress and dispensed_volume > self._previous_dispensed_volume:
+            # Detects when water valve closes (state transitions to closed while reward was in progress).
+            if self._reward_in_progress and water_valve_state == 0:
                 self._reward_in_progress = False
                 self.valve_status_label.setText("Valve: Closed")
                 self.valve_status_label.setStyleSheet("QLabel { color: #e67e22; font-weight: bold; }")
@@ -830,15 +824,11 @@ class _MaintenanceUIWindow(QMainWindow):
                 self.calibration_status_label.setText("Calibration: Idle")
                 self.calibration_status_label.setStyleSheet("QLabel { color: #7f8c8d; font-weight: bold; }")
 
-            # Detects when gas puff delivery completes (puff count increased while puff was in progress).
-            if self._puff_in_progress and puff_count > self._previous_puff_count:
+            # Detects when gas puff delivery completes (state transitions to closed while puff was in progress).
+            if self._puff_in_progress and gas_valve_state == 0:
                 self._puff_in_progress = False
                 self.gas_valve_status_label.setText("Valve: Closed")
                 self.gas_valve_status_label.setStyleSheet("QLabel { color: #e67e22; font-weight: bold; }")
-
-            # Updates previous values for the next check.
-            self._previous_dispensed_volume = dispensed_volume
-            self._previous_puff_count = puff_count
 
         except Exception:
             self.close()
