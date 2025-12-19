@@ -96,11 +96,7 @@ class MaintenanceControlUI:
     def __del__(self) -> None:
         """Terminates the UI process and releases the instance's shared memory buffers when garbage-collected."""
         self.shutdown()
-        # Clean up tracker connections
-        with contextlib.suppress(Exception):
-            self._valve_tracker.disconnect()
-            self._gas_puff_tracker.disconnect()
-            # Note: Does not destroy the trackers as they're owned by their respective interfaces
+        # Note: Does not disconnect or destroy the trackers as they're owned by their respective interfaces
 
     def start(self) -> None:
         """Starts the remote UI process."""
@@ -130,10 +126,8 @@ class MaintenanceControlUI:
         self._data_array.disconnect()
         self._data_array.destroy()
 
-        # Disconnects from the trackers (but does not destroy them - they're owned by their respective interfaces)
-        with contextlib.suppress(Exception):
-            self._valve_tracker.disconnect()
-            self._gas_puff_tracker.disconnect()
+        # Note: Does not disconnect trackers here - they're owned by their respective interfaces and disconnecting
+        # them would break access to delivered_volume when generating the session descriptor during shutdown.
 
         self._started = False
 
