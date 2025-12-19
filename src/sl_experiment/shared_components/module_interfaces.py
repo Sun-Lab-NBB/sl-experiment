@@ -777,10 +777,10 @@ class ValveInterface(ModuleInterface):
 
         # Pre-creates a shared memory array used to track and share valve state data. Index 0 tracks the total amount of
         # water dispensed by the valve during runtime. Index 1 tracks the current valve calibration state (0 -
-        # calibrating, 1 - calibrated).
+        # calibrating, 1 - calibrated). Index 2 tracks the current valve open/close state (0 - closed, 1 - open).
         self._valve_tracker: SharedMemoryArray = SharedMemoryArray.create_array(
             name=f"{self._module_type}_{self._module_id}_valve_tracker",
-            prototype=np.zeros(shape=2, dtype=np.float64),
+            prototype=np.zeros(shape=3, dtype=np.float64),
             exists_ok=True,
         )
 
@@ -828,6 +828,7 @@ class ValveInterface(ModuleInterface):
         if message.event == _valve_open_code and not self._previous_module_state:
             # Resets the cycle timer each time the valve transitions to an open state.
             self._previous_module_state = True
+            self._valve_tracker[2] = 1  # Valve is now open
             self._cycle_timer.reset()  # type: ignore[union-attr]
 
         elif message.event == _valve_closed_code and self._previous_module_state:
@@ -835,6 +836,7 @@ class ValveInterface(ModuleInterface):
             # it to estimate the volume of fluid delivered through the valve. Accumulates the total volume in the
             # tracker array.
             self._previous_module_state = False
+            self._valve_tracker[2] = 0  # Valve is now closed
             open_duration = self._cycle_timer.elapsed  # type: ignore[union-attr]
 
             # Accumulates delivered water volumes into the tracker.
@@ -1069,16 +1071,19 @@ class GasPuffValveInterface(ModuleInterface):
         _open: The code for the Open module command.
         _close: The code for the Close module command.
         _configured_state: Tracks the current state of the valve (Open or Closed) set through this interface instance.
+        _previous_module_state: Tracks the valve's state reported by the last received message from the microcontroller.
         _previous_duration: Tracks the pulse duration used during the previous deliver_puff() call.
-        _puff_tracker: The SharedMemoryArray instance that tracks the number of gas puffs delivered by the module.
+        _puff_tracker: The SharedMemoryArray instance that transfers puff data from the communication process to
+            other runtime processes.
     """
 
     def __init__(self) -> None:
+        data_codes: set[np.uint8] = {np.uint8(51), np.uint8(52)}  # kOpen, kClosed
 
         super().__init__(
             module_type=np.uint8(5),
             module_id=np.uint8(2),
-            data_codes=None,
+            data_codes=data_codes,
             error_codes=None,
         )
 
@@ -1089,14 +1094,16 @@ class GasPuffValveInterface(ModuleInterface):
 
         # Tracks the state of the managed valve
         self._configured_state: bool = False
+        self._previous_module_state: bool = False
 
         # Tracks the pulse duration used by the previous deliver_puff() call
         self._previous_duration: int = 0
 
-        # Creates a SharedMemoryArray used to track and share the number of gas puffs delivered by the instance
+        # Creates a SharedMemoryArray used to track and share gas puff data. Index 0 tracks the total number of puffs
+        # delivered. Index 1 tracks the current valve open/close state (0 - closed, 1 - open).
         self._puff_tracker: SharedMemoryArray = SharedMemoryArray.create_array(
             name=f"{self._module_type}_{self._module_id}_puff_tracker",
-            prototype=np.zeros(shape=1, dtype=np.uint32),
+            prototype=np.zeros(shape=2, dtype=np.uint32),
             exists_ok=True,
         )
 
@@ -1114,9 +1121,23 @@ class GasPuffValveInterface(ModuleInterface):
         """Connects to the puff tracker shared memory array from the local process."""
         self._puff_tracker.connect()
 
-    def process_received_data(self, _message: ModuleData | ModuleState) -> None:
-        """Not used, as the module currently does not require any real-time data processing."""
-        return
+    def process_received_data(self, message: ModuleData | ModuleState) -> None:
+        """Updates the puff data stored in the instance's shared memory buffer based on the messages received from
+        the microcontroller.
+        """
+        _valve_open_code = 51
+        _valve_closed_code = 52
+
+        if message.event == _valve_open_code and not self._previous_module_state:
+            # Tracks valve open transitions.
+            self._previous_module_state = True
+            self._puff_tracker[1] = 1  # Valve is now open
+
+        elif message.event == _valve_closed_code and self._previous_module_state:
+            # Each time the valve transitions to a closed state, increments the puff count tracker.
+            self._previous_module_state = False
+            self._puff_tracker[1] = 0  # Valve is now closed
+            self._puff_tracker[0] += 1  # Increment puff count
 
     def set_state(self, *, state: bool) -> None:
         """Sets the managed valve to the desired state.
@@ -1146,9 +1167,7 @@ class GasPuffValveInterface(ModuleInterface):
             self.send_parameters(parameter_data=(duration_us, np.uint16(1), _ZERO_UINT32))
 
         self.send_command(command=self._pulse, noblock=_FALSE, repetition_delay=_ZERO_UINT32)
-
-        # Increments the puff count tracker
-        self._puff_tracker[0] += 1
+        # Note: Puff count is incremented in process_received_data when valve_closed event is received
 
     @property
     def puff_count(self) -> int:
