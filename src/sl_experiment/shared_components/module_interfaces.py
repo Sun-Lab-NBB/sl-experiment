@@ -1074,12 +1074,11 @@ class GasPuffValveInterface(ModuleInterface):
     """
 
     def __init__(self) -> None:
-        data_codes: set[np.uint8] = {np.uint8(51), np.uint8(52)}  # kOpen, kClosed
 
         super().__init__(
             module_type=np.uint8(5),
             module_id=np.uint8(2),
-            data_codes=data_codes,
+            data_codes=None,
             error_codes=None,
         )
 
