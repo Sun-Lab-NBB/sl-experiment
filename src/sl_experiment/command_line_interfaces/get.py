@@ -1,5 +1,5 @@
-"""This module provides the 'sl-get' Command Line Interface (CLI) for evaluating the composition of the data
-acquisition system managed by the host-machine.
+"""Provides the 'sl-get' Command Line Interface (CLI) for evaluating the composition of the data acquisition system
+managed by the host-machine.
 """
 
 import click
@@ -24,9 +24,7 @@ CONTEXT_SETTINGS = {"max_content_width": 120}  # pragma: no cover
 
 @click.group("get", context_settings=CONTEXT_SETTINGS)
 def get() -> None:  # pragma: no cover
-    """This Command Line Interface allows evaluating the composition of the data acquisition system managed by the
-    host-machine.
-    """
+    """Evaluates the composition of the data acquisition system managed by the host-machine."""
 
 
 @get.command("zaber")

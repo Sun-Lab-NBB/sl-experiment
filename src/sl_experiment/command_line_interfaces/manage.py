@@ -1,5 +1,5 @@
-"""This module provides the 'sl-manage' Command Line Interface (CLI) for managing the data accessible to the data
-acquisition system managed by the host-machine.
+"""Provides the 'sl-manage' Command Line Interface (CLI) for managing the data accessible to the data acquisition
+system managed by the host-machine.
 """
 
 from pathlib import Path
@@ -20,9 +20,7 @@ CONTEXT_SETTINGS = {"max_content_width": 120}  # pragma: no cover
 
 @click.group("manage", context_settings=CONTEXT_SETTINGS)
 def manage() -> None:  # pragma: no cover
-    """This Command Line Interface allows managing the data accessible to the data acquisition system managed by the
-    local host-machine.
-    """
+    """Manages the data accessible to the data acquisition system managed by the local host-machine."""
 
 
 @manage.command("preprocess")
@@ -107,7 +105,7 @@ def delete_session(session_path: Path) -> None:
     "--animal",
     type=str,
     required=True,
-    help="The ID of the animal whose data ito migrate.",
+    help="The ID of the animal whose data to migrate.",
 )
 def migrate_animal(source: str, destination: str, animal: str) -> None:
     """Transfers all sessions for the specified animal from the source project to the target project."""

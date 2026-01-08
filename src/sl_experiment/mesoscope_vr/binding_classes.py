@@ -1,6 +1,4 @@
-"""This module exposes the high-level bindings for all Mesoscope-VR system components (cameras, microcontrollers,
-Zaber motors).
-"""
+"""Exposes the high-level bindings for all Mesoscope-VR system components (cameras, microcontrollers, Zaber motors)."""
 
 from pathlib import Path  # noqa: TC003
 
@@ -113,7 +111,7 @@ class ZaberMotors:
         self.unpark_motors()
 
         # If previous position data is available, restores all motors to the positions used during previous sessions.
-        # Otherwise, sets HeadBar and Wheel to the mounting position and the LickPort to the parking position. Note; the
+        # Otherwise, sets HeadBar and Wheel to the mounting position and the LickPort to the parking position. Note: the
         # LickPort's parking position is closer to the animal than the mounting position, but still too far to be usable
         # during runtime, requiring manual fine-tuning.
         self._headbar_z.move(
@@ -503,8 +501,8 @@ class MicroControllerInterfaces:
 
         # Wheel Encoder
         self.wheel_encoder.set_parameters(
-            report_cw=np.bool(self._configuration.wheel_encoder_report_cw),
-            report_ccw=np.bool(self._configuration.wheel_encoder_report_ccw),
+            report_cw=np.bool_(self._configuration.wheel_encoder_report_cw),
+            report_ccw=np.bool_(self._configuration.wheel_encoder_report_ccw),
             delta_threshold=np.uint32(self._configuration.wheel_encoder_delta_threshold_pulse),
         )
 
@@ -525,8 +523,8 @@ class MicroControllerInterfaces:
 
         # Torque Sensor
         self.torque.set_parameters(
-            report_ccw=np.bool(self._configuration.torque_report_ccw),
-            report_cw=np.bool(self._configuration.torque_report_cw),
+            report_ccw=np.bool_(self._configuration.torque_report_ccw),
+            report_cw=np.bool_(self._configuration.torque_report_cw),
             signal_threshold=np.uint16(self._configuration.torque_signal_threshold_adc),
             delta_threshold=np.uint16(self._configuration.torque_delta_threshold_adc),
             averaging_pool_size=np.uint8(self._configuration.torque_averaging_pool_size),
@@ -655,7 +653,7 @@ class VideoSystems:
         message = "Initializing face camera frame acquisition..."
         console.echo(message=message, level=LogLevel.INFO)
 
-        # Starts frame acquisition. Note; this does NOT start frame saving.
+        # Starts frame acquisition. Note: this does NOT start frame saving.
         self._face_camera.start()
         self._face_camera_started = True
 
@@ -676,7 +674,7 @@ class VideoSystems:
         message = "Initializing body camera frame acquisition..."
         console.echo(message=message, level=LogLevel.INFO)
 
-        # Starts frame acquisition. Note; this does NOT start frame saving.
+        # Starts frame acquisition. Note: this does NOT start frame saving.
         self._body_camera.start()
         self._body_camera_started = True
 
