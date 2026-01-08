@@ -31,15 +31,23 @@ def function_name(param1: int, param2: str = "default") -> bool:
     """
 ```
 
+### General Rules
+
+**Punctuation**: Always use proper punctuation in all documentation: docstrings, comments, and argument descriptions.
+
 ### Section Guidelines
 
-**Summary line**: Imperative mood ("Computes..." not "This function computes..."), no period unless multi-sentence.
+**Summary line**: Use imperative mood for ALL docstrings (functions, methods, classes, modules). Use verbs like "Computes...", "Defines...", "Configures...", "Processes..." rather than noun phrases like "A class that..." or "Configuration for...".
 
-**Notes**: Use for algorithms, references, implementation rationale. Not for parameter details.
+**Extended description**: Only include if the summary line is not sufficient to fully understand what the function does. Use third person ("This method creates..."). Do not explain every step of implementation; focus on the high-level purpose.
 
-**Args**: One line per parameter. Don't repeat type info. Start with lowercase, no period.
+**Notes**: Use for usage guidance, non-obvious behavior, algorithms, references, and implementation rationale. This section explains how the function is used or unique things to know about it, not what it does.
+
+**Args**: Don't repeat type info. Start with uppercase after the colon. Always use proper punctuation. Descriptions must be clear enough to give the user a good understanding of what the argument controls or does.
 
 **Args (boolean)**: Use "Determines whether..." not "Whether..." for boolean parameters.
+
+**Args (enum)**: Type hint should accept both the enum and its base type (e.g., `VisualizerMode | int` for IntEnum). Include "Must be a valid X enumeration member." at the end of the description.
 
 **Returns**: Describe what is returned, not the type. Start with uppercase if a sentence. For complex returns (tuples, dicts), describe each element in prose form.
 
@@ -68,6 +76,32 @@ class DataProcessor:
         _enable_filtering: Cached filtering flag.
         _processed_data: Dictionary storing processed results.
     """
+```
+
+### Enum and Dataclass Attributes
+
+For enums and dataclasses, document each attribute inline using triple-quoted strings:
+
+```python
+class VisualizerMode(IntEnum):
+    """Defines the display modes for the BehaviorVisualizer."""
+
+    LICK_TRAINING = 0
+    """Displays only lick sensor and valve plots."""
+    RUN_TRAINING = 1
+    """Displays lick, valve, and running speed plots."""
+    EXPERIMENT = 2
+    """Displays all plots including the trial performance panel."""
+
+
+@dataclass
+class SessionConfig:
+    """Defines the configuration parameters for an experiment session."""
+
+    animal_id: str
+    """The unique identifier for the animal."""
+    session_duration: float
+    """The duration of the session in seconds."""
 ```
 
 ### Property Docstrings
@@ -255,19 +289,28 @@ for i in prange(data.shape[0]):
 
 ### Inline Comments
 
-- Explain **why**, not **what**
+- Use third person imperative ("Configures..." not "This section configures..." or "Configure...")
 - Place above the code, not at end of line (unless very short)
-- Use for non-obvious logic only
+- Use comments to explain non-obvious logic or provide context that aids understanding
+- When explaining what code does, focus on the high-level purpose, not obvious implementation details
 
 ```python
 # The constant 2.046392675 is the theoretical injectivity bound for 2D cubic B-splines.
 # Values exceeding 1/K of the grid spacing can cause non-injective (folded) transformations.
 limit = (1.0 / 2.046392675) * self._grid_sampling * factor
+
+# Configures the speed axis, which only exists in RUN_TRAINING and experiment modes.
+if self._speed_axis is not None:
+    ...
+
+# Creates the reinforcing trial rectangles in the bottom row.
+for i in range(20):
+    ...
 ```
 
 ### What to Avoid
 
-- Don't add comments restating what the code does
+- Don't reiterate the obvious (e.g., `# Set x to 5` before `x = 5`)
 - Don't add docstrings/comments to code you didn't write or modify
 - Don't add type annotations as comments (use actual type hints)
 
@@ -333,6 +376,54 @@ def set_from_array(self, data: NDArray[np.float32], weights: NDArray[np.float32]
     ...
 ```
 
+### Method Types
+
+Use the appropriate method decorator based on what the method accesses:
+
+- **Instance methods** (no decorator): Use when the method accesses instance attributes (`self`).
+- **`@staticmethod`**: Use when the method doesn't access instance or class attributes. Prefer this over instance methods when `self` is not needed.
+- **`@classmethod`**: Use when the method needs access to class attributes but not instance attributes.
+
+```python
+class DataProcessor:
+    _default_threshold: float = 0.5  # Class attribute.
+
+    def process(self, data: NDArray[np.float32]) -> NDArray[np.float32]:
+        """Processes data using instance configuration."""
+        return data * self._scale_factor  # Uses self.
+
+    @staticmethod
+    def validate_input(data: NDArray[np.float32]) -> bool:
+        """Validates input data format."""
+        return data.ndim == 2  # No self or cls needed.
+
+    @classmethod
+    def from_config(cls, config: dict) -> "DataProcessor":
+        """Creates an instance from a configuration dictionary."""
+        return cls(threshold=config.get("threshold", cls._default_threshold))
+```
+
+### Visibility (Public vs Private)
+
+- **Private** (`_` prefix): Use for anything internal to the class/module that should not be accessed externally. This includes helper methods, internal attributes, and implementation details.
+- **Public** (no prefix): Use only for methods, functions, and classes that are intended to be used from other modules or by external code.
+
+```python
+class SessionManager:
+    def __init__(self) -> None:
+        self._session_id: str = ""  # Private attribute.
+        self._is_active: bool = False  # Private attribute.
+
+    def start_session(self) -> None:
+        """Starts a new session."""  # Public - called externally.
+        self._initialize_resources()
+        self._is_active = True
+
+    def _initialize_resources(self) -> None:
+        """Initializes internal resources."""  # Private - internal helper.
+        ...
+```
+
 ---
 
 ## Line Length and Formatting
@@ -356,3 +447,55 @@ message = (
     f"(0, 1], but got {threshold}."
 )
 ```
+
+---
+
+## Linting and Code Quality
+
+### Running the Linter
+
+Run `tox -e lint` after making changes. All issues must either be resolved or marked with proper `# noqa` ignore statements.
+
+### Resolution Policy
+
+Prefer resolving issues unless the resolution would:
+- Make the code unnecessarily complex
+- Hurt performance by adding redundant checks
+- Harm codebase readability instead of helping it
+
+### Magic Numbers (PLR2004)
+
+For magic number warnings, prefer defining constants:
+
+**Local constants**: Use when the value is specific to a single function or method.
+
+```python
+def calculate_threshold(self, value: float) -> float:
+    """Calculates the adjusted threshold."""
+    adjustment_factor = 1.5  # Empirically determined scaling factor.
+    return value * adjustment_factor
+```
+
+**Module-level constants**: Use when the value is a configuration parameter that may need adjustment later.
+
+```python
+# Maximum number of retry attempts for network operations.
+_MAX_RETRY_ATTEMPTS: int = 3
+
+# Default timeout in milliseconds for sensor polling.
+_SENSOR_TIMEOUT_MS: int = 500
+```
+
+### Using noqa
+
+When suppressing a warning, always include the specific error code:
+
+```python
+if mode == 3:  # noqa: PLR2004 - LICK_TRAINING mode value from VisualizerMode enum.
+    ...
+```
+
+### Typos
+
+- **Obvious typos**: Must be fixed immediately (e.g., "teh" → "the", "fucntion" → "function").
+- **Ambiguous typos**: If a typo may be intentional (e.g., domain-specific terminology, abbreviations), flag it for user confirmation before changing.

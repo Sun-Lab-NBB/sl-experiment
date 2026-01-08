@@ -1,5 +1,5 @@
-"""This module provides the 'sl-run' Command Line Interface (CLI) for running the data acquisition and system
-maintenance sessions supported by the data acquisition system managed by the host-machine.
+"""Provides the 'sl-run' Command Line Interface (CLI) for running the data acquisition and system maintenance sessions
+supported by the data acquisition system managed by the host-machine.
 """
 
 import click
@@ -18,8 +18,8 @@ CONTEXT_SETTINGS = {"max_content_width": 120}  # pragma: no cover
 
 @click.group("run", context_settings=CONTEXT_SETTINGS)
 def run() -> None:  # pragma: no cover
-    """This Command Line Interface allows running the data acquisition and system maintenance sessions supported by
-    the data acquisition system managed by the host-machine.
+    """Runs data acquisition and system maintenance sessions supported by the data acquisition system managed by the
+    host-machine.
     """
 
 
@@ -308,7 +308,7 @@ def run_experiment(ctx: click.Context, experiment: str, unconsumed_rewards: int 
 
     Experiment runtimes are carried out after the lick and run training sessions. This command allows running any valid
     Sun lab experiment supported by the data acquisition system managed by the host-machine. To create a
-    new experiment configuration for the local adata-acquisition system, use the 'sl-configure experiment' CLI command.
+    new experiment configuration for the local data-acquisition system, use the 'sl-configure experiment' CLI command.
     """
     experiment_logic(
         experimenter=ctx.obj["user"],

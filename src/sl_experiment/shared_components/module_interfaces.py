@@ -1,5 +1,5 @@
-"""This module provides the interfaces (ModuleInterface class implementations) for the hardware modules assembled and
-configured according to the instructions from the Sun lab's microcontrollers library:
+"""Provides the interfaces (ModuleInterface class implementations) for the hardware modules assembled and configured
+according to the instructions from the Sun lab's microcontrollers library:
 https://github.com/Sun-Lab-NBB/sl-micro-controllers.
 """
 
@@ -22,7 +22,7 @@ from ataraxis_communication_interface import (
 _ZERO_UINT64 = np.uint64(0)
 _ZERO_FLOAT64 = np.float64(0.0)
 _ZERO_UINT32 = np.uint32(0)
-_FALSE = np.bool(False)
+_FALSE: np.bool_ = np.bool_(0)
 
 
 def _power_law_model(
@@ -323,7 +323,7 @@ class LickInterface(ModuleInterface):
 
         Args:
             signal_threshold: The minimum voltage level, in raw analog units of a 3.3 Volt 12-bit
-                Analog-to-Digital-Converter (ADC), reported to the PC as a significant sensor interaction. Note;
+                Analog-to-Digital-Converter (ADC), reported to the PC as a significant sensor interaction. Note:
                 signals below the threshold are pulled to 0.
             delta_threshold: The minimum difference between two consecutive voltage level readouts for reporting the
                 new signal value to the PC.
@@ -444,7 +444,7 @@ class TorqueInterface(ModuleInterface):
                 direction.
             report_cw: Determines whether the sensor should report torque in the clockwise (CW; negative) direction.
             signal_threshold: The minimum torque level, in raw analog units of 12-bit Analog-to-Digital-Converter
-                (ADC), reported to the PC as a significant torque signal. Note; signals below the threshold are
+                (ADC), reported to the PC as a significant torque signal. Note: signals below the threshold are
                 pulled to 0.
             delta_threshold: The minimum difference between two consecutive torque level readouts for reporting the
                 new signal value to the PC.

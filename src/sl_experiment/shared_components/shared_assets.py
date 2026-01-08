@@ -1,4 +1,4 @@
-"""This module provides miscellaneous assets shared by other library packages."""
+"""Provides miscellaneous assets shared by other library packages."""
 
 import sys
 
@@ -8,7 +8,7 @@ from importlib_metadata import metadata as _metadata
 
 
 def get_version_data() -> tuple[str, str]:
-    """Determines and returns the current Python and sl-experiment versions.
+    """Returns the current Python and sl-experiment versions.
 
     Returns:
         A tuple of two strings. The first string stores the Python version, and the second string stores the
@@ -16,7 +16,7 @@ def get_version_data() -> tuple[str, str]:
     """
     # Determines the local Python version and the version of the sl-experiment library.
     sl_experiment_version = _metadata("sl-experiment")["version"]  # type: ignore[index]
-    python_version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"  # Python version
+    python_version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
     return python_version, sl_experiment_version
 
 

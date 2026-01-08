@@ -1,5 +1,5 @@
-"""This module provides the graphical user interface used by the Mesoscope-VR data acquisition system to facilitate
-data acquisition runtimes by allowing direct control over a subset of the system's runtime parameters and hardware.
+"""Provides the graphical user interface used by the Mesoscope-VR data acquisition system to facilitate data
+acquisition runtimes by allowing direct control over a subset of the system's runtime parameters and hardware.
 """
 
 import sys
@@ -449,7 +449,7 @@ class _ControlUIWindow(QMainWindow):
         self.volume_spinbox.setValue(5)  # Default value
         self.volume_spinbox.setDecimals(0)  # Integer precision
         self.volume_spinbox.setSuffix(" μL")  # Adds units suffix
-        self.volume_spinbox.setToolTip("Sets water reward volume. Accepts values between 1 and 2 μL.")
+        self.volume_spinbox.setToolTip("Sets water reward volume. Accepts values between 1 and 20 μL.")
         self.volume_spinbox.setMinimumHeight(30)
         # noinspection PyUnresolvedReferences
         self.volume_spinbox.valueChanged.connect(self._update_reward_volume)

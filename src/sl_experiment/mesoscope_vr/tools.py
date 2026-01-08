@@ -1,4 +1,4 @@
-"""This module provides utility assets shared by other modules of the mesoscope_vr package."""
+"""Provides utility assets shared by other modules of the mesoscope_vr package."""
 
 from enum import IntEnum
 from pathlib import Path
@@ -130,10 +130,10 @@ class _ScanImagePCData:
     """The path to the session-specific directory where all Mesoscope-acquired data is moved at the end of each data 
     acquisition session's runtime."""
     motion_estimator_path: Path = field(default_factory=Path, init=False)
-    """The path top the animal-specific reference .ME (motion estimator) file, used to align the Mesoscope's imaging 
+    """The path to the animal-specific reference .ME (motion estimator) file, used to align the Mesoscope's imaging
     field to the same view across all data acquisition sessions."""
     roi_path: Path = field(default_factory=Path, init=False)
-    """The path top the animal-specific reference .ROI (Region-of-Interest) file, used to restore the same imaging 
+    """The path to the animal-specific reference .ROI (Region-of-Interest) file, used to restore the same imaging
     field across all data acquisition sessions."""
     kinase_path: Path = field(default_factory=Path, init=False)
     """The path to the 'kinase.bin' file used to lock the MATLAB's runtime function (setupAcquisition.m) into the data 

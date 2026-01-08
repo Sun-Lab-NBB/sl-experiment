@@ -1,4 +1,4 @@
-"""This module provides the assets for interfacing with Google Sheet files."""
+"""Provides the assets for interfacing with Google Sheet files."""
 
 import re
 from typing import Any
@@ -223,9 +223,9 @@ class SurgeryLog:
     Attributes:
         _project_name: The name of the target project.
         _animal_id: The unique identifier of the target animal.
-        _sheet_id: THe unique identifier of the surgery log Google Sheet.
+        _sheet_id: The unique identifier of the surgery log Google Sheet.
         _service: The API service instance that bidirectionally interfaces with the surgery log.
-        _headers: Maps the surgery log headers (column names) to the Excell-style Google Sheet column letters
+        _headers: Maps the surgery log headers (column names) to the Excel-style Google Sheet column letters
             (A, B, etc.).
         _animals: Stores the unique identifiers of all animals whose data is stored in the surgery log.
 
@@ -270,7 +270,7 @@ class SurgeryLog:
             message = (
                 f"Unable to parse the surgery data for the project {project_name} and animal {animal_id}. The first "
                 f"row of the target project's surgery log tab appears to be empty instead of containing the "
-                f"human-friendly the column headers."
+                f"human-friendly column headers."
             )
             console.error(message, error=ValueError)
 
@@ -604,7 +604,7 @@ class WaterLog:
         _sheet_id: The unique identifier of the water restriction and animal interaction log Google Sheet.
         _service: The API service instance that bidirectionally interfaces with the log.
         _animals: Stores the unique identifiers of all animals whose data is stored in the log.
-        _headers: Maps the water restriction and animal interaction log headers (column names) to the Excell-style
+        _headers: Maps the water restriction and animal interaction log headers (column names) to the Excel-style
             Google Sheet column letters (A, B, etc.).
         _animal_tab_id: The unique identifier of the log's tab that stores the target animal's data.
         _current_time: The current ETC/EDT time in the HH:MM format.
@@ -680,7 +680,7 @@ class WaterLog:
             console.error(message, error=ValueError)
 
         # Retrieves all values stored in the second row of the Google Sheet tab with the name that matches the target
-        # animal ID. Note; this is in contrast to the Surgery data log, where the headers are stored in the first sheet
+        # animal ID. Note: this is in contrast to the Surgery data log, where the headers are stored in the first sheet
         # row.
         # noinspection PyUnresolvedReferences
         headers = (

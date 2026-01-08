@@ -1,4 +1,4 @@
-"""This module provides the entry point wrapper functions for all CLI commands.
+"""Provides the entry point wrapper functions for all CLI commands.
 
 The warning filter is applied at module level before any other imports to ensure deprecation warnings from dependencies
 are suppressed during the import phase.

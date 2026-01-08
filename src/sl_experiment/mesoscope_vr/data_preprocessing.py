@@ -1,5 +1,5 @@
-"""This module provides the assets for preprocessing the data acquired by the Mesoscope-VR data acquisition system
-during a session's runtime and moving it to the long-term storage destinations.
+"""Provides the assets for preprocessing the data acquired by the Mesoscope-VR data acquisition system during a
+session's runtime and moving it to the long-term storage destinations.
 """
 
 import os
@@ -134,7 +134,7 @@ def _process_stack(
                 key = key.strip()
                 value = value.strip()
 
-                # This section is written to raise errors if it encounters an unexpected (unsupported) metadata field.
+                # Raises errors if the metadata field is unexpected (unsupported).
                 if key in _METADATA_SCHEMA:  # Expected data fields
                     # Use the schema to parse and convert the value
                     _, converter = _METADATA_SCHEMA[key]

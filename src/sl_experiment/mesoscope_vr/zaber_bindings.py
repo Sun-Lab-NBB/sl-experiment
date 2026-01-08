@@ -1,4 +1,4 @@
-"""This module provides the interfaces for Zaber devices used in the Mesoscope-VR data acquisition system."""
+"""Provides the interfaces for Zaber devices used in the Mesoscope-VR data acquisition system."""
 
 from typing import Any
 from dataclasses import field, dataclass
@@ -19,7 +19,7 @@ class _ZaberAxisData:
     axis_id: int
     """The unique motor type code of the axis."""
     axis_label: str
-    """THe user-assigned name of the axis."""
+    """The user-assigned name of the axis."""
 
 
 @dataclass
@@ -684,6 +684,7 @@ class ZaberConnection:
         """Returns True if the class has established connection with the managed serial port."""
         # Actualizes the connection status and returns it to the caller
         if self._connection is not None and self._is_connected:
+            # noinspection PyBroadException
             try:
                 # Tries to detect available devices using the connection. If the connection is broken, this will
                 # necessarily fail with an error.

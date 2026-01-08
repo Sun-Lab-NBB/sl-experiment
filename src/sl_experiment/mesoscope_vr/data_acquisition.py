@@ -1,5 +1,5 @@
-"""This module provides the assets for executing data acquisition sessions and maintenance runtimes via the
-Mesoscope-VR data acquisition system.
+"""Provides the assets for executing data acquisition sessions and maintenance runtimes via the Mesoscope-VR data
+acquisition system.
 """
 
 import os
@@ -39,7 +39,7 @@ from ataraxis_communication_interface import MQTTCommunication, MicroControllerI
 
 from .tools import MesoscopeData, CachedMotifDecomposer, get_system_configuration
 from .runtime_ui import RuntimeControlUI
-from .visualizers import BehaviorVisualizer
+from .visualizers import VisualizerMode, BehaviorVisualizer
 from .maintenance_ui import MaintenanceControlUI
 from .binding_classes import ZaberMotors, VideoSystems, MicroControllerInterfaces
 from ..shared_components import (
@@ -508,6 +508,7 @@ def _verify_descriptor_update(
     # Continuously attempts to read and validate the session descriptor until successful
     while True:
         # Attempts to read the session's descriptor data from the .yaml file.
+        # noinspection PyBroadException
         try:
             descriptor = descriptor.from_yaml(file_path=session_data.raw_data.session_descriptor_path)
         except Exception:
@@ -1079,7 +1080,13 @@ class _MesoscopeVRSystem:
 
         # Initializes the runtime visualizer. This HAS to be initialized after cameras and the UI to prevent collisions
         # in the QT backend, which is used by all three assets.
-        self._visualizer.open()
+        if self._session_data.session_type == SessionTypes.LICK_TRAINING:
+            visualizer_mode = VisualizerMode.LICK_TRAINING
+        elif self._session_data.session_type == SessionTypes.RUN_TRAINING:
+            visualizer_mode = VisualizerMode.RUN_TRAINING
+        else:
+            visualizer_mode = VisualizerMode.EXPERIMENT
+        self._visualizer.open(mode=visualizer_mode)
 
         # Enters the manual checkpoint loop. This loop holds the runtime and allows using the GUI to test all runtime
         # components before starting the data acquisition.
@@ -2185,10 +2192,22 @@ class _MesoscopeVRSystem:
 
             # Checks if the animal has completed the current trial.
             if self._trial_state.trial_completed(traveled_distance):
+                # Capture outcome BEFORE advance_trial() resets the flags
+                is_aversive = self._trial_state.is_current_trial_aversive()
+                if is_aversive:
+                    succeeded = self._trial_state.aversive_succeeded
+                    was_guided = self._trial_state.aversive_guided_trials > 0
+                else:
+                    succeeded = self._trial_state.reinforcing_rewarded
+                    was_guided = self._trial_state.reinforcing_guided_trials > 0
+
                 failed_count = self._trial_state.advance_trial()
 
+                # Report outcome to visualizer
+                self._visualizer.add_trial_outcome(is_aversive=is_aversive, succeeded=succeeded, was_guided=was_guided)
+
                 # Handles recovery mode activation based on trial type.
-                if self._trial_state.is_current_trial_aversive():
+                if is_aversive:
                     threshold = self._trial_state.aversive_recovery_threshold
                     recovery_trials = self._trial_state.aversive_recovery_trials
                     if failed_count >= threshold and recovery_trials > 0:
@@ -3666,7 +3685,7 @@ def experiment_logic(
                     if system.terminated:
                         break
 
-                    # Updates the progress bar every second. Note; this calculation statically discounts the time spent
+                    # Updates the progress bar every second. Note: this calculation statically discounts the time spent
                     # in the paused state.
                     delta_seconds = runtime_timer.elapsed - (previous_seconds + system.paused_time)
                     if delta_seconds > 0:
