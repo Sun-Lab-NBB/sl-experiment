@@ -62,10 +62,10 @@ dependencies = [
     "tqdm==4.67.1",
     "google-api-python-client==2.187.0",
     "appdirs==1.4.4",
-    "pyqt6==6.10.1",
+    "pyqt6==6.10.2",
     "importlib_metadata==8.7.1",
     "natsort-rs==0.1.17",
-    "sl-shared-assets==6.2.0rc2",
+    "sl-shared-assets==6.2.0rc3",
 ]
 
 [project.urls]
