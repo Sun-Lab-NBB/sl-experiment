@@ -28,6 +28,9 @@ _FALSE: np.bool_ = np.bool_(0)
 _MAXIMUM_VALVE_PULSE_DURATION_MS: int = 400
 _MAXIMUM_VALVE_PULSE_DURATION_US: int = _MAXIMUM_VALVE_PULSE_DURATION_MS * 1000
 
+# The braking strength value sent to the BrakeModule for pulse commands. Uses maximum strength (255).
+_MAXIMUM_BRAKING_STRENGTH: np.uint8 = np.uint8(255)
+
 
 def _power_law_model(
     pulse_duration: float | NDArray[np.floating], a: float, b: float, /
@@ -702,8 +705,9 @@ class BrakeInterface(ModuleInterface):
         # parameters are only updated when necessary, reducing communication overhead.
         if duration_ms != self._previous_pulse_duration:
             self._previous_pulse_duration = duration_ms
+            # The microcontroller expects both braking_strength (uint8) and pulse_duration (uint32) parameters.
             duration_us = np.uint32(duration_ms * 1000)
-            self.send_parameters(parameter_data=(duration_us,))
+            self.send_parameters(parameter_data=(_MAXIMUM_BRAKING_STRENGTH, duration_us))
 
         self.send_command(command=self._pulse, noblock=_FALSE, repetition_delay=_ZERO_UINT32)
 

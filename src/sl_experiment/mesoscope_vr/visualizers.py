@@ -147,12 +147,11 @@ class BehaviorVisualizer:
         _duration_threshold_text: The text object that communicates the running epoch duration value to the user.
         _mode: The runtime mode that determines the visualizer layout.
         _trial_axis: The axis for the trial performance panel (only in experiment mode).
-        _reinforcing_trials: Stores the outcomes of the last 20 reinforcing trials. Values are -1 for empty,
-            0 for failed, 1 for succeeded, 2 for guided.
-        _aversive_trials: Stores the outcomes of the last 20 aversive trials. Values are -1 for empty, 0 for failed,
+        _trial_outcomes: Stores the outcomes of the last 20 trials. Values are -1 for empty, 0 for failed,
             1 for succeeded, 2 for guided.
-        _reinforcing_index: The current write index for the reinforcing trials circular buffer.
-        _aversive_index: The current write index for the aversive trials circular buffer.
+        _trial_types: Stores the types of the last 20 trials. Values are -1 for empty, 0 for reinforcing,
+            1 for aversive.
+        _trial_index: The current write index for the unified trial circular buffer.
         _reinforcing_rectangles: The rectangle patches for visualizing reinforcing trial outcomes.
         _aversive_rectangles: The rectangle patches for visualizing aversive trial outcomes.
     """
@@ -205,11 +204,11 @@ class BehaviorVisualizer:
 
         self._mode: VisualizerMode | int = VisualizerMode.EXPERIMENT
 
-        # These arrays store trial outcomes as circular buffers with values: -1=empty, 0=failed, 1=succeeded, 2=guided.
-        self._reinforcing_trials: NDArray[np.int8] = np.full(20, -1, dtype=np.int8)
-        self._aversive_trials: NDArray[np.int8] = np.full(20, -1, dtype=np.int8)
-        self._reinforcing_index: int = 0
-        self._aversive_index: int = 0
+        # Stores trial outcomes as a circular buffer with values: -1=empty, 0=failed, 1=succeeded, 2=guided.
+        self._trial_outcomes: NDArray[np.int8] = np.full(20, -1, dtype=np.int8)
+        # Stores trial types as a circular buffer: -1=empty, 0=reinforcing, 1=aversive.
+        self._trial_types: NDArray[np.int8] = np.full(20, -1, dtype=np.int8)
+        self._trial_index: int = 0
 
         self._trial_axis: Axes | None = None
         self._reinforcing_rectangles: list[Rectangle] = []
@@ -256,9 +255,9 @@ class BehaviorVisualizer:
             self._figure, (self._lick_axis, self._valve_axis, self._speed_axis, self._trial_axis) = plt.subplots(
                 4,
                 1,
-                figsize=(10, 10),
+                figsize=(10, 12),
                 num="Runtime Behavior Visualizer",
-                gridspec_kw={"hspace": 0.3, "left": 0.15, "height_ratios": [1, 1, 3, 2]},
+                gridspec_kw={"hspace": 0.5, "left": 0.15, "height_ratios": [1, 1, 3, 2]},
             )
 
         # Padding value ensures that the y-labels are aligned across all axes.
@@ -489,28 +488,46 @@ class BehaviorVisualizer:
     def _setup_trial_axis(self) -> None:
         """Initializes the trial performance panel with empty rectangle patches.
 
-        This method creates a 2-row visualization showing reinforcing (bottom) and aversive (top) trial outcomes
-        as colored bars. Each row contains 20 rectangle slots that are filled as trials complete.
+        This method creates a 2-row visualization showing 20 total trials. Each trial appears in either the
+        reinforcing (bottom) or aversive (top) row based on its type, creating a staggered pattern when trial
+        types alternate.
         """
         if self._trial_axis is None:
             return
 
         self._trial_axis.set_title("Trial Performance (Last 20 Trials)", fontdict=_fontdict_title)
-        self._trial_axis.set_xlim(-0.5, 19.5)
-        self._trial_axis.set_ylim(-0.1, 1.1)
+        self._trial_axis.set_xlim(0.5, 20.5)
+        self._trial_axis.set_ylim(-0.2, 1.2)
         self._trial_axis.set_yticks([0.25, 0.75])
         self._trial_axis.set_yticklabels(["Reinforcing", "Aversive"])
         self._trial_axis.yaxis.labelpad = 15
-        self._trial_axis.set_xticks(range(0, 20, 2))
-        self._trial_axis.set_xlabel("Trial Position (0 = oldest, 19 = newest)", fontdict=_fontdict_axis_label)
+        self._trial_axis.set_xticks([])
+        self._trial_axis.set_xlabel("Trial State", fontdict=_fontdict_axis_label)
         self._trial_axis.axhline(y=0.5, color=_plt_palette("gray"), linestyle="-", linewidth=0.5, alpha=0.5)
 
-        # Creates the reinforcing trial rectangles in the bottom row.
+        # Adds trial number labels above each rectangle position.
+        for i in range(1, 21):
+            self._trial_axis.text(
+                i, 1.05, str(i), ha="center", va="bottom", fontsize=10, fontweight="normal", color="#2c3e50"
+            )
+
+        # Adds color legend for trial outcomes.
+        legend_elements = [
+            Rectangle((0, 0), 1, 1, facecolor=_plt_palette("green"), label="Success"),
+            Rectangle((0, 0), 1, 1, facecolor=_plt_palette("red"), label="Failed"),
+            Rectangle((0, 0), 1, 1, facecolor=_plt_palette("blue"), label="Guided"),
+        ]
+        self._trial_axis.legend(
+            handles=legend_elements, loc="upper right", fontsize=10, framealpha=0.9, edgecolor="none"
+        )
+
+        # Creates the reinforcing trial rectangles in the bottom row. Uses 1-indexed positions with reduced width
+        # for visual separation between adjacent rectangles.
         self._reinforcing_rectangles = []
         for i in range(20):
             rect = Rectangle(
-                xy=(i - 0.4, 0.05),
-                width=0.8,
+                xy=(i + 1 - 0.35, 0.05),
+                width=0.7,
                 height=0.4,
                 facecolor=_plt_palette("gray"),
                 edgecolor="none",
@@ -520,12 +537,13 @@ class BehaviorVisualizer:
             self._trial_axis.add_patch(rect)
             self._reinforcing_rectangles.append(rect)
 
-        # Creates the aversive trial rectangles in the top row.
+        # Creates the aversive trial rectangles in the top row. Uses 1-indexed positions with reduced width
+        # for visual separation between adjacent rectangles.
         self._aversive_rectangles = []
         for i in range(20):
             rect = Rectangle(
-                xy=(i - 0.4, 0.55),
-                width=0.8,
+                xy=(i + 1 - 0.35, 0.55),
+                width=0.7,
                 height=0.4,
                 facecolor=_plt_palette("gray"),
                 edgecolor="none",
@@ -556,18 +574,23 @@ class BehaviorVisualizer:
         else:
             outcome = np.int8(0)
 
+        # Stores the trial outcome and type in the unified circular buffer.
+        self._trial_outcomes[self._trial_index] = outcome
+        self._trial_types[self._trial_index] = np.int8(1 if is_aversive else 0)
+
+        # Hides the rectangle in the opposite row and shows the rectangle in the appropriate row.
         if is_aversive:
-            self._aversive_trials[self._aversive_index] = outcome
+            self._reinforcing_rectangles[self._trial_index].set_visible(False)
             self._update_trial_rectangle(
-                rectangles=self._aversive_rectangles, index=self._aversive_index, outcome=outcome
+                rectangles=self._aversive_rectangles, index=self._trial_index, outcome=outcome
             )
-            self._aversive_index = (self._aversive_index + 1) % 20
         else:
-            self._reinforcing_trials[self._reinforcing_index] = outcome
+            self._aversive_rectangles[self._trial_index].set_visible(False)
             self._update_trial_rectangle(
-                rectangles=self._reinforcing_rectangles, index=self._reinforcing_index, outcome=outcome
+                rectangles=self._reinforcing_rectangles, index=self._trial_index, outcome=outcome
             )
-            self._reinforcing_index = (self._reinforcing_index + 1) % 20
+
+        self._trial_index = (self._trial_index + 1) % 20
 
     @staticmethod
     def _update_trial_rectangle(rectangles: list[Rectangle], index: int, outcome: np.int8) -> None:
