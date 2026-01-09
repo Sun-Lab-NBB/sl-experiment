@@ -1558,26 +1558,25 @@ class _MesoscopeVRSystem:
             RuntimeError: If the method is not able to fully decompose the Virtual Reality environment cue sequence into
                 a sequence of trials.
         """
-        # Extracts all trial data in a single pass to avoid redundant iterations.
+        # Extracts all trial data in a single pass to avoid redundant iterations. These arrays are indexed by trial
+        # type, not by trial position in the sequence.
         trial_structures = self._experiment_configuration.trial_structures  # type: ignore[union-attr]
         trials = list(trial_structures.values())
         trial_motifs = []
         trial_distances = []
-        reinforcing_rewards = []
-        aversive_puff_durations = []
+        reinforcing_rewards_by_type: list[tuple[float, int]] = []
+        aversive_puff_durations_by_type: list[int] = []
 
         for trial in trials:
             trial_motifs.append(np.array(trial.cue_sequence, dtype=np.uint8))
             trial_distances.append(float(trial.trial_length_cm))
             if isinstance(trial, WaterRewardTrial):
-                reinforcing_rewards.append((float(trial.reward_size_ul), int(trial.reward_tone_duration_ms)))
-                aversive_puff_durations.append(0)  # Safe placeholder for reinforcing trials
+                reinforcing_rewards_by_type.append((float(trial.reward_size_ul), int(trial.reward_tone_duration_ms)))
+                aversive_puff_durations_by_type.append(0)  # Safe placeholder for reinforcing trials
             else:  # GasPuffTrial
-                reinforcing_rewards.append((0.0, 0))  # Safe placeholder for aversive trials
-                aversive_puff_durations.append(int(trial.puff_duration_ms))
+                reinforcing_rewards_by_type.append((0.0, 0))  # Safe placeholder for aversive trials
+                aversive_puff_durations_by_type.append(int(trial.puff_duration_ms))
 
-        self._trial_state.reinforcing_rewards = tuple(reinforcing_rewards)
-        self._trial_state.aversive_puff_durations = tuple(aversive_puff_durations)
         self._trial_state.trial_structures = trial_structures
 
         # Prepares the flattened motif data using the MotifDecomposer class.
@@ -1606,6 +1605,12 @@ class _MesoscopeVRSystem:
 
         # Constructs the cumulative distance array directly from decomposed trial indices.
         self._trial_state.distances = np.cumsum(distances_array[trial_indices_array[:trial_count]].astype(np.float64))
+
+        # Builds per-trial reward and puff duration arrays from the decomposed sequence. Each entry corresponds to
+        # a trial in the actual sequence, not a trial type.
+        sequence_indices = trial_indices_array[:trial_count]
+        self._trial_state.reinforcing_rewards = tuple(reinforcing_rewards_by_type[i] for i in sequence_indices)
+        self._trial_state.aversive_puff_durations = tuple(aversive_puff_durations_by_type[i] for i in sequence_indices)
 
     @staticmethod
     @njit(cache=True)
