@@ -73,6 +73,10 @@ def _generate_mesoscope_position_snapshot(session_data: SessionData, mesoscope_d
         session_data: The SessionData instance that defines the session for which the snapshot is generated.
         mesoscope_data: The MesoscopeData instance that defines the current Mesoscope-VR system's configuration.
     """
+    # If the session was not fully initialized (nk.bin marker exists), skips the snapshot generation.
+    if session_data.raw_data.nk_path.exists():
+        return
+
     # Loads the previous position data into memory.
     previous_mesoscope_positions: MesoscopePositions = MesoscopePositions.from_yaml(
         file_path=mesoscope_data.vrpc_data.mesoscope_positions_path
@@ -571,13 +575,13 @@ class _MesoscopeVRMQTTTopics(StrEnum):
     """The topic to which Unity sends the sequence of VR cues used by the current game session."""
     CUE_SEQUENCE_REQUEST = "CueSequenceTrigger/"
     """Requests Unity to send the sequence of VR cues used by the current game session."""
-    DISABLE_LICK_GUIDANCE = "MustLick/True/"
+    DISABLE_LICK_GUIDANCE = "RequireLick/True/"
     """Disables lick guidance for reinforcing trials (animal must lick to trigger reward)."""
-    ENABLE_LICK_GUIDANCE = "MustLick/False/"
+    ENABLE_LICK_GUIDANCE = "RequireLick/False/"
     """Enables lick guidance for reinforcing trials (reward on collision without lick)."""
-    DISABLE_OCCUPANCY_GUIDANCE = "MustWait/True/"
+    DISABLE_OCCUPANCY_GUIDANCE = "RequireWait/True/"
     """Disables occupancy guidance for aversive trials (animal must meet duration requirement)."""
-    ENABLE_OCCUPANCY_GUIDANCE = "MustWait/False/"
+    ENABLE_OCCUPANCY_GUIDANCE = "RequireWait/False/"
     """Enables occupancy guidance for aversive trials (brake pulse on early exit)."""
     SHOW_REWARD_ZONE_BOUNDARY = "VisibleMarker/True/"
     """Requests Unity to show the task guidance mode collision box to the animal."""

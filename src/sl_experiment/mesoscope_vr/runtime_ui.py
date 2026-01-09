@@ -520,11 +520,11 @@ class _ControlUIWindow(QMainWindow):
         gas_duration_label.setObjectName("volumeLabel")
 
         self.gas_duration_spinbox = QDoubleSpinBox()
-        self.gas_duration_spinbox.setRange(10, 1000)
+        self.gas_duration_spinbox.setRange(10, 350)
         self.gas_duration_spinbox.setValue(100)
         self.gas_duration_spinbox.setDecimals(0)
         self.gas_duration_spinbox.setSuffix(" ms")
-        self.gas_duration_spinbox.setToolTip("Sets gas puff duration. Accepts values between 10 and 1000 ms.")
+        self.gas_duration_spinbox.setToolTip("Sets gas puff duration. Accepts values between 10 and 350 ms.")
         self.gas_duration_spinbox.setMinimumHeight(30)
         # noinspection PyUnresolvedReferences
         self.gas_duration_spinbox.valueChanged.connect(self._update_gas_puff_duration)

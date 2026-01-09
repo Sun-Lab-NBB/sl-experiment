@@ -9,7 +9,7 @@ import numpy as np
 from numpy.typing import NDArray  # noqa: TC002
 from ataraxis_time import TimeUnits, PrecisionTimer, convert_time
 from scipy.optimize import curve_fit
-from ataraxis_base_utilities import console
+from ataraxis_base_utilities import console, LogLevel
 from ataraxis_data_structures import SharedMemoryArray
 from ataraxis_communication_interface import (
     ModuleData,
@@ -23,6 +23,10 @@ _ZERO_UINT64 = np.uint64(0)
 _ZERO_FLOAT64 = np.float64(0.0)
 _ZERO_UINT32 = np.uint32(0)
 _FALSE: np.bool_ = np.bool_(0)
+
+# The maximum pulse duration that water and gas valves can use. Longer pulses trigger keepalive intervention.
+_MAXIMUM_VALVE_PULSE_DURATION_MS: int = 400
+_MAXIMUM_VALVE_PULSE_DURATION_US: int = _MAXIMUM_VALVE_PULSE_DURATION_MS * 1000
 
 
 def _power_law_model(
@@ -933,6 +937,16 @@ class ValveInterface(ModuleInterface):
         Args:
             pulse_duration: The duration, in milliseconds, to keep the valve open at each calibration cycle.
         """
+        # Guards against pulse durations that exceed the maximum allowed duration. Caps to the safe maximum and warns.
+        if pulse_duration > _MAXIMUM_VALVE_PULSE_DURATION_MS:
+            message = (
+                f"The requested pulse duration of {pulse_duration} ms for ValveModule {self._module_id} exceeds the "
+                f"maximum allowed duration of {_MAXIMUM_VALVE_PULSE_DURATION_MS} ms. Capping to "
+                f"{_MAXIMUM_VALVE_PULSE_DURATION_MS} ms."
+            )
+            console.echo(message=message, level=LogLevel.WARNING)
+            pulse_duration = _MAXIMUM_VALVE_PULSE_DURATION_MS
+
         # Converts the pulse duration to microseconds before updating the valve's parameters.
         self.send_parameters(parameter_data=(np.uint32(pulse_duration * 1000), self._calibration_count, _ZERO_UINT32))
         self.send_command(command=self._calibrate, noblock=_FALSE, repetition_delay=_ZERO_UINT32)
@@ -966,6 +980,16 @@ class ValveInterface(ModuleInterface):
 
         # Inverts the power-law calibration to get the pulse duration.
         pulse_duration = (target_volume / self._scale_coefficient) ** (1.0 / self._nonlinearity_exponent)
+
+        # Guards against pulse durations that exceed the maximum allowed duration. Caps to the safe maximum and warns.
+        if pulse_duration > _MAXIMUM_VALVE_PULSE_DURATION_US:
+            message = (
+                f"The computed pulse duration of {pulse_duration / 1000:.1f} ms for ValveModule {self._module_id} "
+                f"exceeds the maximum allowed duration of {_MAXIMUM_VALVE_PULSE_DURATION_MS} ms. Capping to "
+                f"{_MAXIMUM_VALVE_PULSE_DURATION_MS} ms."
+            )
+            console.echo(message=message, level=LogLevel.WARNING)
+            pulse_duration = _MAXIMUM_VALVE_PULSE_DURATION_US
 
         return np.uint32(np.round(pulse_duration))
 
@@ -1158,6 +1182,16 @@ class GasPuffValveInterface(ModuleInterface):
         Args:
             duration_ms: The duration, in milliseconds, to keep the valve open.
         """
+        # Guards against pulse durations that exceed the maximum allowed duration. Caps to the safe maximum and warns.
+        if duration_ms > _MAXIMUM_VALVE_PULSE_DURATION_MS:
+            message = (
+                f"The requested pulse duration of {duration_ms} ms for GasPuffValveModule {self._module_id} exceeds "
+                f"the maximum allowed duration of {_MAXIMUM_VALVE_PULSE_DURATION_MS} ms. Capping to "
+                f"{_MAXIMUM_VALVE_PULSE_DURATION_MS} ms."
+            )
+            console.echo(message=message, level=LogLevel.WARNING)
+            duration_ms = _MAXIMUM_VALVE_PULSE_DURATION_MS
+
         # Only updates the module parameters if the pulse duration changed compared to the previous call. This ensures
         # parameters are only updated when necessary, reducing communication overhead.
         if duration_ms != self._previous_duration:

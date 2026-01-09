@@ -115,11 +115,28 @@ def field_shape(self) -> tuple[int, int]:
 
 ### Module Docstrings
 
-Use the format "This module provides the assets for X." to describe what the module contains:
+Follow the same imperative mood pattern as other docstrings:
 
 ```python
-"""This module provides the assets for processing and analyzing neural imaging data."""
+"""Provides assets for processing and analyzing neural imaging data."""
 ```
+
+### CLI Command Docstrings
+
+CLI commands and command groups use a specialized docstring format because Click parses these docstrings into help messages displayed to users. Do not use standard docstring sections (Notes, Args, Returns, Raises) as they will appear verbatim in the CLI help output.
+
+```python
+@click.command()
+def process_data(input_path: Path, output_path: Path) -> None:
+    """Processes raw experimental data and saves the results.
+
+    This command reads data from the input path, applies standard preprocessing
+    steps, and writes the processed output to the specified location. The input
+    must be a valid .feather file containing session data.
+    """
+```
+
+The first sentence serves as the short command description shown in command listings. The remaining prose provides additional context shown in the detailed help for that specific command.
 
 ---
 
