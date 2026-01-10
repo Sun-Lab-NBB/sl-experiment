@@ -14,6 +14,7 @@ from ataraxis_time import PrecisionTimer
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator, FixedLocator, FixedFormatter
 from matplotlib.patches import Rectangle
+from matplotlib.gridspec import GridSpec
 from ataraxis_base_utilities import console
 
 if TYPE_CHECKING:
@@ -147,11 +148,10 @@ class BehaviorVisualizer:
         _duration_threshold_text: The text object that communicates the running epoch duration value to the user.
         _mode: The runtime mode that determines the visualizer layout.
         _trial_axis: The axis for the trial performance panel (only in experiment mode).
-        _trial_outcomes: Stores the outcomes of the last 20 trials. Values are -1 for empty, 0 for failed,
-            1 for succeeded, 2 for guided.
-        _trial_types: Stores the types of the last 20 trials. Values are -1 for empty, 0 for reinforcing,
-            1 for aversive.
-        _trial_index: The current write index for the unified trial circular buffer.
+        _trial_types: Stores the last 20 trial types with values -1=empty, 0=reinforcing, 1=aversive.
+            Newest at index 19.
+        _trial_outcomes: Stores the last 20 trial outcomes with values -1=empty, 0=failed, 1=success, 2=guided.
+        _total_trials: The total number of trials recorded, used for x-axis labeling.
         _reinforcing_rectangles: The rectangle patches for visualizing reinforcing trial outcomes.
         _aversive_rectangles: The rectangle patches for visualizing aversive trial outcomes.
     """
@@ -204,11 +204,11 @@ class BehaviorVisualizer:
 
         self._mode: VisualizerMode | int = VisualizerMode.EXPERIMENT
 
-        # Stores trial outcomes as a circular buffer with values: -1=empty, 0=failed, 1=succeeded, 2=guided.
-        self._trial_outcomes: NDArray[np.int8] = np.full(20, -1, dtype=np.int8)
-        # Stores trial types as a circular buffer: -1=empty, 0=reinforcing, 1=aversive.
-        self._trial_types: NDArray[np.int8] = np.full(20, -1, dtype=np.int8)
-        self._trial_index: int = 0
+        # Stores the last 20 trial types: -1=empty, 0=reinforcing, 1=aversive. Newest trial is at index 19 (rightmost).
+        self._trial_types: NDArray[np.int8] = np.full(shape=20, fill_value=-1, dtype=np.int8)
+        # Stores the last 20 trial outcomes: -1=empty, 0=failed, 1=success, 2=guided. Newest trial is at index 19.
+        self._trial_outcomes: NDArray[np.int8] = np.full(shape=20, fill_value=-1, dtype=np.int8)
+        self._total_trials: int = 0  # Tracks total trial count for x-axis labeling.
 
         self._trial_axis: Axes | None = None
         self._reinforcing_rectangles: list[Rectangle] = []
@@ -234,10 +234,17 @@ class BehaviorVisualizer:
             self._figure, (self._lick_axis, self._valve_axis) = plt.subplots(
                 2,
                 1,
-                figsize=(10, 5),
+                figsize=(10, 4.5),
                 sharex=True,
                 num="Runtime Behavior Visualizer",
-                gridspec_kw={"hspace": 0.3, "left": 0.15, "height_ratios": [1, 1]},
+                gridspec_kw={
+                    "hspace": 0.4,
+                    "left": 0.10,
+                    "right": 0.97,
+                    "top": 0.92,
+                    "bottom": 0.15,
+                    "height_ratios": [1, 1],
+                },
             )
             self._speed_axis = None
             self._trial_axis = None
@@ -245,60 +252,71 @@ class BehaviorVisualizer:
             self._figure, (self._lick_axis, self._valve_axis, self._speed_axis) = plt.subplots(
                 3,
                 1,
-                figsize=(10, 8),
+                figsize=(10, 6),
                 sharex=True,
                 num="Runtime Behavior Visualizer",
-                gridspec_kw={"hspace": 0.3, "left": 0.15, "height_ratios": [1, 1, 3]},
+                gridspec_kw={
+                    "hspace": 0.4,
+                    "left": 0.10,
+                    "right": 0.97,
+                    "top": 0.95,
+                    "bottom": 0.12,
+                    "height_ratios": [1, 1, 3],
+                },
             )
             self._trial_axis = None
         else:  # VisualizerMode.EXPERIMENT
-            self._figure, (self._lick_axis, self._valve_axis, self._speed_axis, self._trial_axis) = plt.subplots(
-                4,
-                1,
-                figsize=(10, 12),
-                num="Runtime Behavior Visualizer",
-                gridspec_kw={"hspace": 0.5, "left": 0.15, "height_ratios": [1, 1, 3, 2]},
+            # Uses GridSpec with a spacer row to have tight spacing between lick/valve/speed but larger gap before
+            # trial.
+            self._figure = plt.figure(num="Runtime Behavior Visualizer", figsize=(10, 10))
+            grid_spec = GridSpec(
+                nrows=5,
+                ncols=1,
+                figure=self._figure,
+                height_ratios=[1, 1, 3, 0, 2.3],
+                hspace=0.4,
+                left=0.13,
+                right=0.97,
+                top=0.96,
+                bottom=0.07,
             )
+            self._lick_axis = self._figure.add_subplot(grid_spec[0])
+            self._valve_axis = self._figure.add_subplot(grid_spec[1])
+            self._speed_axis = self._figure.add_subplot(grid_spec[2])
+            # Row 3 is a spacer (not used).
+            self._trial_axis = self._figure.add_subplot(grid_spec[4])
 
-        # Padding value ensures that the y-labels are aligned across all axes.
-        self._lick_axis.yaxis.labelpad = 15
-        self._valve_axis.yaxis.labelpad = 15
+        self._lick_axis.set_title(label="Lick Sensor State", fontdict=_fontdict_title)
+        self._lick_axis.set_ylim(bottom=-0.05, top=1.05)
+        self._lick_axis.set_xlim(left=-self._time_window, right=0)
+        self._lick_axis.set_xlabel(xlabel="")
+        self._lick_axis.yaxis.set_major_locator(FixedLocator(locs=[0, 1]))
+        self._lick_axis.yaxis.set_major_formatter(FixedFormatter(seq=["No Lick", "Lick"]))
+
+        self._valve_axis.set_title(label="Reward Valve State", fontdict=_fontdict_title)
+        self._valve_axis.set_ylim(bottom=-0.05, top=1.05)
+        self._valve_axis.set_xlim(left=-self._time_window, right=0)
+        self._valve_axis.set_xlabel(xlabel="")
+        self._valve_axis.yaxis.set_major_locator(FixedLocator(locs=[0, 1]))
+        self._valve_axis.yaxis.set_major_formatter(FixedFormatter(seq=["Closed", "Open"]))
+
+        # Configures the speed axis, which only exists in RUN_TRAINING and EXPERIMENT modes.
         if self._speed_axis is not None:
-            self._speed_axis.yaxis.labelpad = 15
-
-        self._lick_axis.set_title("Lick Sensor State", fontdict=_fontdict_title)
-        self._lick_axis.set_ylim(-0.05, 1.05)
-        self._lick_axis.set_ylabel("Lick State", fontdict=_fontdict_axis_label)
-        self._lick_axis.set_xlabel("")
-        self._lick_axis.yaxis.set_major_locator(FixedLocator([0, 1]))
-        self._lick_axis.yaxis.set_major_formatter(FixedFormatter(["No Lick", "Lick"]))
-
-        self._valve_axis.set_title("Reward Valve State", fontdict=_fontdict_title)
-        self._valve_axis.set_ylim(-0.05, 1.05)
-        self._valve_axis.set_ylabel("Valve State", fontdict=_fontdict_axis_label)
-        self._valve_axis.set_xlabel("")
-        self._valve_axis.yaxis.set_major_locator(FixedLocator([0, 1]))
-        self._valve_axis.yaxis.set_major_formatter(FixedFormatter(["Closed", "Open"]))
-
-        # Configures the speed axis, which only exists in RUN_TRAINING and experiment modes.
-        if self._speed_axis is not None:
-            self._speed_axis.set_title("Average Running Speed", fontdict=_fontdict_title)
-            self._speed_axis.set_ylim(-2, 42)
-            self._speed_axis.set_ylabel("Running speed (cm/s)", fontdict=_fontdict_axis_label)
-            self._speed_axis.set_xlabel("Time (s)", fontdict=_fontdict_axis_label)
+            self._speed_axis.set_title(label="Average Running Speed", fontdict=_fontdict_title)
+            self._speed_axis.set_ylim(bottom=-2, top=42)
+            self._speed_axis.set_xlim(left=-self._time_window, right=0)
+            self._speed_axis.set_ylabel(ylabel="Speed (cm / s)", fontdict=_fontdict_axis_label)
+            self._speed_axis.yaxis.labelpad = 10
+            self._speed_axis.set_xlabel(xlabel="Time (s)", fontdict=_fontdict_axis_label)
             self._speed_axis.yaxis.set_major_locator(MaxNLocator(nbins="auto", integer=False))
             self._speed_axis.xaxis.set_major_locator(MaxNLocator(nbins="auto", integer=True))
-            self._speed_axis.set_xlim(-self._time_window, 0)
             plt.setp(self._lick_axis.get_xticklabels(), visible=False)
             plt.setp(self._valve_axis.get_xticklabels(), visible=False)
-            self._figure.align_ylabels([self._lick_axis, self._valve_axis, self._speed_axis])
         else:
             # In LICK_TRAINING mode, the valve axis is the bottom plot and shows the x-axis labels.
-            self._valve_axis.set_xlabel("Time (s)", fontdict=_fontdict_axis_label)
+            self._valve_axis.set_xlabel(xlabel="Time (s)", fontdict=_fontdict_axis_label)
             self._valve_axis.xaxis.set_major_locator(MaxNLocator(nbins="auto", integer=True))
-            self._valve_axis.set_xlim(-self._time_window, 0)
             plt.setp(self._lick_axis.get_xticklabels(), visible=False)
-            self._figure.align_ylabels([self._lick_axis, self._valve_axis])
 
         (self._lick_line,) = self._lick_axis.plot(
             self._timestamps,
@@ -495,30 +513,30 @@ class BehaviorVisualizer:
         if self._trial_axis is None:
             return
 
-        self._trial_axis.set_title("Trial Performance (Last 20 Trials)", fontdict=_fontdict_title)
-        self._trial_axis.set_xlim(0.5, 20.5)
-        self._trial_axis.set_ylim(-0.2, 1.2)
-        self._trial_axis.set_yticks([0.25, 0.75])
-        self._trial_axis.set_yticklabels(["Reinforcing", "Aversive"])
-        self._trial_axis.yaxis.labelpad = 15
-        self._trial_axis.set_xticks([])
-        self._trial_axis.set_xlabel("Trial State", fontdict=_fontdict_axis_label)
-        self._trial_axis.axhline(y=0.5, color=_plt_palette("gray"), linestyle="-", linewidth=0.5, alpha=0.5)
-
-        # Adds trial number labels above each rectangle position.
-        for i in range(1, 21):
-            self._trial_axis.text(
-                i, 1.05, str(i), ha="center", va="bottom", fontsize=10, fontweight="normal", color="#2c3e50"
-            )
+        self._trial_axis.set_title(label="Trial Performance", fontdict=_fontdict_title)
+        self._trial_axis.set_xlim(left=0.5, right=20.5)
+        self._trial_axis.set_ylim(bottom=-0.1, top=1.0)
+        self._trial_axis.set_yticks(ticks=[0.25, 0.75])
+        self._trial_axis.set_yticklabels(labels=["Reinforcing", "Aversive"])
+        self._trial_axis.set_xlabel(xlabel="Trial Number", fontdict=_fontdict_axis_label)
+        self._trial_axis.set_xticks(ticks=range(1, 21))
+        self._trial_axis.set_xticklabels(labels=[""] * 20)
+        self._trial_axis.axhline(y=0.5, color=_plt_palette(color="gray"), linestyle="-", linewidth=0.5, alpha=0.5)
 
         # Adds color legend for trial outcomes.
         legend_elements = [
-            Rectangle((0, 0), 1, 1, facecolor=_plt_palette("green"), label="Success"),
-            Rectangle((0, 0), 1, 1, facecolor=_plt_palette("red"), label="Failed"),
-            Rectangle((0, 0), 1, 1, facecolor=_plt_palette("blue"), label="Guided"),
+            Rectangle(xy=(0, 0), width=1, height=1, facecolor=_plt_palette(color="green"), label="Succeeded"),
+            Rectangle(xy=(0, 0), width=1, height=1, facecolor=_plt_palette(color="red"), label="Failed"),
+            Rectangle(xy=(0, 0), width=1, height=1, facecolor=_plt_palette(color="gray"), label="Guided"),
         ]
         self._trial_axis.legend(
-            handles=legend_elements, loc="upper right", fontsize=10, framealpha=0.9, edgecolor="none"
+            handles=legend_elements,
+            loc="lower right",
+            ncol=3,
+            fontsize=10,
+            framealpha=0.9,
+            edgecolor="none",
+            bbox_to_anchor=(1.0, -0.02),
         )
 
         # Creates the reinforcing trial rectangles in the bottom row. Uses 1-indexed positions with reduced width
@@ -526,8 +544,8 @@ class BehaviorVisualizer:
         self._reinforcing_rectangles = []
         for i in range(20):
             rect = Rectangle(
-                xy=(i + 1 - 0.35, 0.05),
-                width=0.7,
+                xy=(i + 1 - 0.175, 0.05),
+                width=0.35,
                 height=0.4,
                 facecolor=_plt_palette("gray"),
                 edgecolor="none",
@@ -542,8 +560,8 @@ class BehaviorVisualizer:
         self._aversive_rectangles = []
         for i in range(20):
             rect = Rectangle(
-                xy=(i + 1 - 0.35, 0.55),
-                width=0.7,
+                xy=(i + 1 - 0.175, 0.55),
+                width=0.35,
                 height=0.4,
                 facecolor=_plt_palette("gray"),
                 edgecolor="none",
@@ -566,6 +584,9 @@ class BehaviorVisualizer:
         if self._trial_axis is None:
             return
 
+        # Increments total trial count for x-axis labeling.
+        self._total_trials += 1
+
         # Maps the boolean outcome flags to integer values: 2=guided, 1=success, 0=failure.
         if was_guided:
             outcome = np.int8(2)
@@ -574,23 +595,41 @@ class BehaviorVisualizer:
         else:
             outcome = np.int8(0)
 
-        # Stores the trial outcome and type in the unified circular buffer.
-        self._trial_outcomes[self._trial_index] = outcome
-        self._trial_types[self._trial_index] = np.int8(1 if is_aversive else 0)
+        # Rolls arrays left by 1 position and inserts new trial at the rightmost position (index 19).
+        self._trial_types = np.roll(a=self._trial_types, shift=-1)
+        self._trial_outcomes = np.roll(a=self._trial_outcomes, shift=-1)
+        self._trial_types[-1] = np.int8(1) if is_aversive else np.int8(0)
+        self._trial_outcomes[-1] = outcome
 
-        # Hides the rectangle in the opposite row and shows the rectangle in the appropriate row.
-        if is_aversive:
-            self._reinforcing_rectangles[self._trial_index].set_visible(False)
-            self._update_trial_rectangle(
-                rectangles=self._aversive_rectangles, index=self._trial_index, outcome=outcome
-            )
-        else:
-            self._aversive_rectangles[self._trial_index].set_visible(False)
-            self._update_trial_rectangle(
-                rectangles=self._reinforcing_rectangles, index=self._trial_index, outcome=outcome
-            )
+        # Redraws all rectangles based on the arrays. Newest trial is at index 19 (rightmost).
+        for index in range(20):
+            trial_type = self._trial_types[index]
+            trial_outcome = self._trial_outcomes[index]
+            if trial_type == -1:
+                # Empty slot, hides both rectangles.
+                self._reinforcing_rectangles[index].set_visible(False)
+                self._aversive_rectangles[index].set_visible(False)
+            elif trial_type == 1:
+                # Aversive trial.
+                self._reinforcing_rectangles[index].set_visible(False)
+                self._update_trial_rectangle(rectangles=self._aversive_rectangles, index=index, outcome=trial_outcome)
+            else:
+                # Reinforcing trial.
+                self._aversive_rectangles[index].set_visible(False)
+                self._update_trial_rectangle(
+                    rectangles=self._reinforcing_rectangles, index=index, outcome=trial_outcome
+                )
 
-        self._trial_index = (self._trial_index + 1) % 20
+        # Updates x-axis labels. Empty positions get empty labels, filled positions get trial numbers.
+        num_displayed = min(self._total_trials, 20)
+        start_trial_number = self._total_trials - num_displayed + 1
+        labels: list[str] = []
+        for index in range(20):
+            if self._trial_types[index] == -1:
+                labels.append("")
+            else:
+                labels.append(str(start_trial_number + index - (20 - num_displayed)))
+        self._trial_axis.set_xticklabels(labels=labels)
 
     @staticmethod
     def _update_trial_rectangle(rectangles: list[Rectangle], index: int, outcome: np.int8) -> None:
@@ -606,13 +645,13 @@ class BehaviorVisualizer:
 
         rect = rectangles[index]
 
-        # Sets rectangle color based on outcome: green=success, red=failure, blue=guided.
+        # Sets rectangle color based on outcome: green=success, red=failure, gray=guided.
         if outcome == 1:
             rect.set_facecolor(_plt_palette("green"))
         elif outcome == 0:
             rect.set_facecolor(_plt_palette("red"))
         else:
-            rect.set_facecolor(_plt_palette("blue"))
+            rect.set_facecolor(_plt_palette("gray"))
 
         rect.set_alpha(1.0)
         rect.set_visible(True)

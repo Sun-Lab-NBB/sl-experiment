@@ -665,8 +665,6 @@ class _TrialState:
     # Trial structure configuration
     trial_structures: dict[str, WaterRewardTrial | GasPuffTrial] = field(default_factory=dict)
     """Maps trial structure names to their configuration objects."""
-    current_trial_name: str = ""
-    """The name of the currently active trial structure."""
 
     def trial_completed(self, traveled_distance: float) -> bool:
         """Determines whether the current trial is complete based on the total distance traveled by the animal.
@@ -696,21 +694,13 @@ class _TrialState:
         """
         return self.aversive_puff_durations[self.completed]
 
-    def get_current_trial_config(self) -> WaterRewardTrial | GasPuffTrial | None:
-        """Retrieves the configuration object for the currently active trial structure.
-
-        Returns:
-            The trial configuration object, or None if no trial is currently active.
-        """
-        return None if not self.current_trial_name else self.trial_structures.get(self.current_trial_name)
-
     def is_current_trial_aversive(self) -> bool:
         """Checks whether the current trial is an aversive (gas puff) trial.
 
         Returns:
             True if the current trial is a GasPuffTrial, False otherwise.
         """
-        return isinstance(self.get_current_trial_config(), GasPuffTrial)
+        return self.aversive_puff_durations[self.completed] > 0
 
     def advance_trial(self) -> int:
         """Advances the trial tracking state to the next trial.
