@@ -125,7 +125,7 @@ def get_cameras() -> None:
             console.echo(
                 message=(
                     f"Harvesters camera {num}: index={camera_data.camera_index}, model={camera_data.model}, "
-                    f"serial_code={camera_data.serial_number} frame_height={camera_data.frame_height} pixels,"
+                    f"serial_code={camera_data.serial_number}, frame_height={camera_data.frame_height} pixels, "
                     f"frame_width={camera_data.frame_width} pixels, "
                     f"frame_rate={camera_data.acquisition_frame_rate} frames / second."
                 )

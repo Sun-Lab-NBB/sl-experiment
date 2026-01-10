@@ -993,7 +993,7 @@ class ValveInterface(ModuleInterface):
                 f"{_MAXIMUM_VALVE_PULSE_DURATION_MS} ms."
             )
             console.echo(message=message, level=LogLevel.WARNING)
-            pulse_duration = _MAXIMUM_VALVE_PULSE_DURATION_US
+            pulse_duration = np.float64(_MAXIMUM_VALVE_PULSE_DURATION_US)
 
         return np.uint32(np.round(pulse_duration))
 

@@ -11,7 +11,7 @@ dependencies:
   - colorama=0.4.6=pyhd8ed1ab_1
   - distlib=0.4.0=pyhd8ed1ab_0
   - filelock=3.20.2=pyhd8ed1ab_0
-  - icu=78.1=h33c6efd_0
+  - icu=78.2=h33c6efd_0
   - ld_impl_linux-64=2.45=default_hbd61a6d_105
   - libexpat=2.7.3=hecca717_0
   - libffi=3.5.2=h9ec8514_0
@@ -36,7 +36,7 @@ dependencies:
   - readline=8.3=h853b02a_0
   - tk=8.6.13=noxft_ha0e22de_103
   - tomli=2.3.0=pyhcf101f3_0
-  - tox=4.33.0=pyhcf101f3_0
+  - tox=4.34.0=pyhcf101f3_0
   - tox-uv=1.29.0=pyhd8ed1ab_0
   - typing_extensions=4.15.0=pyhcf101f3_0
   - tzdata=2025c=hc9c84f9_1

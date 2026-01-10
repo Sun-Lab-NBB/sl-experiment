@@ -1,6 +1,5 @@
 """Provides utility assets shared by other modules of the mesoscope_vr package."""
 
-from enum import IntEnum
 from pathlib import Path
 from dataclasses import field, dataclass
 
@@ -41,21 +40,6 @@ mesoscope_vr_sessions: tuple[str, str, str, str] = (
     SessionTypes.WINDOW_CHECKING,
 )
 """Defines the data acquisition session types supported by the Mesoscope-VR data acquisition system."""
-
-
-class _DataArrayIndex(IntEnum):
-    """Defines the shared memory array indices for each runtime parameter addressable from the user-facing GUI."""
-
-    TERMINATION = 0
-    EXIT_SIGNAL = 1
-    REWARD_SIGNAL = 2
-    SPEED_MODIFIER = 3
-    DURATION_MODIFIER = 4
-    PAUSE_STATE = 5
-    OPEN_VALVE = 6
-    CLOSE_VALVE = 7
-    REWARD_VOLUME = 8
-    GUIDANCE_ENABLED = 9
 
 
 @dataclass()

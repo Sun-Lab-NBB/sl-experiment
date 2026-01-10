@@ -9,7 +9,7 @@ https://conda.anaconda.org/conda-forge/noarch/chardet-5.2.0-pyhd8ed1ab_3.conda
 https://conda.anaconda.org/conda-forge/noarch/colorama-0.4.6-pyhd8ed1ab_1.conda
 https://conda.anaconda.org/conda-forge/noarch/distlib-0.4.0-pyhd8ed1ab_0.conda
 https://conda.anaconda.org/conda-forge/noarch/filelock-3.20.2-pyhd8ed1ab_0.conda
-https://conda.anaconda.org/conda-forge/linux-64/icu-78.1-h33c6efd_0.conda
+https://conda.anaconda.org/conda-forge/linux-64/icu-78.2-h33c6efd_0.conda
 https://conda.anaconda.org/conda-forge/linux-64/ld_impl_linux-64-2.45-default_hbd61a6d_105.conda
 https://conda.anaconda.org/conda-forge/linux-64/libexpat-2.7.3-hecca717_0.conda
 https://conda.anaconda.org/conda-forge/linux-64/libffi-3.5.2-h9ec8514_0.conda
@@ -34,7 +34,7 @@ https://conda.anaconda.org/conda-forge/noarch/python_abi-3.14-8_cp314.conda
 https://conda.anaconda.org/conda-forge/linux-64/readline-8.3-h853b02a_0.conda
 https://conda.anaconda.org/conda-forge/linux-64/tk-8.6.13-noxft_ha0e22de_103.conda
 https://conda.anaconda.org/conda-forge/noarch/tomli-2.3.0-pyhcf101f3_0.conda
-https://conda.anaconda.org/conda-forge/noarch/tox-4.33.0-pyhcf101f3_0.conda
+https://conda.anaconda.org/conda-forge/noarch/tox-4.34.0-pyhcf101f3_0.conda
 https://conda.anaconda.org/conda-forge/noarch/tox-uv-1.29.0-pyhd8ed1ab_0.conda
 https://conda.anaconda.org/conda-forge/noarch/typing_extensions-4.15.0-pyhcf101f3_0.conda
 https://conda.anaconda.org/conda-forge/noarch/tzdata-2025c-hc9c84f9_1.conda

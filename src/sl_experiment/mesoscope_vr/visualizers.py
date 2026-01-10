@@ -46,6 +46,9 @@ _palette_dict = {
     "gray": (0.500, 0.500, 0.500),
 }
 
+# The number of trials to display in the trial performance panel.
+_TRIAL_HISTORY_SIZE: int = 20
+
 
 class VisualizerMode(IntEnum):
     """Defines the display modes for the BehaviorVisualizer."""
@@ -148,9 +151,9 @@ class BehaviorVisualizer:
         _duration_threshold_text: The text object that communicates the running epoch duration value to the user.
         _mode: The runtime mode that determines the visualizer layout.
         _trial_axis: The axis for the trial performance panel (only in experiment mode).
-        _trial_types: Stores the last 20 trial types with values -1=empty, 0=reinforcing, 1=aversive.
-            Newest at index 19.
-        _trial_outcomes: Stores the last 20 trial outcomes with values -1=empty, 0=failed, 1=success, 2=guided.
+        _trial_types: Stores the most recent trial types with values -1=empty, 0=reinforcing, 1=aversive.
+            Newest at the rightmost index.
+        _trial_outcomes: Stores the most recent trial outcomes with values -1=empty, 0=failed, 1=success, 2=guided.
         _total_trials: The total number of trials recorded, used for x-axis labeling.
         _reinforcing_rectangles: The rectangle patches for visualizing reinforcing trial outcomes.
         _aversive_rectangles: The rectangle patches for visualizing aversive trial outcomes.
@@ -204,10 +207,10 @@ class BehaviorVisualizer:
 
         self._mode: VisualizerMode | int = VisualizerMode.EXPERIMENT
 
-        # Stores the last 20 trial types: -1=empty, 0=reinforcing, 1=aversive. Newest trial is at index 19 (rightmost).
-        self._trial_types: NDArray[np.int8] = np.full(shape=20, fill_value=-1, dtype=np.int8)
-        # Stores the last 20 trial outcomes: -1=empty, 0=failed, 1=success, 2=guided. Newest trial is at index 19.
-        self._trial_outcomes: NDArray[np.int8] = np.full(shape=20, fill_value=-1, dtype=np.int8)
+        # Stores trial types: -1=empty, 0=reinforcing, 1=aversive. Newest trial is at the rightmost index.
+        self._trial_types: NDArray[np.int8] = np.full(shape=_TRIAL_HISTORY_SIZE, fill_value=-1, dtype=np.int8)
+        # Stores trial outcomes: -1=empty, 0=failed, 1=success, 2=guided. Newest trial is at the rightmost index.
+        self._trial_outcomes: NDArray[np.int8] = np.full(shape=_TRIAL_HISTORY_SIZE, fill_value=-1, dtype=np.int8)
         self._total_trials: int = 0  # Tracks total trial count for x-axis labeling.
 
         self._trial_axis: Axes | None = None
@@ -506,7 +509,7 @@ class BehaviorVisualizer:
     def _setup_trial_axis(self) -> None:
         """Initializes the trial performance panel with empty rectangle patches.
 
-        This method creates a 2-row visualization showing 20 total trials. Each trial appears in either the
+        This method creates a 2-row visualization showing the most recent trials. Each trial appears in either the
         reinforcing (bottom) or aversive (top) row based on its type, creating a staggered pattern when trial
         types alternate.
         """
@@ -514,13 +517,13 @@ class BehaviorVisualizer:
             return
 
         self._trial_axis.set_title(label="Trial Performance", fontdict=_fontdict_title)
-        self._trial_axis.set_xlim(left=0.5, right=20.5)
+        self._trial_axis.set_xlim(left=0.5, right=_TRIAL_HISTORY_SIZE + 0.5)
         self._trial_axis.set_ylim(bottom=-0.1, top=1.0)
         self._trial_axis.set_yticks(ticks=[0.25, 0.75])
         self._trial_axis.set_yticklabels(labels=["Reinforcing", "Aversive"])
         self._trial_axis.set_xlabel(xlabel="Trial Number", fontdict=_fontdict_axis_label)
-        self._trial_axis.set_xticks(ticks=range(1, 21))
-        self._trial_axis.set_xticklabels(labels=[""] * 20)
+        self._trial_axis.set_xticks(ticks=range(1, _TRIAL_HISTORY_SIZE + 1))
+        self._trial_axis.set_xticklabels(labels=[""] * _TRIAL_HISTORY_SIZE)
         self._trial_axis.axhline(y=0.5, color=_plt_palette(color="gray"), linestyle="-", linewidth=0.5, alpha=0.5)
 
         # Adds color legend for trial outcomes.
@@ -542,7 +545,7 @@ class BehaviorVisualizer:
         # Creates the reinforcing trial rectangles in the bottom row. Uses 1-indexed positions with reduced width
         # for visual separation between adjacent rectangles.
         self._reinforcing_rectangles = []
-        for i in range(20):
+        for i in range(_TRIAL_HISTORY_SIZE):
             rect = Rectangle(
                 xy=(i + 1 - 0.175, 0.05),
                 width=0.35,
@@ -558,7 +561,7 @@ class BehaviorVisualizer:
         # Creates the aversive trial rectangles in the top row. Uses 1-indexed positions with reduced width
         # for visual separation between adjacent rectangles.
         self._aversive_rectangles = []
-        for i in range(20):
+        for i in range(_TRIAL_HISTORY_SIZE):
             rect = Rectangle(
                 xy=(i + 1 - 0.175, 0.55),
                 width=0.35,
@@ -595,14 +598,14 @@ class BehaviorVisualizer:
         else:
             outcome = np.int8(0)
 
-        # Rolls arrays left by 1 position and inserts new trial at the rightmost position (index 19).
+        # Rolls arrays left by 1 position and inserts new trial at the rightmost position.
         self._trial_types = np.roll(a=self._trial_types, shift=-1)
         self._trial_outcomes = np.roll(a=self._trial_outcomes, shift=-1)
         self._trial_types[-1] = np.int8(1) if is_aversive else np.int8(0)
         self._trial_outcomes[-1] = outcome
 
-        # Redraws all rectangles based on the arrays. Newest trial is at index 19 (rightmost).
-        for index in range(20):
+        # Redraws all rectangles based on the arrays. Newest trial is at the rightmost index.
+        for index in range(_TRIAL_HISTORY_SIZE):
             trial_type = self._trial_types[index]
             trial_outcome = self._trial_outcomes[index]
             if trial_type == -1:
@@ -621,14 +624,14 @@ class BehaviorVisualizer:
                 )
 
         # Updates x-axis labels. Empty positions get empty labels, filled positions get trial numbers.
-        num_displayed = min(self._total_trials, 20)
+        num_displayed = min(self._total_trials, _TRIAL_HISTORY_SIZE)
         start_trial_number = self._total_trials - num_displayed + 1
         labels: list[str] = []
-        for index in range(20):
+        for index in range(_TRIAL_HISTORY_SIZE):
             if self._trial_types[index] == -1:
                 labels.append("")
             else:
-                labels.append(str(start_trial_number + index - (20 - num_displayed)))
+                labels.append(str(start_trial_number + index - (_TRIAL_HISTORY_SIZE - num_displayed)))
         self._trial_axis.set_xticklabels(labels=labels)
 
     @staticmethod

@@ -674,8 +674,11 @@ class _TrialState:
                 cue sequence reset or runtime onset.
 
         Returns:
-            True if the animal has traveled beyond the current trial's distance threshold, False otherwise.
+            True if the animal has traveled beyond the current trial's distance threshold, False otherwise. Returns
+            False if all trials have been completed.
         """
+        if self.completed >= len(self.distances):
+            return False
         return traveled_distance > self.distances[self.completed]
 
     def get_current_reward(self) -> tuple[float, int]:
@@ -708,17 +711,19 @@ class _TrialState:
         Returns:
             The updated count of consecutively failed trials for the current trial type.
         """
+        # Captures trial type BEFORE incrementing to update the correct failure counters.
+        is_aversive = self.is_current_trial_aversive()
         self.completed += 1
 
-        if self.is_current_trial_aversive():
-            # Aversive trial: success = met occupancy requirement (no puff delivered)
+        if is_aversive:
+            # Aversive trial: success = met occupancy requirement (no puff delivered).
             if not self.aversive_succeeded:
                 self.aversive_failed_trials += 1
             else:
                 self.aversive_failed_trials = 0
             self.aversive_succeeded = False
             return self.aversive_failed_trials
-        # Reinforcing trial: success = received water reward
+        # Reinforcing trial: success = received water reward.
         if not self.reinforcing_rewarded:
             self.reinforcing_failed_trials += 1
         else:
@@ -2910,6 +2915,17 @@ def lick_training_logic(
 
     # Slices the samples array to make the total training time be roughly the maximum requested duration.
     reward_delays: NDArray[np.float64] = samples[:max_samples_idx]
+
+    # Aborts if no rewards fit in the requested training time. Raises an error before system initialization to allow
+    # automatic session data purge.
+    if max_samples_idx == 0:
+        message = (
+            f"Unable to generate the lick training reward sequence. The requested maximum training time "
+            f"({descriptor.maximum_training_time_min} minutes) is shorter than the minimum reward delay "
+            f"({descriptor.minimum_reward_delay_s} seconds). Increase the maximum training time or decrease the "
+            f"minimum reward delay."
+        )
+        console.error(message=message, error=ValueError)
 
     message = (
         f"Generated a sequence of {len(reward_delays)} rewards with the total cumulative runtime of "
