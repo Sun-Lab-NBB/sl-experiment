@@ -9,7 +9,7 @@ import numpy as np
 from numpy.typing import NDArray  # noqa: TC002
 from ataraxis_time import TimeUnits, PrecisionTimer, convert_time
 from scipy.optimize import curve_fit
-from ataraxis_base_utilities import console, LogLevel
+from ataraxis_base_utilities import LogLevel, console
 from ataraxis_data_structures import SharedMemoryArray
 from ataraxis_communication_interface import (
     ModuleData,
