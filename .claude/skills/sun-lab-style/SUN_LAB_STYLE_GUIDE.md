@@ -1,6 +1,7 @@
 # Sun Lab Python Style Guide
 
-This guide defines the documentation and coding conventions used across Sun Lab Python projects. Reference this during development to maintain consistency across all codebases.
+This guide defines the documentation and coding conventions used across Sun Lab Python projects.
+Reference this during development to maintain consistency across all codebases.
 
 ---
 
@@ -33,29 +34,42 @@ def function_name(param1: int, param2: str = "default") -> bool:
 
 ### General Rules
 
-**Punctuation**: Always use proper punctuation in all documentation: docstrings, comments, and argument descriptions.
+**Punctuation**: Always use proper punctuation in all documentation: docstrings, comments, and
+argument descriptions.
 
 ### Section Guidelines
 
-**Summary line**: Use imperative mood for ALL docstrings (functions, methods, classes, modules). Use verbs like "Computes...", "Defines...", "Configures...", "Processes..." rather than noun phrases like "A class that..." or "Configuration for...".
+**Summary line**: Use imperative mood for ALL docstrings (functions, methods, classes, modules).
+Use verbs like "Computes...", "Defines...", "Configures...", "Processes..." rather than noun
+phrases like "A class that..." or "Configuration for...".
 
-**Extended description**: Only include if the summary line is not sufficient to fully understand what the function does. Use third person ("This method creates..."). Do not explain every step of implementation; focus on the high-level purpose.
+**Extended description**: Only include if the summary line is not sufficient to fully understand
+what the function does. Use third person ("This method creates..."). Do not explain every step of
+implementation; focus on the high-level purpose.
 
-**Notes**: Use for usage guidance, non-obvious behavior, algorithms, references, and implementation rationale. This section explains how the function is used or unique things to know about it, not what it does.
+**Notes**: Use for usage guidance, non-obvious behavior, algorithms, references, and implementation
+rationale. This section explains how the function is used or unique things to know about it, not
+what it does.
 
-**Args**: Don't repeat type info. Start with uppercase after the colon. Always use proper punctuation. Descriptions must be clear enough to give the user a good understanding of what the argument controls or does.
+**Args**: Don't repeat type info. Start with uppercase after the colon. Always use proper
+punctuation. Descriptions must be clear enough to give the user a good understanding of what the
+argument controls or does.
 
 **Args (boolean)**: Use "Determines whether..." not "Whether..." for boolean parameters.
 
-**Args (enum)**: Type hint should accept both the enum and its base type (e.g., `VisualizerMode | int` for IntEnum). Include "Must be a valid X enumeration member." at the end of the description.
+**Args (enum)**: Type hint should accept both the enum and its base type (e.g.,
+`VisualizerMode | int` for IntEnum). Include "Must be a valid X enumeration member." at the end
+of the description.
 
-**Returns**: Describe what is returned, not the type. Start with uppercase if a sentence. For complex returns (tuples, dicts), describe each element in prose form.
+**Returns**: Describe what is returned, not the type. Start with uppercase if a sentence. For
+complex returns (tuples, dicts), describe each element in prose form.
 
 **Raises**: Only include if the function explicitly raises exceptions.
 
 **Attributes**: Document all instance attributes, including private ones prefixed with `_`.
 
-**Lists**: Do not use lists (numbered or bulleted) in docstrings. Write information in prose form instead.
+**Lists**: Do not use lists (numbered or bulleted) in docstrings. Write information in prose form
+instead.
 
 ### Class Docstrings with Attributes
 
@@ -123,7 +137,9 @@ Follow the same imperative mood pattern as other docstrings:
 
 ### CLI Command Docstrings
 
-CLI commands and command groups use a specialized docstring format because Click parses these docstrings into help messages displayed to users. Do not use standard docstring sections (Notes, Args, Returns, Raises) as they will appear verbatim in the CLI help output.
+CLI commands and command groups use a specialized docstring format because Click parses these
+docstrings into help messages displayed to users. Do not use standard docstring sections (Notes,
+Args, Returns, Raises) as they will appear verbatim in the CLI help output.
 
 ```python
 @click.command()
@@ -136,7 +152,8 @@ def process_data(input_path: Path, output_path: Path) -> None:
     """
 ```
 
-The first sentence serves as the short command description shown in command listings. The remaining prose provides additional context shown in the detailed help for that specific command.
+The first sentence serves as the short command description shown in command listings. The
+remaining prose provides additional context shown in the detailed help for that specific command.
 
 ---
 
@@ -162,7 +179,8 @@ def process(data: NDArray[np.float32]) -> NDArray[np.float32]:
     ...
 ```
 
-- Always specify dtype explicitly: `NDArray[np.float32]`, `NDArray[np.uint16]`, `NDArray[np.bool_]`, etc.
+- Always specify dtype explicitly: `NDArray[np.float32]`, `NDArray[np.uint16]`,
+  `NDArray[np.bool_]`, etc.
 - Never use unparameterized `NDArray`
 - Use `TYPE_CHECKING` block for `NDArray` to avoid runtime import overhead
 
@@ -309,7 +327,8 @@ for i in prange(data.shape[0]):
 - Use third person imperative ("Configures..." not "This section configures..." or "Configure...")
 - Place above the code, not at end of line (unless very short)
 - Use comments to explain non-obvious logic or provide context that aids understanding
-- When explaining what code does, focus on the high-level purpose, not obvious implementation details
+- When explaining what code does, focus on the high-level purpose, not obvious implementation
+  details
 
 ```python
 # The constant 2.046392675 is the theoretical injectivity bound for 2D cubic B-splines.
@@ -398,8 +417,10 @@ def set_from_array(self, data: NDArray[np.float32], weights: NDArray[np.float32]
 Use the appropriate method decorator based on what the method accesses:
 
 - **Instance methods** (no decorator): Use when the method accesses instance attributes (`self`).
-- **`@staticmethod`**: Use when the method doesn't access instance or class attributes. Prefer this over instance methods when `self` is not needed.
-- **`@classmethod`**: Use when the method needs access to class attributes but not instance attributes.
+- **`@staticmethod`**: Use when the method doesn't access instance or class attributes. Prefer
+  this over instance methods when `self` is not needed.
+- **`@classmethod`**: Use when the method needs access to class attributes but not instance
+  attributes.
 
 ```python
 class DataProcessor:
@@ -422,8 +443,11 @@ class DataProcessor:
 
 ### Visibility (Public vs Private)
 
-- **Private** (`_` prefix): Use for anything internal to the class/module that should not be accessed externally. This includes helper methods, internal attributes, and implementation details.
-- **Public** (no prefix): Use only for methods, functions, and classes that are intended to be used from other modules or by external code.
+- **Private** (`_` prefix): Use for anything internal to the class/module that should not be
+  accessed externally. This includes helper methods, internal attributes, and implementation
+  details.
+- **Public** (no prefix): Use only for methods, functions, and classes that are intended to be
+  used from other modules or by external code.
 
 ```python
 class SessionManager:
@@ -471,7 +495,8 @@ message = (
 
 ### Running the Linter
 
-Run `tox -e lint` after making changes. All issues must either be resolved or marked with proper `# noqa` ignore statements.
+Run `tox -e lint` after making changes. All issues must either be resolved or marked with proper
+`# noqa` ignore statements.
 
 ### Resolution Policy
 
@@ -493,7 +518,8 @@ def calculate_threshold(self, value: float) -> float:
     return value * adjustment_factor
 ```
 
-**Module-level constants**: Use when the value is a configuration parameter that may need adjustment later.
+**Module-level constants**: Use when the value is a configuration parameter that may need
+adjustment later.
 
 ```python
 # Maximum number of retry attempts for network operations.
@@ -515,4 +541,5 @@ if mode == 3:  # noqa: PLR2004 - LICK_TRAINING mode value from VisualizerMode en
 ### Typos
 
 - **Obvious typos**: Must be fixed immediately (e.g., "teh" → "the", "fucntion" → "function").
-- **Ambiguous typos**: If a typo may be intentional (e.g., domain-specific terminology, abbreviations), flag it for user confirmation before changing.
+- **Ambiguous typos**: If a typo may be intentional (e.g., domain-specific terminology,
+  abbreviations), flag it for user confirmation before changing.

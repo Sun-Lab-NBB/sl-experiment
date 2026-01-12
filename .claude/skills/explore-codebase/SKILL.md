@@ -1,11 +1,14 @@
 ---
 name: explore-codebase
-description: Perform in-depth codebase exploration at the start of a coding session. Builds comprehensive understanding of project structure, architecture, key components, and patterns.
+description: >-
+  Perform in-depth codebase exploration at the start of a coding session. Builds comprehensive
+  understanding of project structure, architecture, key components, and patterns.
 ---
 
 # Codebase Exploration
 
-When this skill is invoked, perform a thorough exploration of the codebase to build deep understanding before any coding work begins.
+When this skill is invoked, perform a thorough exploration of the codebase to build deep
+understanding before any coding work begins.
 
 ## Exploration Requirements
 
@@ -65,4 +68,5 @@ After exploration, provide a structured summary with:
 
 ## Usage
 
-This skill should be invoked at the start of coding sessions to ensure full context before making changes. It prevents blind modifications and ensures understanding of existing patterns.
+This skill should be invoked at the start of coding sessions to ensure full context before making
+changes. It prevents blind modifications and ensures understanding of existing patterns.
