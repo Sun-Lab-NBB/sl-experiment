@@ -50,6 +50,7 @@ actual library state to prevent integration errors.
 - `/explore-codebase` - Perform in-depth codebase exploration
 - `/sun-lab-style` - Apply Sun Lab Python coding conventions (REQUIRED for all code changes)
 - `/camera-interface` - Guide for using ataraxis-video-system to implement camera functionality
+- `/acquisition-system-setup` - Configure data acquisition systems (uses MCP tools from sl-shared-assets)
 
 ## Project Context
 
