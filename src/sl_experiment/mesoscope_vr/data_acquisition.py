@@ -1732,8 +1732,9 @@ class _MesoscopeVRSystem:
                     self._mesoscope_started = True
                     return
 
-            # If the timeout window expires without receiving any mesoscope frames, prompts the user to reconfigure the
-            # mesoscope.
+            # If the timeout window expires without receiving any mesoscope frames, clears the markers and prompts the
+            # user to reconfigure the mesoscope.
+            self._clear_mesoscope_markers()
             message = (
                 "The Mesoscope-VR system has requested the mesoscope to start acquiring frames and failed to "
                 "receive 10 frame acquisition triggers over 15 seconds. It is likely that the mesoscope has not "
