@@ -22,6 +22,7 @@ from sl_shared_assets import (
     GasPuffTrial,
     SessionTypes,
     ZaberPositions,
+    ExperimentState,
     WaterRewardTrial,
     MesoscopePositions,
     RunTrainingDescriptor,
