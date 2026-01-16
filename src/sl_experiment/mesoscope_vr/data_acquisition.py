@@ -1714,10 +1714,10 @@ class _MesoscopeVRSystem:
             message = "Mesoscope acquisition trigger: Sent. Waiting for the mesoscope frame acquisition to start..."
             console.echo(message=message, level=LogLevel.INFO)
 
-            # Waits for mesoscope to start acquiring at least 10 frames (at ~10 Hz, takes ~1 second).
+            # Waits for mesoscope to start acquiring at least 10 frames.
             _response_delay_timer.reset()
-            _maximum_wait_time = 5000  # 5 seconds
-            _expected_pulses = 10  # 10 frames at 10 Hz
+            _maximum_wait_time = 15000  # 15 seconds
+            _expected_pulses = 10
             while _response_delay_timer.elapsed < _maximum_wait_time:
                 # Adds delay to prevent CPU spinning.
                 _response_delay_timer.delay(delay=10, block=False)
@@ -1732,11 +1732,11 @@ class _MesoscopeVRSystem:
                     self._mesoscope_started = True
                     return
 
-            # If a 5-second window expires without receiving any mesoscope frames, prompt the user to reconfigure the
+            # If the timeout window expires without receiving any mesoscope frames, prompts the user to reconfigure the
             # mesoscope.
             message = (
                 "The Mesoscope-VR system has requested the mesoscope to start acquiring frames and failed to "
-                "receive 10 frame acquisition triggers over 5 seconds. It is likely that the mesoscope has not "
+                "receive 10 frame acquisition triggers over 15 seconds. It is likely that the mesoscope has not "
                 "been armed for externally-triggered frame acquisition or that the mesoscope frame monitoring "
                 "module is not functioning. Make sure the Mesoscope is configured for data acquisition and try again."
             )
