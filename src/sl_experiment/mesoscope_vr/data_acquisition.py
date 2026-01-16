@@ -22,12 +22,12 @@ from sl_shared_assets import (
     GasPuffTrial,
     SessionTypes,
     ZaberPositions,
+    ExperimentState,
     WaterRewardTrial,
     MesoscopePositions,
     RunTrainingDescriptor,
     LickTrainingDescriptor,
     MesoscopeHardwareState,
-    MesoscopeExperimentState,
     WindowCheckingDescriptor,
     MesoscopeSystemConfiguration,
     MesoscopeExperimentDescriptor,
@@ -3577,7 +3577,7 @@ def experiment_logic(
 
     # Verifies that all Mesoscope-VR states used during experiments are valid
     valid_states = {1, 2}
-    state: MesoscopeExperimentState
+    state: ExperimentState
     for state in experiment_config.experiment_states.values():
         if state.system_state_code not in valid_states:
             message = (
