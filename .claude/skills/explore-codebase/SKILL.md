@@ -1,72 +1,105 @@
 ---
-name: explore-codebase
+name: exploring-codebase
 description: >-
-  Perform in-depth codebase exploration at the start of a coding session. Builds comprehensive
-  understanding of project structure, architecture, key components, and patterns.
+  Performs in-depth codebase exploration at the start of a coding session. Builds comprehensive
+  understanding of project structure, architecture, key components, and patterns. Use when starting
+  a new session, when asked to understand or explore the codebase, when asked "what does this project
+  do", when exploring unfamiliar code, or when the user asks about project structure or architecture.
 ---
 
 # Codebase Exploration
 
-When this skill is invoked, perform a thorough exploration of the codebase to build deep
-understanding before any coding work begins.
+Performs thorough codebase exploration to build deep understanding before coding work begins.
 
-## Exploration Requirements
+---
 
-You MUST use the Task tool with `subagent_type: Explore` to investigate the following areas:
+## Exploration Approach
 
-### 1. Project Overview
-- Read README, pyproject.toml, setup.py, and documentation
-- Understand the project's purpose, goals, and primary use cases
-- Identify the target users/audience
+Use the Task tool with `subagent_type: Explore` to investigate the codebase. Focus on understanding:
 
-### 2. Directory Structure
-- Map the complete directory structure
-- Explain what each major directory/module contains
-- Identify source code vs configuration vs documentation vs tests
+1. **Project purpose and structure** - README, documentation, directory layout
+2. **Architecture** - Main components, how they interact, communication patterns
+3. **Core code** - Key classes, data models, utilities
+4. **Configuration** - How the project is configured and customized
+5. **Dependencies** - External libraries and integrations
+6. **Patterns and conventions** - Coding style, naming conventions, design patterns
 
-### 3. Architecture
-- Understand the overall system architecture
-- Identify main components and how they interact
-- Document communication patterns (IPC, APIs, events, etc.)
-- Note any external system integrations
+Adapt exploration depth based on project size and complexity. For small projects, a quick overview
+suffices. For large projects, explore systematically.
 
-### 4. Core Modules
-- **Entry points**: Main execution flow, CLI commands, APIs
-- **Business logic**: Core functionality and algorithms
-- **Data models**: Classes, schemas, data structures
-- **Utilities**: Helper functions, shared components
-- **Configuration**: How settings are managed and loaded
+---
 
-### 5. Dependencies
-- Review external library dependencies
-- Understand how key dependencies are used
-- Note version constraints or compatibility requirements
+## Guiding Questions
 
-### 6. Testing Structure
-- Identify testing frameworks used
-- Understand test organization
-- Note any test utilities or fixtures
+Answer these questions during exploration:
 
-### 7. Design Patterns & Conventions
-- Document coding patterns used (factories, strategies, etc.)
-- Note naming conventions
-- Identify code style and formatting standards
+### Architecture
+- What is the main entry point or controller?
+- How do components communicate (IPC, APIs, events)?
+- What external systems does this integrate with?
 
-### 8. Key Files
-- List the most important files with brief descriptions
-- Include file paths and line counts where relevant
+### Patterns
+- What naming conventions are used?
+- What design patterns appear (factories, dataclasses, protocols)?
+- How is configuration managed?
+
+### Structure
+- Where is the core business logic?
+- Where are tests located?
+- What build/tooling configuration exists?
+
+---
 
 ## Output Format
 
-After exploration, provide a structured summary with:
+Provide a structured summary including:
+
 - Project purpose (1-2 sentences)
-- Architecture diagram (ASCII if helpful)
 - Key components table
 - Important files list with paths
 - Notable patterns or conventions
 - Any areas of complexity or concern
 
+### Example Output
+
+```markdown
+## Project Purpose
+
+Manages scientific data acquisition systems for the Sun Lab at Cornell University. Currently implements
+the Mesoscope-VR two-photon imaging system combining brain imaging with virtual reality behavioral tasks.
+
+## Key Components
+
+| Component              | Location                                     | Purpose                                          |
+|------------------------|----------------------------------------------|--------------------------------------------------|
+| CLI Entry Points       | src/sl_experiment/command_line_interfaces/   | sl-get, sl-manage, sl-run commands               |
+| Mesoscope-VR System    | src/sl_experiment/mesoscope_vr/              | Two-photon imaging with VR behavior integration  |
+| Shared Components      | src/sl_experiment/shared_components/         | Cross-system utilities for all acquisition types |
+
+## Important Files
+
+- `src/sl_experiment/command_line_interfaces/sl_run.py` - Main experiment execution CLI
+- `src/sl_experiment/command_line_interfaces/sl_manage.py` - Session and data management CLI
+- `src/sl_experiment/command_line_interfaces/sl_get.py` - Data retrieval CLI
+- `src/sl_experiment/mesoscope_vr/runtime.py` - Mesoscope-VR experiment runtime
+- `src/sl_experiment/shared_components/session_manager.py` - Session-based data management
+
+## Notable Patterns
+
+- Hardware abstraction via binding classes (Zaber motors, cameras, microcontrollers)
+- Shared memory IPC for GUI-runtime communication
+- Session-based data management with distributed storage
+- MyPy strict mode with full type annotations
+
+## Areas of Concern
+
+- Hardware dependencies require physical equipment for full testing
+- Cross-library coordination with sl-shared-assets and ataraxis-video-system
+```
+
+---
+
 ## Usage
 
-This skill should be invoked at the start of coding sessions to ensure full context before making
-changes. It prevents blind modifications and ensures understanding of existing patterns.
+Invoke at session start to ensure full context before making changes. Prevents blind modifications
+and ensures understanding of existing patterns.
