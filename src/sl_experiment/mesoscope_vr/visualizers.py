@@ -132,15 +132,19 @@ class BehaviorVisualizer:
         _timestamps: Stores the timestamps of the displayed data during visualization runtime.
         _lick_data: Stores the data used to generate the lick sensor state plot.
         _valve_data: Stores the data used to generate the solenoid valve state plot.
+        _puff_data: Stores the data used to generate the air puff valve state plot.
         _speed_data: Stores the data used to generate the running speed plot.
         _lick_event: Determines whether the lick sensor has reported a new lick event since the last visualizer update.
         _valve_event: Determines whether the valve was used to deliver a new reward since the last visualizer update.
+        _puff_event: Determines whether the air puff valve was activated since the last visualizer update.
         _lick_line: The line for the lick sensor data plot.
         _valve_line: The line for the solenoid valve data plot.
+        _puff_line: The line for the air puff valve data plot.
         _speed_line: The line for the average running speed data plot.
         _figure: The figure that displays the plots.
         _lick_axis: The axis for the lick sensor data plot.
         _valve_axis: The axis for the solenoid valve data plot.
+        _puff_axis: The axis for the air puff valve data plot (only in EXPERIMENT mode with aversive trials).
         _speed_axis: The axis for the average running speed data plot.
         _speed_threshold_line: The horizontal line that shows the running speed threshold used during training sessions.
         _duration_threshold_line: The vertical line that shows the running epoch duration used during training sessions.
@@ -157,6 +161,8 @@ class BehaviorVisualizer:
         _total_trials: The total number of trials recorded, used for x-axis labeling.
         _reinforcing_rectangles: The rectangle patches for visualizing reinforcing trial outcomes.
         _aversive_rectangles: The rectangle patches for visualizing aversive trial outcomes.
+        _has_reinforcing_trials: Determines whether the experiment includes reinforcing (water reward) trials.
+        _has_aversive_trials: Determines whether the experiment includes aversive (gas puff) trials.
     """
 
     # Pre-initializes NumPy event ticks to slightly reduce cyclic visualizer update speed.
@@ -178,20 +184,24 @@ class BehaviorVisualizer:
         )
         self._lick_data: NDArray[np.uint8] = np.zeros_like(a=self._timestamps, dtype=np.uint8)
         self._valve_data: NDArray[np.uint8] = np.zeros_like(a=self._timestamps, dtype=np.uint8)
+        self._puff_data: NDArray[np.uint8] = np.zeros_like(a=self._timestamps, dtype=np.uint8)
         self._speed_data: NDArray[np.float64] = np.zeros_like(a=self._timestamps, dtype=np.float64)
         self._valve_event: bool = False
+        self._puff_event: bool = False
         self._lick_event: bool = False
         self._running_speed: np.float64 = np.float64(0)
 
         # Line objects (to be created during open())
         self._lick_line: Line2D | None = None
         self._valve_line: Line2D | None = None
+        self._puff_line: Line2D | None = None
         self._speed_line: Line2D | None = None
 
         # Figure objects (to be created during open())
         self._figure: Figure | None = None
         self._lick_axis: Axes | None = None
         self._valve_axis: Axes | None = None
+        self._puff_axis: Axes | None = None
         self._speed_axis: Axes | None = None
 
         # Running speed threshold and duration threshold lines.
@@ -217,7 +227,16 @@ class BehaviorVisualizer:
         self._reinforcing_rectangles: list[Rectangle] = []
         self._aversive_rectangles: list[Rectangle] = []
 
-    def open(self, mode: VisualizerMode | int = VisualizerMode.EXPERIMENT) -> None:
+        # Trial type flags, set during open() based on experiment configuration.
+        self._has_reinforcing_trials: bool = True
+        self._has_aversive_trials: bool = True
+
+    def open(
+        self,
+        mode: VisualizerMode | int = VisualizerMode.EXPERIMENT,
+        has_reinforcing_trials: bool = True,
+        has_aversive_trials: bool = True,
+    ) -> None:
         """Opens the visualization window and initializes all matplotlib components.
 
         Notes:
@@ -226,26 +245,32 @@ class BehaviorVisualizer:
         Args:
             mode: The display mode that determines the subplot layout. Must be a valid VisualizerMode
                 enumeration member.
+            has_reinforcing_trials: Determines whether the experiment includes reinforcing (water reward) trials.
+                When True, the trial panel shows a row for reinforcing trial outcomes.
+            has_aversive_trials: Determines whether the experiment includes aversive (gas puff) trials.
+                When True, the trial panel shows a row for aversive trial outcomes.
         """
         if self._is_open:
             return
 
         self._mode = mode
+        self._has_reinforcing_trials = has_reinforcing_trials
+        self._has_aversive_trials = has_aversive_trials
 
         # Creates the figure with a mode-dependent subplot layout.
         if mode == VisualizerMode.LICK_TRAINING:
             self._figure, (self._lick_axis, self._valve_axis) = plt.subplots(
                 2,
                 1,
-                figsize=(10, 4.5),
+                figsize=(10, 2.9),
                 sharex=True,
                 num="Runtime Behavior Visualizer",
                 gridspec_kw={
-                    "hspace": 0.4,
-                    "left": 0.10,
+                    "hspace": 0.5,
+                    "left": 0.11,
                     "right": 0.97,
-                    "top": 0.92,
-                    "bottom": 0.15,
+                    "top": 0.88,
+                    "bottom": 0.22,
                     "height_ratios": [1, 1],
                 },
             )
@@ -260,34 +285,68 @@ class BehaviorVisualizer:
                 num="Runtime Behavior Visualizer",
                 gridspec_kw={
                     "hspace": 0.4,
-                    "left": 0.10,
+                    "left": 0.11,
                     "right": 0.97,
-                    "top": 0.95,
-                    "bottom": 0.12,
+                    "top": 0.94,
+                    "bottom": 0.11,
                     "height_ratios": [1, 1, 3],
                 },
             )
             self._trial_axis = None
         else:  # VisualizerMode.EXPERIMENT
             # Uses GridSpec with a spacer row to have tight spacing between lick/valve/speed but larger gap before
-            # trial.
-            self._figure = plt.figure(num="Runtime Behavior Visualizer", figsize=(10, 10))
+            # trial. Figure size and trial panel height adapt based on whether one or both trial types are enabled.
+            # When aversive trials are enabled, an additional air puff axis is included.
+            spacer_ratio = 0.3
+
+            if has_reinforcing_trials and has_aversive_trials:
+                # Both trial types: larger figure with 2-row trial panel and puff axis.
+                fig_height = 10.5
+                trial_height_ratio = 2.3
+                top_margin = 0.97
+                bottom_margin = 0.07
+                height_ratios = [1, 1, 1, 3, spacer_ratio, trial_height_ratio]
+            elif has_aversive_trials:
+                # Aversive only: includes puff axis with 1-row trial panel.
+                fig_height = 9.5
+                trial_height_ratio = 1.5
+                top_margin = 0.96
+                bottom_margin = 0.08
+                height_ratios = [1, 1, 1, 3, spacer_ratio, trial_height_ratio]
+            else:
+                # Reinforcing only: no puff axis, 1-row trial panel.
+                fig_height = 8.5
+                trial_height_ratio = 1.5
+                top_margin = 0.96
+                bottom_margin = 0.08
+                height_ratios = [1, 1, 3, spacer_ratio, trial_height_ratio]
+
+            self._figure = plt.figure(num="Runtime Behavior Visualizer", figsize=(10, fig_height))
             grid_spec = GridSpec(
-                nrows=5,
+                nrows=len(height_ratios),
                 ncols=1,
                 figure=self._figure,
-                height_ratios=[1, 1, 3, 0, 2.3],
+                height_ratios=height_ratios,
                 hspace=0.4,
-                left=0.13,
+                left=0.16,
                 right=0.97,
-                top=0.96,
-                bottom=0.07,
+                top=top_margin,
+                bottom=bottom_margin,
             )
+
+            # Creates axes based on layout configuration.
             self._lick_axis = self._figure.add_subplot(grid_spec[0])
             self._valve_axis = self._figure.add_subplot(grid_spec[1])
-            self._speed_axis = self._figure.add_subplot(grid_spec[2])
-            # Row 3 is a spacer (not used).
-            self._trial_axis = self._figure.add_subplot(grid_spec[4])
+            if has_aversive_trials:
+                # Layout with puff axis: lick, valve, puff, speed, spacer, trial.
+                self._puff_axis = self._figure.add_subplot(grid_spec[2])
+                self._speed_axis = self._figure.add_subplot(grid_spec[3])
+                self._trial_axis = self._figure.add_subplot(grid_spec[5])
+            else:
+                # Layout without puff axis: lick, valve, speed, spacer, trial.
+                self._puff_axis = None
+                self._speed_axis = self._figure.add_subplot(grid_spec[2])
+                self._trial_axis = self._figure.add_subplot(grid_spec[4])
 
         self._lick_axis.set_title(label="Lick Sensor State", fontdict=_fontdict_title)
         self._lick_axis.set_ylim(bottom=-0.05, top=1.05)
@@ -303,6 +362,15 @@ class BehaviorVisualizer:
         self._valve_axis.yaxis.set_major_locator(FixedLocator(locs=[0, 1]))
         self._valve_axis.yaxis.set_major_formatter(FixedFormatter(seq=["Closed", "Open"]))
 
+        # Configures the air puff axis, which only exists in EXPERIMENT mode with aversive trials.
+        if self._puff_axis is not None:
+            self._puff_axis.set_title(label="Air Puff Valve State", fontdict=_fontdict_title)
+            self._puff_axis.set_ylim(bottom=-0.05, top=1.05)
+            self._puff_axis.set_xlim(left=-self._time_window, right=0)
+            self._puff_axis.set_xlabel(xlabel="")
+            self._puff_axis.yaxis.set_major_locator(FixedLocator(locs=[0, 1]))
+            self._puff_axis.yaxis.set_major_formatter(FixedFormatter(seq=["Closed", "Open"]))
+
         # Configures the speed axis, which only exists in RUN_TRAINING and EXPERIMENT modes.
         if self._speed_axis is not None:
             self._speed_axis.set_title(label="Average Running Speed", fontdict=_fontdict_title)
@@ -315,6 +383,8 @@ class BehaviorVisualizer:
             self._speed_axis.xaxis.set_major_locator(MaxNLocator(nbins="auto", integer=True))
             plt.setp(self._lick_axis.get_xticklabels(), visible=False)
             plt.setp(self._valve_axis.get_xticklabels(), visible=False)
+            if self._puff_axis is not None:
+                plt.setp(self._puff_axis.get_xticklabels(), visible=False)
         else:
             # In LICK_TRAINING mode, the valve axis is the bottom plot and shows the x-axis labels.
             self._valve_axis.set_xlabel(xlabel="Time (s)", fontdict=_fontdict_axis_label)
@@ -340,6 +410,18 @@ class BehaviorVisualizer:
             alpha=1.0,
             linestyle="solid",
         )
+
+        # Creates the air puff plot for EXPERIMENT mode with aversive trials.
+        if self._puff_axis is not None:
+            (self._puff_line,) = self._puff_axis.plot(
+                self._timestamps,
+                self._puff_data,
+                drawstyle="steps-post",
+                color=_plt_palette("gray"),
+                linewidth=2,
+                alpha=1.0,
+                linestyle="solid",
+            )
 
         # Creates the speed plot and threshold lines for RUN_TRAINING and experiment modes.
         if self._speed_axis is not None:
@@ -415,6 +497,8 @@ class BehaviorVisualizer:
         # Updates the artists with new data.
         self._lick_line.set_data(self._timestamps, self._lick_data)  # type: ignore[union-attr]
         self._valve_line.set_data(self._timestamps, self._valve_data)  # type: ignore[union-attr]
+        if self._puff_line is not None:
+            self._puff_line.set_data(self._timestamps, self._puff_data)
         if self._speed_line is not None:
             self._speed_line.set_data(self._timestamps, self._speed_data)
 
@@ -486,6 +570,16 @@ class BehaviorVisualizer:
             self._valve_data[-1] = self._event_tick_false
         self._valve_event = False  # Resets the valve event flag.
 
+        # If the runtime has detected at least one air puff event since the last visualizer update, emits a puff tick.
+        # Only updates if puff axis exists (EXPERIMENT mode with aversive trials).
+        if self._puff_axis is not None:
+            self._puff_data = np.roll(self._puff_data, shift=-1)
+            if self._puff_event:
+                self._puff_data[-1] = self._event_tick_true
+            else:
+                self._puff_data[-1] = self._event_tick_false
+            self._puff_event = False  # Resets the puff event flag.
+
         # The speed value is updated ~every 50 milliseconds. Until the update timeout is exhausted, at each graph
         # update cycle the last speed point is overwritten with the previous speed point. This generates a
         # sequence of at most 2 identical speed readouts and is not noticeable to the user. Only updates if speed axis
@@ -502,6 +596,10 @@ class BehaviorVisualizer:
         """Instructs the visualizer to render a new valve activation (reward) event during the next update cycle."""
         self._valve_event = True
 
+    def add_puff_event(self) -> None:
+        """Instructs the visualizer to render a new air puff valve activation event during the next update cycle."""
+        self._puff_event = True
+
     def update_running_speed(self, running_speed: np.float64) -> None:
         """Instructs the visualizer to render the provided running speed datapoint during the next update cycle."""
         self._running_speed = running_speed
@@ -509,22 +607,46 @@ class BehaviorVisualizer:
     def _setup_trial_axis(self) -> None:
         """Initializes the trial performance panel with empty rectangle patches.
 
-        This method creates a 2-row visualization showing the most recent trials. Each trial appears in either the
-        reinforcing (bottom) or aversive (top) row based on its type, creating a staggered pattern when trial
-        types alternate.
+        This method creates a visualization showing the most recent trials. The layout adapts based on which trial
+        types are enabled: when both reinforcing and aversive trials are enabled, trials appear in a 2-row layout
+        with reinforcing trials on the bottom and aversive trials on top. When only one trial type is enabled,
+        a single-row layout is used.
         """
         if self._trial_axis is None:
             return
 
         self._trial_axis.set_title(label="Trial Performance", fontdict=_fontdict_title)
         self._trial_axis.set_xlim(left=0.5, right=_TRIAL_HISTORY_SIZE + 0.5)
-        self._trial_axis.set_ylim(bottom=-0.1, top=1.0)
-        self._trial_axis.set_yticks(ticks=[0.25, 0.75])
-        self._trial_axis.set_yticklabels(labels=["Reinforcing", "Aversive"])
         self._trial_axis.set_xlabel(xlabel="Trial Number", fontdict=_fontdict_axis_label)
         self._trial_axis.set_xticks(ticks=range(1, _TRIAL_HISTORY_SIZE + 1))
         self._trial_axis.set_xticklabels(labels=[""] * _TRIAL_HISTORY_SIZE)
-        self._trial_axis.axhline(y=0.5, color=_plt_palette(color="gray"), linestyle="-", linewidth=0.5, alpha=0.5)
+
+        # Configures the Y-axis layout based on which trial types are enabled.
+        if self._has_reinforcing_trials and self._has_aversive_trials:
+            # Two-row layout: reinforcing on bottom, aversive on top.
+            self._trial_axis.set_ylim(bottom=-0.1, top=1.0)
+            self._trial_axis.set_yticks(ticks=[0.25, 0.75])
+            self._trial_axis.set_yticklabels(labels=["Reinforcing", "Aversive"])
+            self._trial_axis.axhline(y=0.5, color=_plt_palette(color="gray"), linestyle="-", linewidth=0.5, alpha=0.5)
+            reinforcing_y = 0.05
+            aversive_y = 0.55
+            rect_height = 0.4
+        elif self._has_reinforcing_trials:
+            # Single-row layout: reinforcing only.
+            self._trial_axis.set_ylim(bottom=-0.1, top=1.0)
+            self._trial_axis.set_yticks(ticks=[0.45])
+            self._trial_axis.set_yticklabels(labels=["Reinforcing"])
+            reinforcing_y = 0.15
+            aversive_y = 0.0  # Not used.
+            rect_height = 0.6
+        else:
+            # Single-row layout: aversive only.
+            self._trial_axis.set_ylim(bottom=-0.1, top=1.0)
+            self._trial_axis.set_yticks(ticks=[0.45])
+            self._trial_axis.set_yticklabels(labels=["Aversive"])
+            reinforcing_y = 0.0  # Not used.
+            aversive_y = 0.15
+            rect_height = 0.6
 
         # Adds color legend for trial outcomes.
         legend_elements = [
@@ -542,37 +664,37 @@ class BehaviorVisualizer:
             bbox_to_anchor=(1.0, -0.02),
         )
 
-        # Creates the reinforcing trial rectangles in the bottom row. Uses 1-indexed positions with reduced width
-        # for visual separation between adjacent rectangles.
+        # Creates the reinforcing trial rectangles if reinforcing trials are enabled.
         self._reinforcing_rectangles = []
-        for i in range(_TRIAL_HISTORY_SIZE):
-            rect = Rectangle(
-                xy=(i + 1 - 0.175, 0.05),
-                width=0.35,
-                height=0.4,
-                facecolor=_plt_palette("gray"),
-                edgecolor="none",
-                alpha=0.3,
-                visible=False,
-            )
-            self._trial_axis.add_patch(rect)
-            self._reinforcing_rectangles.append(rect)
+        if self._has_reinforcing_trials:
+            for i in range(_TRIAL_HISTORY_SIZE):
+                rect = Rectangle(
+                    xy=(i + 1 - 0.175, reinforcing_y),
+                    width=0.35,
+                    height=rect_height,
+                    facecolor=_plt_palette("gray"),
+                    edgecolor="none",
+                    alpha=0.3,
+                    visible=False,
+                )
+                self._trial_axis.add_patch(rect)
+                self._reinforcing_rectangles.append(rect)
 
-        # Creates the aversive trial rectangles in the top row. Uses 1-indexed positions with reduced width
-        # for visual separation between adjacent rectangles.
+        # Creates the aversive trial rectangles if aversive trials are enabled.
         self._aversive_rectangles = []
-        for i in range(_TRIAL_HISTORY_SIZE):
-            rect = Rectangle(
-                xy=(i + 1 - 0.175, 0.55),
-                width=0.35,
-                height=0.4,
-                facecolor=_plt_palette("gray"),
-                edgecolor="none",
-                alpha=0.3,
-                visible=False,
-            )
-            self._trial_axis.add_patch(rect)
-            self._aversive_rectangles.append(rect)
+        if self._has_aversive_trials:
+            for i in range(_TRIAL_HISTORY_SIZE):
+                rect = Rectangle(
+                    xy=(i + 1 - 0.175, aversive_y),
+                    width=0.35,
+                    height=rect_height,
+                    facecolor=_plt_palette("gray"),
+                    edgecolor="none",
+                    alpha=0.3,
+                    visible=False,
+                )
+                self._trial_axis.add_patch(rect)
+                self._aversive_rectangles.append(rect)
 
     def add_trial_outcome(self, *, is_aversive: bool, succeeded: bool, was_guided: bool) -> None:
         """Records a trial outcome and updates the trial performance visualization.
@@ -609,19 +731,27 @@ class BehaviorVisualizer:
             trial_type = self._trial_types[index]
             trial_outcome = self._trial_outcomes[index]
             if trial_type == -1:
-                # Empty slot, hides both rectangles.
-                self._reinforcing_rectangles[index].set_visible(False)
-                self._aversive_rectangles[index].set_visible(False)
+                # Empty slot, hides rectangles for enabled trial types.
+                if self._has_reinforcing_trials:
+                    self._reinforcing_rectangles[index].set_visible(False)
+                if self._has_aversive_trials:
+                    self._aversive_rectangles[index].set_visible(False)
             elif trial_type == 1:
                 # Aversive trial.
-                self._reinforcing_rectangles[index].set_visible(False)
-                self._update_trial_rectangle(rectangles=self._aversive_rectangles, index=index, outcome=trial_outcome)
+                if self._has_reinforcing_trials:
+                    self._reinforcing_rectangles[index].set_visible(False)
+                if self._has_aversive_trials:
+                    self._update_trial_rectangle(
+                        rectangles=self._aversive_rectangles, index=index, outcome=trial_outcome
+                    )
             else:
                 # Reinforcing trial.
-                self._aversive_rectangles[index].set_visible(False)
-                self._update_trial_rectangle(
-                    rectangles=self._reinforcing_rectangles, index=index, outcome=trial_outcome
-                )
+                if self._has_aversive_trials:
+                    self._aversive_rectangles[index].set_visible(False)
+                if self._has_reinforcing_trials:
+                    self._update_trial_rectangle(
+                        rectangles=self._reinforcing_rectangles, index=index, outcome=trial_outcome
+                    )
 
         # Updates x-axis labels. Empty positions get empty labels, filled positions get trial numbers.
         num_displayed = min(self._total_trials, _TRIAL_HISTORY_SIZE)
