@@ -1075,8 +1075,21 @@ class _MesoscopeVRSystem:
         else:
             visualizer_mode = VisualizerMode.EXPERIMENT
 
-        # Initializes the runtime control GUI with the appropriate mode.
-        self._ui.start(mode=visualizer_mode)
+        # Determines which trial types are used based on the experiment configuration. This affects both the runtime
+        # control UI and the visualizer layouts.
+        has_reinforcing_trials = True
+        has_aversive_trials = True
+        if visualizer_mode == VisualizerMode.EXPERIMENT:
+            trial_structures = self._experiment_configuration.trial_structures.values()
+            has_reinforcing_trials = any(isinstance(t, WaterRewardTrial) for t in trial_structures)
+            has_aversive_trials = any(isinstance(t, GasPuffTrial) for t in trial_structures)
+
+        # Initializes the runtime control GUI with the appropriate mode and trial type configuration.
+        self._ui.start(
+            mode=visualizer_mode,
+            has_reinforcing_trials=has_reinforcing_trials,
+            has_aversive_trials=has_aversive_trials,
+        )
 
         # Synchronizes the Unity game engine's state with the initial state of the runtime control's UI before
         # entering the checkpoint loop.
@@ -1087,14 +1100,7 @@ class _MesoscopeVRSystem:
             self._toggle_aversive_guidance(enable_guidance=self._unity_state.aversive_guidance_enabled)
 
         # Initializes the runtime visualizer. This HAS to be initialized after cameras and the UI to prevent collisions
-        # in the QT backend, which is used by all three assets. Determines which trial types are used for the trial
-        # panel layout (only relevant for experiment mode).
-        has_reinforcing_trials = True
-        has_aversive_trials = True
-        if visualizer_mode == VisualizerMode.EXPERIMENT:
-            trial_structures = self._experiment_configuration.trial_structures.values()
-            has_reinforcing_trials = any(isinstance(t, WaterRewardTrial) for t in trial_structures)
-            has_aversive_trials = any(isinstance(t, GasPuffTrial) for t in trial_structures)
+        # in the QT backend, which is used by all three assets.
         self._visualizer.open(
             mode=visualizer_mode,
             has_reinforcing_trials=has_reinforcing_trials,
