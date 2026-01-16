@@ -51,6 +51,7 @@ actual library state to prevent integration errors.
 - `/sun-lab-style` - Apply Sun Lab Python coding conventions (REQUIRED for all code changes)
 - `/camera-interface` - Guide for using ataraxis-video-system to implement camera functionality
 - `/acquisition-system-setup` - Configure data acquisition systems (uses MCP tools from sl-shared-assets)
+- `/experiment-design` - Interactive guidance for building experiment configurations (uses MCP tools from sl-shared-assets)
 
 ## Project Context
 
