@@ -25,6 +25,8 @@ from PyQt6.QtWidgets import (
 from ataraxis_base_utilities import console
 from ataraxis_data_structures import SharedMemoryArray
 
+from .visualizers import VisualizerMode
+
 
 class _DataArrayIndex(IntEnum):
     """Defines the shared memory array indices for each runtime parameter and hardware component addressable from the
@@ -46,6 +48,7 @@ class _DataArrayIndex(IntEnum):
     GAS_VALVE_CLOSE = 12
     GAS_VALVE_PUFF = 13
     GAS_VALVE_PUFF_DURATION = 14
+    SETUP_COMPLETE = 15
 
 
 class RuntimeControlUI:
@@ -71,6 +74,7 @@ class RuntimeControlUI:
             processes.
         _gas_puff_tracker: The SharedMemoryArray instance used by the GasPuffValveInterface to export the gas puff
             count to other processes.
+        _mode: The VisualizerMode that determines which UI elements are enabled.
         _ui_process: The Process instance running the GUI cycle.
         _started: Tracks whether the UI process is running.
     """
@@ -78,7 +82,7 @@ class RuntimeControlUI:
     def __init__(self, valve_tracker: SharedMemoryArray, gas_puff_tracker: SharedMemoryArray) -> None:
         # Defines the prototype array for the SharedMemoryArray initialization and sets the array elements to the
         # desired default state
-        prototype = np.zeros(shape=15, dtype=np.int32)
+        prototype = np.zeros(shape=16, dtype=np.int32)
         prototype[_DataArrayIndex.PAUSE_STATE] = 1  # Ensures all runtimes start in a paused state
         prototype[_DataArrayIndex.REINFORCING_GUIDANCE_ENABLED] = 0  # Initially disables reinforcing guidance
         prototype[_DataArrayIndex.AVERSIVE_GUIDANCE_ENABLED] = 0  # Initially disables aversive guidance
@@ -94,8 +98,15 @@ class RuntimeControlUI:
         self._valve_tracker = valve_tracker
         self._gas_puff_tracker = gas_puff_tracker
 
-        # Defines but does not automatically start the UI process.
-        self._ui_process = Process(target=self._run_ui_process, daemon=True)
+        # Initializes the mode to EXPERIMENT by default. The mode is set when start() is called.
+        self._mode: VisualizerMode = VisualizerMode.EXPERIMENT
+
+        # Trial type flags, set when start() is called based on experiment configuration.
+        self._has_reinforcing_trials: bool = True
+        self._has_aversive_trials: bool = True
+
+        # Defines but does not automatically start the UI process. The process target is set in start() to pass the mode.
+        self._ui_process: Process | None = None
         self._started = False
 
     def __del__(self) -> None:
@@ -103,11 +114,37 @@ class RuntimeControlUI:
         self.shutdown()
         # Note: Does not disconnect or destroy the trackers as they're owned by their respective interfaces
 
-    def start(self) -> None:
-        """Starts the remote UI process."""
+    def start(
+        self,
+        mode: VisualizerMode | int = VisualizerMode.EXPERIMENT,
+        has_reinforcing_trials: bool = True,
+        has_aversive_trials: bool = True,
+    ) -> None:
+        """Starts the remote UI process.
+
+        Args:
+            mode: The VisualizerMode that determines which UI elements are enabled. Speed and duration threshold
+                controls are only enabled for RUN_TRAINING mode. Must be a valid VisualizerMode enumeration member.
+            has_reinforcing_trials: Determines whether the experiment includes reinforcing (water reward) trials.
+                When True, the UI shows the reinforcing guidance toggle button.
+            has_aversive_trials: Determines whether the experiment includes aversive (gas puff) trials. When True,
+                the UI shows the aversive guidance toggle button and the gas puff valve control group.
+        """
         # If the instance is already started, aborts early
         if self._started:
             return
+
+        # Stores the mode and trial type flags.
+        self._mode = VisualizerMode(mode)
+        self._has_reinforcing_trials = has_reinforcing_trials
+        self._has_aversive_trials = has_aversive_trials
+
+        # Creates the UI process with the mode and trial type flags as arguments.
+        self._ui_process = Process(
+            target=self._run_ui_process,
+            args=(self._mode, self._has_reinforcing_trials, self._has_aversive_trials),
+            daemon=True,
+        )
 
         # Starts the remote UI process.
         self._ui_process.start()
@@ -131,7 +168,7 @@ class RuntimeControlUI:
             return
 
         # Shuts down the remote UI process.
-        if self._ui_process.is_alive():
+        if self._ui_process is not None and self._ui_process.is_alive():
             self._data_array[_DataArrayIndex.TERMINATION] = 1  # Sends the termination signal to the remote process
             self._ui_process.terminate()
             self._ui_process.join(timeout=2.0)
@@ -146,8 +183,16 @@ class RuntimeControlUI:
         # Marks the instance as shut down
         self._started = False
 
-    def _run_ui_process(self) -> None:
-        """Runs UI management cycle in a parallel process."""
+    def _run_ui_process(
+        self, mode: VisualizerMode, has_reinforcing_trials: bool, has_aversive_trials: bool
+    ) -> None:
+        """Runs UI management cycle in a parallel process.
+
+        Args:
+            mode: The VisualizerMode that determines which UI elements are enabled.
+            has_reinforcing_trials: Determines whether the experiment includes reinforcing (water reward) trials.
+            has_aversive_trials: Determines whether the experiment includes aversive (gas puff) trials.
+        """
         self._data_array.connect()
         self._valve_tracker.connect()
         self._gas_puff_tracker.connect()
@@ -158,7 +203,14 @@ class RuntimeControlUI:
             app.setOrganizationName("SunLab")
             app.setStyle("Fusion")
 
-            window = _ControlUIWindow(self._data_array, self._valve_tracker, self._gas_puff_tracker)
+            window = _ControlUIWindow(
+                self._data_array,
+                self._valve_tracker,
+                self._gas_puff_tracker,
+                mode=mode,
+                has_reinforcing_trials=has_reinforcing_trials,
+                has_aversive_trials=has_aversive_trials,
+            )
             window.show()
 
             app.exec()
@@ -196,6 +248,15 @@ class RuntimeControlUI:
             enabled: Determines whether the aversive guidance mode is currently enabled.
         """
         self._data_array[_DataArrayIndex.AVERSIVE_GUIDANCE_ENABLED] = 1 if enabled else 0
+
+    def set_setup_complete(self) -> None:
+        """Signals the GUI that the initial setup phase is complete and the runtime has started.
+
+        Notes:
+            Once setup is complete, the valve open/close buttons are permanently disabled for the remainder of the
+            runtime. This method should be called after the initial checkpoint loop exits.
+        """
+        self._data_array[_DataArrayIndex.SETUP_COMPLETE] = 1
 
     @property
     def exit_signal(self) -> bool:
@@ -292,7 +353,12 @@ class _ControlUIWindow(QMainWindow):
             processes during runtime.
         _gas_puff_tracker: The SharedMemoryArray instance used by the GasPuffValveInterface to export the gas puff
             data to other processes during runtime.
+        _mode: The VisualizerMode that determines which UI elements are enabled.
+        _has_reinforcing_trials: Determines whether the experiment includes reinforcing (water reward) trials.
+        _has_aversive_trials: Determines whether the experiment includes aversive (gas puff) trials.
         _is_paused: Tracks whether the runtime is paused.
+        _setup_complete: Tracks whether the initial setup phase is complete. Once True, valve open/close buttons
+            are permanently disabled.
         _reinforcing_guidance_enabled: Tracks whether reinforcing trial guidance is enabled.
         _aversive_guidance_enabled: Tracks whether aversive trial guidance is enabled.
         _reward_in_progress: Tracks whether a reward delivery is in progress.
@@ -300,15 +366,25 @@ class _ControlUIWindow(QMainWindow):
     """
 
     def __init__(
-        self, data_array: SharedMemoryArray, valve_tracker: SharedMemoryArray, gas_puff_tracker: SharedMemoryArray
+        self,
+        data_array: SharedMemoryArray,
+        valve_tracker: SharedMemoryArray,
+        gas_puff_tracker: SharedMemoryArray,
+        mode: VisualizerMode | int = VisualizerMode.EXPERIMENT,
+        has_reinforcing_trials: bool = True,
+        has_aversive_trials: bool = True,
     ) -> None:
         super().__init__()
 
         self._data_array: SharedMemoryArray = data_array
         self._valve_tracker: SharedMemoryArray = valve_tracker
         self._gas_puff_tracker: SharedMemoryArray = gas_puff_tracker
+        self._mode: VisualizerMode = VisualizerMode(mode)
+        self._has_reinforcing_trials: bool = has_reinforcing_trials
+        self._has_aversive_trials: bool = has_aversive_trials
 
         self._is_paused: bool = True
+        self._setup_complete: bool = False
         self._reinforcing_guidance_enabled: bool = False
         self._aversive_guidance_enabled: bool = False
 
@@ -320,8 +396,18 @@ class _ControlUIWindow(QMainWindow):
         # Configures the window title
         self.setWindowTitle("Mesoscope-VR Control Panel")
 
-        # Uses fixed size
-        self.setFixedSize(450, 700)
+        # Calculates window height based on visible elements.
+        # Base height includes: runtime control (without guidance buttons) and valve control.
+        base_height = 380
+        if self._mode == VisualizerMode.RUN_TRAINING:
+            base_height += 100  # Speed and duration threshold controls.
+        elif self._mode == VisualizerMode.EXPERIMENT:
+            if has_reinforcing_trials:
+                base_height += 45  # Reinforcing guidance button.
+            if has_aversive_trials:
+                base_height += 45  # Aversive guidance button.
+                base_height += 130  # Gas puff valve control group.
+        self.setFixedSize(450, base_height)
 
         # Sets up the interactive UI
         self._setup_ui()
@@ -366,25 +452,29 @@ class _ControlUIWindow(QMainWindow):
             btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
             runtime_control_layout.addWidget(btn)
 
-        # Reinforcing Guidance button
-        self.reinforcing_guidance_btn = QPushButton("🎯 Enable Reinforcing Guidance")
-        self.reinforcing_guidance_btn.setToolTip("Toggles reinforcing trial guidance mode on or off.")
-        # noinspection PyUnresolvedReferences
-        self.reinforcing_guidance_btn.clicked.connect(self._toggle_reinforcing_guidance)
-        self.reinforcing_guidance_btn.setObjectName("reinforcingGuidanceButton")
+        # Reinforcing Guidance button (only shown in EXPERIMENT mode with reinforcing trials).
+        self.reinforcing_guidance_btn: QPushButton | None = None
+        if self._mode == VisualizerMode.EXPERIMENT and self._has_reinforcing_trials:
+            self.reinforcing_guidance_btn = QPushButton("🎯 Enable Reinforcing Guidance")
+            self.reinforcing_guidance_btn.setToolTip("Toggles reinforcing trial guidance mode on or off.")
+            # noinspection PyUnresolvedReferences
+            self.reinforcing_guidance_btn.clicked.connect(self._toggle_reinforcing_guidance)
+            self.reinforcing_guidance_btn.setObjectName("reinforcingGuidanceButton")
+            self.reinforcing_guidance_btn.setMinimumHeight(35)
+            self.reinforcing_guidance_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            runtime_control_layout.addWidget(self.reinforcing_guidance_btn)
 
-        # Aversive Guidance button
-        self.aversive_guidance_btn = QPushButton("🎯 Enable Aversive Guidance")
-        self.aversive_guidance_btn.setToolTip("Toggles aversive trial guidance mode on or off.")
-        # noinspection PyUnresolvedReferences
-        self.aversive_guidance_btn.clicked.connect(self._toggle_aversive_guidance)
-        self.aversive_guidance_btn.setObjectName("aversiveGuidanceButton")
-
-        # Configures guidance buttons
-        for btn in [self.reinforcing_guidance_btn, self.aversive_guidance_btn]:
-            btn.setMinimumHeight(35)
-            btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-            runtime_control_layout.addWidget(btn)
+        # Aversive Guidance button (only shown in EXPERIMENT mode with aversive trials).
+        self.aversive_guidance_btn: QPushButton | None = None
+        if self._mode == VisualizerMode.EXPERIMENT and self._has_aversive_trials:
+            self.aversive_guidance_btn = QPushButton("🎯 Enable Aversive Guidance")
+            self.aversive_guidance_btn.setToolTip("Toggles aversive trial guidance mode on or off.")
+            # noinspection PyUnresolvedReferences
+            self.aversive_guidance_btn.clicked.connect(self._toggle_aversive_guidance)
+            self.aversive_guidance_btn.setObjectName("aversiveGuidanceButton")
+            self.aversive_guidance_btn.setMinimumHeight(35)
+            self.aversive_guidance_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            runtime_control_layout.addWidget(self.aversive_guidance_btn)
 
         # Adds runtime status tracker to the same box
         self.runtime_status_label = QLabel("Runtime Status: ⏸️ Paused")
@@ -474,126 +564,139 @@ class _ControlUIWindow(QMainWindow):
         # Adds the valve control box to the UI widget
         main_layout.addWidget(valve_group)
 
-        # Gas Puff Valve Control Group
-        gas_valve_group = QGroupBox("Gas Puff Valve Control")
-        gas_valve_layout = QVBoxLayout(gas_valve_group)
-        gas_valve_layout.setSpacing(6)
+        # Gas Puff Valve Control Group (only shown in EXPERIMENT mode with aversive trials).
+        self.gas_valve_open_btn: QPushButton | None = None
+        self.gas_valve_close_btn: QPushButton | None = None
+        self.gas_puff_btn: QPushButton | None = None
+        self.gas_duration_spinbox: QDoubleSpinBox | None = None
+        self.gas_valve_status_label: QLabel | None = None
 
-        # Arranges gas valve control buttons in a horizontal layout
-        gas_valve_buttons_layout = QHBoxLayout()
+        if self._mode == VisualizerMode.EXPERIMENT and self._has_aversive_trials:
+            gas_valve_group = QGroupBox("Gas Puff Valve Control")
+            gas_valve_layout = QVBoxLayout(gas_valve_group)
+            gas_valve_layout.setSpacing(6)
 
-        # Gas valve open
-        self.gas_valve_open_btn = QPushButton("🔓 Open")
-        self.gas_valve_open_btn.setToolTip("Opens the gas puff valve.")
-        # noinspection PyUnresolvedReferences
-        self.gas_valve_open_btn.clicked.connect(self._gas_valve_open)
-        self.gas_valve_open_btn.setObjectName("gasValveOpenButton")
+            # Arranges gas valve control buttons in a horizontal layout
+            gas_valve_buttons_layout = QHBoxLayout()
 
-        # Gas valve close
-        self.gas_valve_close_btn = QPushButton("🔒 Close")
-        self.gas_valve_close_btn.setToolTip("Closes the gas puff valve.")
-        # noinspection PyUnresolvedReferences
-        self.gas_valve_close_btn.clicked.connect(self._gas_valve_close)
-        self.gas_valve_close_btn.setObjectName("gasValveCloseButton")
+            # Gas valve open
+            self.gas_valve_open_btn = QPushButton("🔓 Open")
+            self.gas_valve_open_btn.setToolTip("Opens the gas puff valve.")
+            # noinspection PyUnresolvedReferences
+            self.gas_valve_open_btn.clicked.connect(self._gas_valve_open)
+            self.gas_valve_open_btn.setObjectName("gasValveOpenButton")
 
-        # Gas puff button
-        self.gas_puff_btn = QPushButton("💨 Puff")
-        self.gas_puff_btn.setToolTip("Delivers a gas puff with the specified duration.")
-        # noinspection PyUnresolvedReferences
-        self.gas_puff_btn.clicked.connect(self._gas_valve_puff)
-        self.gas_puff_btn.setObjectName("gasPuffButton")
+            # Gas valve close
+            self.gas_valve_close_btn = QPushButton("🔒 Close")
+            self.gas_valve_close_btn.setToolTip("Closes the gas puff valve.")
+            # noinspection PyUnresolvedReferences
+            self.gas_valve_close_btn.clicked.connect(self._gas_valve_close)
+            self.gas_valve_close_btn.setObjectName("gasValveCloseButton")
 
-        # Configures the buttons to expand when the UI is resized, but use a fixed height of 35 points
-        for btn in [self.gas_valve_open_btn, self.gas_valve_close_btn, self.gas_puff_btn]:
-            btn.setMinimumHeight(35)
-            btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-            gas_valve_buttons_layout.addWidget(btn)
+            # Gas puff button
+            self.gas_puff_btn = QPushButton("💨 Puff")
+            self.gas_puff_btn.setToolTip("Delivers a gas puff with the specified duration.")
+            # noinspection PyUnresolvedReferences
+            self.gas_puff_btn.clicked.connect(self._gas_valve_puff)
+            self.gas_puff_btn.setObjectName("gasPuffButton")
 
-        gas_valve_layout.addLayout(gas_valve_buttons_layout)
+            # Configures the buttons to expand when the UI is resized, but use a fixed height of 35 points
+            for btn in [self.gas_valve_open_btn, self.gas_valve_close_btn, self.gas_puff_btn]:
+                btn.setMinimumHeight(35)
+                btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+                gas_valve_buttons_layout.addWidget(btn)
 
-        # Gas valve status and duration control section - horizontal layout
-        gas_valve_status_layout = QHBoxLayout()
-        gas_valve_status_layout.setSpacing(6)
+            gas_valve_layout.addLayout(gas_valve_buttons_layout)
 
-        # Duration control on the left
-        gas_duration_label = QLabel("Puff duration:")
-        gas_duration_label.setObjectName("volumeLabel")
+            # Gas valve status and duration control section - horizontal layout
+            gas_valve_status_layout = QHBoxLayout()
+            gas_valve_status_layout.setSpacing(6)
 
-        self.gas_duration_spinbox = QDoubleSpinBox()
-        self.gas_duration_spinbox.setRange(10, 350)
-        self.gas_duration_spinbox.setValue(100)
-        self.gas_duration_spinbox.setDecimals(0)
-        self.gas_duration_spinbox.setSuffix(" ms")
-        self.gas_duration_spinbox.setToolTip("Sets gas puff duration. Accepts values between 10 and 350 ms.")
-        self.gas_duration_spinbox.setMinimumHeight(30)
-        # noinspection PyUnresolvedReferences
-        self.gas_duration_spinbox.valueChanged.connect(self._update_gas_puff_duration)
+            # Duration control on the left
+            gas_duration_label = QLabel("Puff duration:")
+            gas_duration_label.setObjectName("volumeLabel")
 
-        # Adds duration controls to the left side
-        gas_valve_status_layout.addWidget(gas_duration_label)
-        gas_valve_status_layout.addWidget(self.gas_duration_spinbox)
+            self.gas_duration_spinbox = QDoubleSpinBox()
+            self.gas_duration_spinbox.setRange(10, 350)
+            self.gas_duration_spinbox.setValue(100)
+            self.gas_duration_spinbox.setDecimals(0)
+            self.gas_duration_spinbox.setSuffix(" ms")
+            self.gas_duration_spinbox.setToolTip("Sets gas puff duration. Accepts values between 10 and 350 ms.")
+            self.gas_duration_spinbox.setMinimumHeight(30)
+            # noinspection PyUnresolvedReferences
+            self.gas_duration_spinbox.valueChanged.connect(self._update_gas_puff_duration)
 
-        # Adds the gas valve status tracker on the right
-        self.gas_valve_status_label = QLabel("Valve: 🔒 Closed")
-        self.gas_valve_status_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        gas_valve_status_font = QFont()
-        gas_valve_status_font.setPointSize(35)
-        gas_valve_status_font.setBold(True)
-        self.gas_valve_status_label.setFont(gas_valve_status_font)
-        self.gas_valve_status_label.setStyleSheet("QLabel { color: #e67e22; font-weight: bold; }")
-        gas_valve_status_layout.addWidget(self.gas_valve_status_label)
+            # Adds duration controls to the left side
+            gas_valve_status_layout.addWidget(gas_duration_label)
+            gas_valve_status_layout.addWidget(self.gas_duration_spinbox)
 
-        # Adds the horizontal status layout to the main gas valve layout
-        gas_valve_layout.addLayout(gas_valve_status_layout)
+            # Adds the gas valve status tracker on the right
+            self.gas_valve_status_label = QLabel("Valve: 🔒 Closed")
+            self.gas_valve_status_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            gas_valve_status_font = QFont()
+            gas_valve_status_font.setPointSize(35)
+            gas_valve_status_font.setBold(True)
+            self.gas_valve_status_label.setFont(gas_valve_status_font)
+            self.gas_valve_status_label.setStyleSheet("QLabel { color: #e67e22; font-weight: bold; }")
+            gas_valve_status_layout.addWidget(self.gas_valve_status_label)
 
-        # Adds the gas valve control box to the UI widget
-        main_layout.addWidget(gas_valve_group)
+            # Adds the horizontal status layout to the main gas valve layout
+            gas_valve_layout.addLayout(gas_valve_status_layout)
 
-        # Adds Run Training controls in a horizontal layout
-        controls_layout = QHBoxLayout()
-        controls_layout.setSpacing(6)
+            # Adds the gas valve control box to the UI widget
+            main_layout.addWidget(gas_valve_group)
 
-        # Running Speed Threshold Control Group
-        speed_group = QGroupBox("Speed Threshold")
-        speed_layout = QVBoxLayout(speed_group)
+        # Adds Run Training controls in a horizontal layout (only shown in RUN_TRAINING mode).
+        self._speed_group: QGroupBox | None = None
+        self._duration_group: QGroupBox | None = None
+        self.speed_spinbox: QDoubleSpinBox | None = None
+        self.duration_spinbox: QDoubleSpinBox | None = None
 
-        # Speed Modifier
-        speed_status_label = QLabel("Current Modifier:")
-        speed_status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        speed_status_label.setStyleSheet("QLabel { font-weight: bold; color: #34495e; }")
-        speed_layout.addWidget(speed_status_label)
-        self.speed_spinbox = QDoubleSpinBox()
-        self.speed_spinbox.setRange(-1000, 1000)  # Factoring in the step of 0.01, this allows -20 to +20 cm/s
-        self.speed_spinbox.setValue(0)  # Default value
-        self.speed_spinbox.setDecimals(0)  # Integer precision
-        self.speed_spinbox.setToolTip("Sets the running speed threshold modifier value.")
-        self.speed_spinbox.setMinimumHeight(30)
-        # noinspection PyUnresolvedReferences
-        self.speed_spinbox.valueChanged.connect(self._update_speed_modifier)
-        speed_layout.addWidget(self.speed_spinbox)
+        if self._mode == VisualizerMode.RUN_TRAINING:
+            controls_layout = QHBoxLayout()
+            controls_layout.setSpacing(6)
 
-        # Running Duration Threshold Control Group
-        duration_group = QGroupBox("Duration Threshold")
-        duration_layout = QVBoxLayout(duration_group)
+            # Running Speed Threshold Control Group
+            self._speed_group = QGroupBox("Speed Threshold")
+            speed_layout = QVBoxLayout(self._speed_group)
 
-        # Duration modifier
-        duration_status_label = QLabel("Current Modifier:")
-        duration_status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        duration_status_label.setStyleSheet("QLabel { font-weight: bold; color: #34495e; }")
-        duration_layout.addWidget(duration_status_label)
-        self.duration_spinbox = QDoubleSpinBox()
-        self.duration_spinbox.setRange(-1000, 1000)  # Factoring in the step of 0.01, this allows -20 to +20 s
-        self.duration_spinbox.setValue(0)  # Default value
-        self.duration_spinbox.setDecimals(0)  # Integer precision
-        self.duration_spinbox.setToolTip("Sets the running duration threshold modifier value.")
-        # noinspection PyUnresolvedReferences
-        self.duration_spinbox.valueChanged.connect(self._update_duration_modifier)
-        duration_layout.addWidget(self.duration_spinbox)
+            # Speed Modifier
+            speed_status_label = QLabel("Current Modifier:")
+            speed_status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            speed_status_label.setStyleSheet("QLabel { font-weight: bold; color: #34495e; }")
+            speed_layout.addWidget(speed_status_label)
+            self.speed_spinbox = QDoubleSpinBox()
+            self.speed_spinbox.setRange(-1000, 1000)  # Factoring in the step of 0.01, this allows -20 to +20 cm/s
+            self.speed_spinbox.setValue(0)  # Default value
+            self.speed_spinbox.setDecimals(0)  # Integer precision
+            self.speed_spinbox.setToolTip("Sets the running speed threshold modifier value.")
+            self.speed_spinbox.setMinimumHeight(30)
+            # noinspection PyUnresolvedReferences
+            self.speed_spinbox.valueChanged.connect(self._update_speed_modifier)
+            speed_layout.addWidget(self.speed_spinbox)
 
-        # Adds speed and duration threshold modifiers to the main UI widget
-        controls_layout.addWidget(speed_group)
-        controls_layout.addWidget(duration_group)
-        main_layout.addLayout(controls_layout)
+            # Running Duration Threshold Control Group
+            self._duration_group = QGroupBox("Duration Threshold")
+            duration_layout = QVBoxLayout(self._duration_group)
+
+            # Duration modifier
+            duration_status_label = QLabel("Current Modifier:")
+            duration_status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            duration_status_label.setStyleSheet("QLabel { font-weight: bold; color: #34495e; }")
+            duration_layout.addWidget(duration_status_label)
+            self.duration_spinbox = QDoubleSpinBox()
+            self.duration_spinbox.setRange(-1000, 1000)  # Factoring in the step of 0.01, this allows -20 to +20 s
+            self.duration_spinbox.setValue(0)  # Default value
+            self.duration_spinbox.setDecimals(0)  # Integer precision
+            self.duration_spinbox.setToolTip("Sets the running duration threshold modifier value.")
+            # noinspection PyUnresolvedReferences
+            self.duration_spinbox.valueChanged.connect(self._update_duration_modifier)
+            duration_layout.addWidget(self.duration_spinbox)
+
+            # Adds speed and duration threshold modifiers to the main UI widget
+            controls_layout.addWidget(self._speed_group)
+            controls_layout.addWidget(self._duration_group)
+            main_layout.addLayout(controls_layout)
 
     def _apply_qt6_styles(self) -> None:
         """Applies optimized styling to all UI elements managed by this instance."""
@@ -999,6 +1102,13 @@ class _ControlUIWindow(QMainWindow):
                 self._aversive_guidance_enabled = external_aversive_guidance
                 self._update_aversive_guidance_ui()
 
+            # Checks for setup complete state change. Once setup is complete, valve open/close buttons are
+            # permanently disabled.
+            external_setup_complete = bool(self._data_array[_DataArrayIndex.SETUP_COMPLETE])
+            if external_setup_complete and not self._setup_complete:
+                self._setup_complete = True
+                self._disable_valve_open_close_buttons()
+
             # Reads valve tracker state (index 2 contains open/close state: 0=closed, 1=open).
             water_valve_state = int(self._valve_tracker[2])
 
@@ -1012,7 +1122,8 @@ class _ControlUIWindow(QMainWindow):
                 self.valve_status_label.setStyleSheet("QLabel { color: #e67e22; font-weight: bold; }")
 
             # Detects when gas puff delivery completes (state transitions to closed while puff was in progress).
-            if self._puff_in_progress and gas_valve_state == 0:
+            # Only updates if aversive trials are enabled (gas_valve_status_label exists).
+            if self._puff_in_progress and gas_valve_state == 0 and self.gas_valve_status_label is not None:
                 self._puff_in_progress = False
                 self.gas_valve_status_label.setText("Valve: 🔒 Closed")
                 self.gas_valve_status_label.setStyleSheet("QLabel { color: #e67e22; font-weight: bold; }")
@@ -1085,11 +1196,13 @@ class _ControlUIWindow(QMainWindow):
 
     def _update_speed_modifier(self) -> None:
         """Updates the running speed threshold modifier to match the current GUI configuration."""
-        self._data_array[_DataArrayIndex.SPEED_MODIFIER] = int(self.speed_spinbox.value())
+        if self.speed_spinbox is not None:
+            self._data_array[_DataArrayIndex.SPEED_MODIFIER] = int(self.speed_spinbox.value())
 
     def _update_duration_modifier(self) -> None:
         """Updates the running epoch duration modifier to match the current GUI configuration."""
-        self._data_array[_DataArrayIndex.DURATION_MODIFIER] = int(self.duration_spinbox.value())
+        if self.duration_spinbox is not None:
+            self._data_array[_DataArrayIndex.DURATION_MODIFIER] = int(self.duration_spinbox.value())
 
     @staticmethod
     def _refresh_button_style(button: QPushButton) -> None:
@@ -1100,6 +1213,9 @@ class _ControlUIWindow(QMainWindow):
 
     def _update_reinforcing_guidance_ui(self) -> None:
         """Updates the GUI to reflect the current reinforcing trial guidance state."""
+        if self.reinforcing_guidance_btn is None:
+            return
+
         if self._reinforcing_guidance_enabled:
             self.reinforcing_guidance_btn.setText("🚫 Disable Reinforcing Guidance")
             self.reinforcing_guidance_btn.setObjectName("reinforcingGuidanceDisableButton")
@@ -1112,6 +1228,9 @@ class _ControlUIWindow(QMainWindow):
 
     def _update_aversive_guidance_ui(self) -> None:
         """Updates the GUI to reflect the current aversive trial guidance state."""
+        if self.aversive_guidance_btn is None:
+            return
+
         if self._aversive_guidance_enabled:
             self.aversive_guidance_btn.setText("🚫 Disable Aversive Guidance")
             self.aversive_guidance_btn.setObjectName("aversiveGuidanceDisableButton")
@@ -1150,25 +1269,38 @@ class _ControlUIWindow(QMainWindow):
         # Refresh styles after object name change
         self._refresh_button_style(button=self.pause_btn)
 
+    def _disable_valve_open_close_buttons(self) -> None:
+        """Permanently disables valve open/close buttons after setup is complete."""
+        self.valve_open_btn.setEnabled(False)
+        self.valve_close_btn.setEnabled(False)
+        if self.gas_valve_open_btn is not None:
+            self.gas_valve_open_btn.setEnabled(False)
+        if self.gas_valve_close_btn is not None:
+            self.gas_valve_close_btn.setEnabled(False)
+
     def _update_gas_puff_duration(self) -> None:
         """Updates the gas puff duration to match the current GUI configuration."""
-        self._data_array[_DataArrayIndex.GAS_VALVE_PUFF_DURATION] = int(self.gas_duration_spinbox.value())
+        if self.gas_duration_spinbox is not None:
+            self._data_array[_DataArrayIndex.GAS_VALVE_PUFF_DURATION] = int(self.gas_duration_spinbox.value())
 
     def _gas_valve_open(self) -> None:
         """Instructs the system to open the gas puff valve."""
         self._data_array[_DataArrayIndex.GAS_VALVE_OPEN] = 1
-        self.gas_valve_status_label.setText("Valve: 🔓 Opened")
-        self.gas_valve_status_label.setStyleSheet("QLabel { color: #27ae60; font-weight: bold; }")
+        if self.gas_valve_status_label is not None:
+            self.gas_valve_status_label.setText("Valve: 🔓 Opened")
+            self.gas_valve_status_label.setStyleSheet("QLabel { color: #27ae60; font-weight: bold; }")
 
     def _gas_valve_close(self) -> None:
         """Instructs the system to close the gas puff valve."""
         self._data_array[_DataArrayIndex.GAS_VALVE_CLOSE] = 1
-        self.gas_valve_status_label.setText("Valve: 🔒 Closed")
-        self.gas_valve_status_label.setStyleSheet("QLabel { color: #e67e22; font-weight: bold; }")
+        if self.gas_valve_status_label is not None:
+            self.gas_valve_status_label.setText("Valve: 🔒 Closed")
+            self.gas_valve_status_label.setStyleSheet("QLabel { color: #e67e22; font-weight: bold; }")
 
     def _gas_valve_puff(self) -> None:
         """Instructs the system to deliver a gas puff."""
         self._data_array[_DataArrayIndex.GAS_VALVE_PUFF] = 1
         self._puff_in_progress = True
-        self.gas_valve_status_label.setText("Valve: 💨 Puffing")
-        self.gas_valve_status_label.setStyleSheet("QLabel { color: #3498db; font-weight: bold; }")
+        if self.gas_valve_status_label is not None:
+            self.gas_valve_status_label.setText("Valve: 💨 Puffing")
+            self.gas_valve_status_label.setStyleSheet("QLabel { color: #3498db; font-weight: bold; }")
