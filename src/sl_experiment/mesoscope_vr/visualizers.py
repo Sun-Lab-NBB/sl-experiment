@@ -234,6 +234,7 @@ class BehaviorVisualizer:
     def open(
         self,
         mode: VisualizerMode | int = VisualizerMode.EXPERIMENT,
+        *,
         has_reinforcing_trials: bool = True,
         has_aversive_trials: bool = True,
     ) -> None:

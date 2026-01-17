@@ -999,7 +999,7 @@ class _MesoscopeVRSystem:
         self._visualizer: BehaviorVisualizer = BehaviorVisualizer()
 
     def start(self) -> None:
-        """Guides the user through a semi-interactive sequence of seps that prepares the assets used to acquire the
+        """Guides the user through a semi-interactive sequence of steps that prepares the assets used to acquire the
         session's data.
 
         Notes:
@@ -1079,7 +1079,7 @@ class _MesoscopeVRSystem:
         # control UI and the visualizer layouts.
         has_reinforcing_trials = True
         has_aversive_trials = True
-        if visualizer_mode == VisualizerMode.EXPERIMENT:
+        if visualizer_mode == VisualizerMode.EXPERIMENT and self._experiment_configuration:
             trial_structures = self._experiment_configuration.trial_structures.values()
             has_reinforcing_trials = any(isinstance(t, WaterRewardTrial) for t in trial_structures)
             has_aversive_trials = any(isinstance(t, GasPuffTrial) for t in trial_structures)
@@ -1608,7 +1608,7 @@ class _MesoscopeVRSystem:
         # Checks for decomposition errors and raises RuntimeError with diagnostic information.
         if trial_count == -1:
             # Reconstructs the position where decomposition failed for error reporting.
-            failed_position = sum(len(trial_motifs[idx]) for idx in trial_indices_array[:max_trials] if idx != 0)
+            failed_position = sum(len(trial_motifs[index]) for index in trial_indices_array[:max_trials] if index != 0)
             remaining_cues = self._unity_state.cue_sequence[failed_position : failed_position + 20]
 
             message = (
@@ -2062,7 +2062,7 @@ class _MesoscopeVRSystem:
         self._change_system_state(_MesoscopeVRStates.LICK_TRAINING)
 
     def run_train(self) -> None:
-        """Switches the Mesoscope-VR system to the lick training state.
+        """Switches the Mesoscope-VR system to the run training state.
 
         Notes:
             In this state, the brake is disengaged and the screens are turned off. The encoder sensor is

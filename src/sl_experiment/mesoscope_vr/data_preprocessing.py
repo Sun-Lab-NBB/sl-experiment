@@ -441,7 +441,7 @@ def _preprocess_mesoscope_directory(
     ops_path = output_directory.joinpath("suite2p_parameters.json")
 
     # Pre-creates the dictionary to store frame-variant metadata extracted from all TIFF frames.
-    all_metadata: defaultdict[str, list[NDArray]] = defaultdict(list)
+    all_metadata: defaultdict[str, list[NDArray[Any]]] = defaultdict(list)
 
     # Finds all TIFF files in the input directory (deliberately non-recursive).
     tiff_files = list(chain(image_directory.glob("*.tif"), image_directory.glob("*.tiff")))

@@ -4,6 +4,7 @@ acquisition runtimes by allowing direct control over a subset of the system's ru
 
 import sys
 from enum import IntEnum
+from functools import partial
 import contextlib
 from multiprocessing import Process
 
@@ -105,7 +106,8 @@ class RuntimeControlUI:
         self._has_reinforcing_trials: bool = True
         self._has_aversive_trials: bool = True
 
-        # Defines but does not automatically start the UI process. The process target is set in start() to pass the mode.
+        # Defines but does not automatically start the UI process. The process target is set in start() to pass
+        # the mode.
         self._ui_process: Process | None = None
         self._started = False
 
@@ -117,6 +119,7 @@ class RuntimeControlUI:
     def start(
         self,
         mode: VisualizerMode | int = VisualizerMode.EXPERIMENT,
+        *,
         has_reinforcing_trials: bool = True,
         has_aversive_trials: bool = True,
     ) -> None:
@@ -139,12 +142,15 @@ class RuntimeControlUI:
         self._has_reinforcing_trials = has_reinforcing_trials
         self._has_aversive_trials = has_aversive_trials
 
-        # Creates the UI process with the mode and trial type flags as arguments.
-        self._ui_process = Process(
-            target=self._run_ui_process,
-            args=(self._mode, self._has_reinforcing_trials, self._has_aversive_trials),
-            daemon=True,
+        # Creates the UI process with the mode and trial type flags as arguments. Uses partial to bind keyword
+        # arguments, allowing the method signature to use keyword-only boolean parameters.
+        target = partial(
+            self._run_ui_process,
+            mode=self._mode,
+            has_reinforcing_trials=self._has_reinforcing_trials,
+            has_aversive_trials=self._has_aversive_trials,
         )
+        self._ui_process = Process(target=target, daemon=True)
 
         # Starts the remote UI process.
         self._ui_process.start()
@@ -184,7 +190,11 @@ class RuntimeControlUI:
         self._started = False
 
     def _run_ui_process(
-        self, mode: VisualizerMode, has_reinforcing_trials: bool, has_aversive_trials: bool
+        self,
+        mode: VisualizerMode,
+        *,
+        has_reinforcing_trials: bool,
+        has_aversive_trials: bool,
     ) -> None:
         """Runs UI management cycle in a parallel process.
 
@@ -371,6 +381,7 @@ class _ControlUIWindow(QMainWindow):
         valve_tracker: SharedMemoryArray,
         gas_puff_tracker: SharedMemoryArray,
         mode: VisualizerMode | int = VisualizerMode.EXPERIMENT,
+        *,
         has_reinforcing_trials: bool = True,
         has_aversive_trials: bool = True,
     ) -> None:
@@ -447,10 +458,10 @@ class _ControlUIWindow(QMainWindow):
         self.pause_btn.setObjectName("resumeButton")
 
         # Configures the main control buttons
-        for btn in [self.exit_btn, self.pause_btn]:
-            btn.setMinimumHeight(35)
-            btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-            runtime_control_layout.addWidget(btn)
+        for button in [self.exit_btn, self.pause_btn]:
+            button.setMinimumHeight(35)
+            button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            runtime_control_layout.addWidget(button)
 
         # Reinforcing Guidance button (only shown in EXPERIMENT mode with reinforcing trials).
         self.reinforcing_guidance_btn: QPushButton | None = None
@@ -519,10 +530,10 @@ class _ControlUIWindow(QMainWindow):
         self.reward_btn.setObjectName("rewardButton")
 
         # Configures the buttons to expand when the UI is resized, but use a fixed height of 35 points
-        for btn in [self.valve_open_btn, self.valve_close_btn, self.reward_btn]:
-            btn.setMinimumHeight(35)
-            btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-            valve_buttons_layout.addWidget(btn)
+        for button in [self.valve_open_btn, self.valve_close_btn, self.reward_btn]:
+            button.setMinimumHeight(35)
+            button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            valve_buttons_layout.addWidget(button)
 
         valve_layout.addLayout(valve_buttons_layout)
 
@@ -601,10 +612,10 @@ class _ControlUIWindow(QMainWindow):
             self.gas_puff_btn.setObjectName("gasPuffButton")
 
             # Configures the buttons to expand when the UI is resized, but use a fixed height of 35 points
-            for btn in [self.gas_valve_open_btn, self.gas_valve_close_btn, self.gas_puff_btn]:
-                btn.setMinimumHeight(35)
-                btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-                gas_valve_buttons_layout.addWidget(btn)
+            for button in [self.gas_valve_open_btn, self.gas_valve_close_btn, self.gas_puff_btn]:
+                button.setMinimumHeight(35)
+                button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+                gas_valve_buttons_layout.addWidget(button)
 
             gas_valve_layout.addLayout(gas_valve_buttons_layout)
 

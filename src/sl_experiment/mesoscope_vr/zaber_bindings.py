@@ -70,14 +70,16 @@ def _attempt_connection(port: str) -> list[_ZaberDeviceData]:
 
         # Parses device information into _ZaberDeviceData instances
         device_list = []
-        for num, device in enumerate(devices):
+        for number, device in enumerate(devices):
             axes = [
-                _ZaberAxisData(axis_id=axis_num, axis_label=device.get_axis(axis_number=axis_num).label or "Not Used")
-                for axis_num in range(1, device.axis_count + 1)
+                _ZaberAxisData(
+                    axis_id=axis_number, axis_label=device.get_axis(axis_number=axis_number).label or "Not Used"
+                )
+                for axis_number in range(1, device.axis_count + 1)
             ]
 
             device_info = _ZaberDeviceData(
-                device_number=num + 1, device_id=device.device_id, label=device.label, name=device.name, axes=axes
+                device_number=number + 1, device_id=device.device_id, label=device.label, name=device.name, axes=axes
             )
             device_list.append(device_info)
 

@@ -105,10 +105,10 @@ def get_cameras() -> None:
             level=LogLevel.WARNING,
         )
         console.echo("Available OpenCV cameras:", level=LogLevel.SUCCESS)
-        for num, camera_data in enumerate(opencv_cameras, start=1):
+        for number, camera_data in enumerate(opencv_cameras, start=1):
             console.echo(
                 message=(
-                    f"OpenCV camera {num}: index={camera_data.camera_index}, "
+                    f"OpenCV camera {number}: index={camera_data.camera_index}, "
                     f"frame_height={camera_data.frame_height} pixels, frame_width={camera_data.frame_width} pixels, "
                     f"frame_rate={camera_data.acquisition_frame_rate} frames / second."
                 )
@@ -121,10 +121,10 @@ def get_cameras() -> None:
         # Note, Harvesters interface supports identifying the camera's model and serial number, which makes it easy to
         # map discovered indices to physical hardware.
         console.echo("Available Harvesters cameras:", level=LogLevel.SUCCESS)
-        for num, camera_data in enumerate(harvesters_cameras, start=1):
+        for number, camera_data in enumerate(harvesters_cameras, start=1):
             console.echo(
                 message=(
-                    f"Harvesters camera {num}: index={camera_data.camera_index}, model={camera_data.model}, "
+                    f"Harvesters camera {number}: index={camera_data.camera_index}, model={camera_data.model}, "
                     f"serial_code={camera_data.serial_number}, frame_height={camera_data.frame_height} pixels, "
                     f"frame_width={camera_data.frame_width} pixels, "
                     f"frame_rate={camera_data.acquisition_frame_rate} frames / second."

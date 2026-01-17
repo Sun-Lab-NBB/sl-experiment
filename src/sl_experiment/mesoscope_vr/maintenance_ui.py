@@ -319,10 +319,10 @@ class _MaintenanceUIWindow(QMainWindow):
         self.valve_close_btn.clicked.connect(self._valve_close)
         self.valve_close_btn.setObjectName("valveCloseButton")
 
-        for btn in [self.valve_open_btn, self.valve_close_btn]:
-            btn.setMinimumHeight(35)
-            btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-            basic_valve_layout.addWidget(btn)
+        for button in [self.valve_open_btn, self.valve_close_btn]:
+            button.setMinimumHeight(35)
+            button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            basic_valve_layout.addWidget(button)
 
         valve_layout.addLayout(basic_valve_layout)
 
@@ -450,10 +450,10 @@ class _MaintenanceUIWindow(QMainWindow):
         self.brake_unlock_btn.clicked.connect(self._brake_unlock)
         self.brake_unlock_btn.setObjectName("brakeUnlockButton")
 
-        for btn in [self.brake_lock_btn, self.brake_unlock_btn]:
-            btn.setMinimumHeight(35)
-            btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-            brake_buttons_layout.addWidget(btn)
+        for button in [self.brake_lock_btn, self.brake_unlock_btn]:
+            button.setMinimumHeight(35)
+            button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            brake_buttons_layout.addWidget(button)
 
         brake_layout.addLayout(brake_buttons_layout)
 
@@ -486,10 +486,10 @@ class _MaintenanceUIWindow(QMainWindow):
         self.gas_valve_close_btn.clicked.connect(self._gas_valve_close)
         self.gas_valve_close_btn.setObjectName("valveCloseButton")
 
-        for btn in [self.gas_valve_open_btn, self.gas_valve_close_btn]:
-            btn.setMinimumHeight(35)
-            btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-            gas_valve_buttons_layout.addWidget(btn)
+        for button in [self.gas_valve_open_btn, self.gas_valve_close_btn]:
+            button.setMinimumHeight(35)
+            button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            gas_valve_buttons_layout.addWidget(button)
 
         gas_valve_layout.addLayout(gas_valve_buttons_layout)
 

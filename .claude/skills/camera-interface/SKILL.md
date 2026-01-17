@@ -1,5 +1,5 @@
 ---
-name: camera-interface
+name: using-camera-interface
 description: >-
   Guide for using ataraxis-video-system to implement camera functionality in sl-experiment.
   Maps library architecture, public API, and integration patterns used in this codebase.
@@ -10,7 +10,7 @@ description: >-
 When implementing camera functionality in sl-experiment, use the ataraxis-video-system library
 following the patterns established in this codebase.
 
-See @CAMERA_INTERFACE_GUIDE.md for complete API reference and integration patterns.
+See [CAMERA_INTERFACE_GUIDE.md](CAMERA_INTERFACE_GUIDE.md) for complete API reference and integration patterns.
 
 ## IMPORTANT: Verification Requirement
 

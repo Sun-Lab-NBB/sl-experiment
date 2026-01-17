@@ -467,8 +467,8 @@ class SurgeryLog:
         # Same as implants, but parses injection data. The only minor difference is that InjectionData has an additional
         # field to store injection volume in nanoliters.
         injections = []
-        for num in injection_numbers:
-            base_key = f"injection{num}"
+        for number in injection_numbers:
+            base_key = f"injection{number}"
             injection_name = animal_data.get(base_key)
 
             if injection_name is not None:

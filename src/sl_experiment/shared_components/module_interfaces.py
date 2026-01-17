@@ -32,9 +32,7 @@ _MAXIMUM_VALVE_PULSE_DURATION_US: int = _MAXIMUM_VALVE_PULSE_DURATION_MS * 1000
 _MAXIMUM_BRAKING_STRENGTH: np.uint8 = np.uint8(255)
 
 
-def _power_law_model(
-    pulse_duration: float | NDArray[np.floating], a: float, b: float, /
-) -> float | NDArray[np.floating]:
+def _power_law_model(pulse_duration: float | NDArray[np.float64], a: float, b: float, /) -> float | NDArray[np.float64]:
     """Defines the power-law model used during valve calibration.
 
     This model was empirically found to have the best fit for the water reward valve's performance data.

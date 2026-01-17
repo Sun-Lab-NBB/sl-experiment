@@ -27,7 +27,7 @@ For experiment design, use the mesoscope-prefixed tools (e.g., `mesoscope_create
 
 Copy this checklist and track your progress when creating a new experiment:
 
-```
+```text
 Experiment Creation Progress:
 - [ ] Step 1: Verify templates directory is configured
 - [ ] Step 2: List and select appropriate template
@@ -179,7 +179,7 @@ Always validate the final configuration:
 
 ## Example Session
 
-```
+```text
 User: I need to create an experiment for the MF_Reward task
 
 Agent: Let me check the available templates and create the experiment.
