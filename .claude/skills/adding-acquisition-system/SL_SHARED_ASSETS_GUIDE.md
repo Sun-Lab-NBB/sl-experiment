@@ -146,10 +146,10 @@ class [System]SystemConfiguration(YamlConfig):
 
 ### Experiment Configuration Class (REQUIRED)
 
-Every system MUST define an experiment configuration class. If using VR-based tasks, inherit structure from
-`vr_configuration.py`. If using pure Python logic, define appropriate trial structures.
+Every system MUST define an experiment configuration class using the VR building blocks from `vr_configuration.py`.
+This enables corridor-based behavioral tasks running in Unity.
 
-**VR-Based Example:**
+**Example:**
 
 ```python
 from .vr_configuration import Cue, Segment, VREnvironment
@@ -185,28 +185,6 @@ class [System]ExperimentConfiguration(YamlConfig):
             console.error(message="Duplicate cue codes found", error=ValueError)
 
         # Add additional validation as needed
-```
-
-**Pure Python Logic Example:**
-
-```python
-from .experiment_configuration import ExperimentState, BaseTrial
-
-@dataclass
-class [System]ExperimentConfiguration(YamlConfig):
-    """Experiment configuration for [System] Python-based tasks.
-
-    Attributes:
-        trial_structures: Mapping of trial names to trial configurations.
-        experiment_states: Mapping of state names to experiment state configurations.
-    """
-
-    trial_structures: dict[str, BaseTrial] = field(default_factory=dict)
-    experiment_states: dict[str, ExperimentState] = field(default_factory=dict)
-
-    def __post_init__(self) -> None:
-        """Validates experiment configuration."""
-        # Add validation logic
 ```
 
 ---

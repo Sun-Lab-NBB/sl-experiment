@@ -19,6 +19,15 @@ from ..mesoscope_vr import (
     migrate_animal_between_projects,
 )
 from ..shared_components import get_project_experiments
+from sl_shared_assets import (
+    TaskTemplate,
+    GasPuffTrial,
+    ExperimentState,
+    WaterRewardTrial,
+    get_task_templates_directory,
+    create_experiment_configuration,
+)
+from ataraxis_base_utilities import ensure_directory_exists
 
 # Initializes the MCP server for sl-get tools.
 get_mcp = FastMCP(name="sl-experiment-get", json_response=True)
@@ -109,6 +118,58 @@ def get_checksum_tool(input_string: str) -> str:
         return f"Error: {exception}"
     else:
         return f"CRC32-XFER checksum for '{input_string}': {checksum}"
+
+
+@get_mcp.tool()
+def get_experiment_info_tool(project: str, experiment: str) -> str:
+    """Retrieves detailed information about an experiment configuration.
+
+    Reads the experiment configuration YAML file and returns a summary of its structure including cues, segments,
+    trial structures, and experiment states.
+
+    Args:
+        project: The name of the project containing the experiment.
+        experiment: The name of the experiment configuration (without .yaml extension).
+
+    Returns:
+        A formatted summary of the experiment configuration, or an error message if the file cannot be read.
+    """
+    try:
+        system_configuration = get_system_configuration_data()
+        config_path = system_configuration.filesystem.root_directory.joinpath(
+            project, "configuration", f"{experiment}.yaml"
+        )
+
+        if not config_path.exists():
+            return f"Error: Experiment '{experiment}' not found in project '{project}'."
+
+        # Loads the experiment configuration using the system-specific class.
+        from sl_shared_assets import MesoscopeExperimentConfiguration
+
+        experiment_config = MesoscopeExperimentConfiguration.from_yaml(file_path=config_path)
+
+        # Builds the summary.
+        cue_info = ", ".join([f"{c.name}(code={c.code})" for c in experiment_config.cues])
+        segment_info = ", ".join([s.name for s in experiment_config.segments])
+
+        trial_info_parts = []
+        for name, trial in experiment_config.trial_structures.items():
+            trial_type = "lick" if isinstance(trial, WaterRewardTrial) else "occupancy"
+            trial_info_parts.append(f"{name}({trial_type})")
+        trial_info = ", ".join(trial_info_parts)
+
+        state_info_parts = []
+        for name, state in experiment_config.experiment_states.items():
+            state_info_parts.append(f"{name}(code={state.experiment_state_code}, duration={state.state_duration_s}s)")
+        state_info = ", ".join(state_info_parts)
+
+        return (
+            f"Experiment: {experiment} | Unity scene: {experiment_config.unity_scene_name} | "
+            f"Cues: [{cue_info}] | Segments: [{segment_info}] | "
+            f"Trials: [{trial_info}] | States: [{state_info}]"
+        )
+    except Exception as exception:
+        return f"Error: {exception}"
 
 
 @manage_mcp.tool()
@@ -211,6 +272,122 @@ def migrate_animal_tool(source_project: str, destination_project: str, animal_id
         return f"Error: {exception}"
     else:
         return f"Animal {animal_id} migrated: {source_project} -> {destination_project}"
+
+
+@manage_mcp.tool()
+def create_project_tool(project: str) -> str:
+    """Creates a new project directory structure for the data acquisition system.
+
+    Creates the project directory and its configuration subdirectory under the system's root directory. If the project
+    already exists, returns an informational message without modifying anything.
+
+    Args:
+        project: The name of the project to create.
+
+    Returns:
+        A success message if the project was created, or an informational message if it already exists.
+    """
+    try:
+        system_configuration = get_system_configuration_data()
+        project_path = system_configuration.filesystem.root_directory.joinpath(project)
+        config_path = project_path.joinpath("configuration")
+
+        if project_path.exists():
+            return f"Project '{project}' already exists at {project_path}"
+
+        ensure_directory_exists(config_path)
+        return f"Project created: {project} at {project_path}"
+
+    except Exception as exception:
+        return f"Error: {exception}"
+
+
+@manage_mcp.tool()
+def create_experiment_config_tool(
+    project: str,
+    experiment: str,
+    template: str,
+    state_count: int = 1,
+) -> str:
+    """Creates an experiment configuration from a task template.
+
+    Generates a new experiment configuration file using the specified task template. The configuration includes VR
+    structure from the template (cues, segments, trials) and generates experiment states with default guidance
+    parameters. Trial-specific parameters use sensible defaults and should be customized via YAML editing.
+
+    Args:
+        project: The name of the project for which to create the experiment.
+        experiment: The name for the new experiment configuration (used as filename without .yaml extension).
+        template: The name of the task template to use (filename without .yaml extension).
+        state_count: The number of experiment states to generate. Defaults to 1.
+
+    Returns:
+        A success message with the file path, or an error description if creation fails.
+    """
+    try:
+        system_configuration = get_system_configuration_data()
+        project_path = system_configuration.filesystem.root_directory.joinpath(project)
+        file_path = project_path.joinpath("configuration", f"{experiment}.yaml")
+
+        # Validates project exists.
+        if not project_path.exists():
+            return (
+                f"Error: Project '{project}' does not exist. "
+                f"Use create_project_tool to create it first."
+            )
+
+        # Checks if experiment already exists.
+        if file_path.exists():
+            return f"Error: Experiment '{experiment}' already exists in project '{project}'."
+
+        # Loads the task template.
+        templates_dir = get_task_templates_directory()
+        template_path = templates_dir.joinpath(f"{template}.yaml")
+        if not template_path.exists():
+            available = sorted([f.stem for f in templates_dir.glob("*.yaml")])
+            return (
+                f"Error: Template '{template}' not found. "
+                f"Available templates: {', '.join(available) if available else 'none'}"
+            )
+
+        task_template = TaskTemplate.from_yaml(file_path=template_path)
+
+        # Creates the experiment configuration.
+        experiment_configuration = create_experiment_configuration(
+            template=task_template,
+            system=system_configuration.name,
+            unity_scene_name=template,
+        )
+
+        # Determines trial type counts for guidance parameters.
+        water_reward_count = sum(
+            1 for t in experiment_configuration.trial_structures.values() if isinstance(t, WaterRewardTrial)
+        )
+        gas_puff_count = sum(
+            1 for t in experiment_configuration.trial_structures.values() if isinstance(t, GasPuffTrial)
+        )
+
+        # Generates experiment states with guidance parameters.
+        for state_num in range(state_count):
+            state_name = f"state_{state_num + 1}"
+            experiment_configuration.experiment_states[state_name] = ExperimentState(
+                experiment_state_code=state_num + 1,
+                system_state_code=0,
+                state_duration_s=60,
+                supports_trials=True,
+                reinforcing_initial_guided_trials=3 if water_reward_count > 0 else 0,
+                reinforcing_recovery_failed_threshold=9 if water_reward_count > 0 else 0,
+                reinforcing_recovery_guided_trials=3 if water_reward_count > 0 else 0,
+                aversive_initial_guided_trials=3 if gas_puff_count > 0 else 0,
+                aversive_recovery_failed_threshold=9 if gas_puff_count > 0 else 0,
+                aversive_recovery_guided_trials=3 if gas_puff_count > 0 else 0,
+            )
+
+        experiment_configuration.to_yaml(file_path=file_path)
+        return f"Experiment created: {experiment} from template '{template}' at {file_path}"
+
+    except Exception as exception:
+        return f"Error: {exception}"
 
 
 def run_get_server(transport: Literal["stdio", "sse", "streamable-http"] = "stdio") -> None:
