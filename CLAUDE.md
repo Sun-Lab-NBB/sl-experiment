@@ -49,13 +49,13 @@ state to prevent integration errors.
 
 ## Available Skills
 
-| Skill                      | Description                                                                            |
-|----------------------------|----------------------------------------------------------------------------------------|
-| `/explore-codebase`        | Perform in-depth codebase exploration at session start                                 |
-| `/sun-lab-style`           | Apply Sun Lab coding conventions (REQUIRED for all code changes)                       |
-| `/camera-interface`        | Guide for using ataraxis-video-system to implement camera functionality                |
-| `/acquisition-system-setup`| Configure data acquisition systems (uses MCP tools from sl-shared-assets)              |
-| `/experiment-design`       | Interactive guidance for building experiment configurations (uses MCP tools)           |
+| Skill                       | Description                                                                  |
+|-----------------------------|------------------------------------------------------------------------------|
+| `/explore-codebase`         | Perform in-depth codebase exploration at session start                       |
+| `/sun-lab-style`            | Apply Sun Lab coding conventions (REQUIRED for all code changes)             |
+| `/camera-interface`         | Guide for using ataraxis-video-system to implement camera functionality      |
+| `/acquisition-system-setup` | Configure data acquisition systems (uses MCP tools from sl-shared-assets)    |
+| `/experiment-design`        | Interactive guidance for building experiment configurations (uses MCP tools) |
 
 ## Project Context
 

@@ -1,237 +1,485 @@
 ---
 name: configuring-acquisition-system
 description: >-
-  Guides users through configuring a data acquisition system on the local machine. Covers working directory setup,
-  acquisition system selection and parameter configuration, and Google credentials setup. Use when setting up a new
-  acquisition PC, changing acquisition system type, or when the user asks about system configuration.
+  Guides users through configuring data acquisition systems on local machines using MCP tools for hardware discovery
+  and direct YAML file editing for system parameters. Covers working directory setup, hardware discovery, system
+  configuration, and credential management. Use when setting up a new acquisition PC, reconfiguring hardware, or
+  troubleshooting system configuration issues.
 ---
 
-# Acquisition System Setup
+# Configuring Acquisition System
 
-Guides users through configuring data acquisition systems on local machines. Supports both complete system setup and
-flexible ad-hoc configuration changes for any supported acquisition system.
+Guides users through configuring data acquisition systems using MCP tools for hardware discovery and direct YAML file
+editing for system parameters. Supports complete system setup, targeted configuration changes, and verification
+workflows.
 
 ---
 
-## Prerequisites
+## MCP Server Requirements
 
-The MCP server must be running. Start it with: `sl-configure mcp`
+This skill uses MCP tools from four libraries. You MUST have access to these servers to use this skill effectively.
+
+| Server                  | CLI Command        | Purpose                                        |
+|-------------------------|--------------------|------------------------------------------------|
+| sl-shared-assets        | `sl-configure mcp` | Working directory, credentials, task templates |
+| sl-experiment           | `sl-get mcp`       | Zaber motor discovery, project listing         |
+| ataraxis-video-system   | `axvs mcp`         | Camera discovery, video requirements check     |
+| ataraxis-comm-interface | `axci-mcp`         | Microcontroller discovery, MQTT broker check   |
+
+If a required MCP server is unavailable, inform the user which server is needed and the command to start it.
 
 ---
 
 ## Supported Acquisition Systems
 
-| System      | Description                         | Reference                         |
-|-------------|-------------------------------------|-----------------------------------|
-| `mesoscope` | Two-photon mesoscope imaging system | [MESOSCOPE_REFERENCE.md](MESOSCOPE_REFERENCE.md) |
+| System      | Description                                 | Reference                                        |
+|-------------|---------------------------------------------|--------------------------------------------------|
+| `mesoscope` | Two-photon mesoscope with VR behavioral rig | [MESOSCOPE_REFERENCE.md](MESOSCOPE_REFERENCE.md) |
 
-Each system has its own reference file documenting all configurable parameters, their purposes, valid ranges, and
-default values based on actual usage in sl-experiment.
-
----
-
-## Usage Modes
-
-This skill supports two modes of operation:
-
-### Flexible Mode (Default)
-
-For users who want to check or modify specific configuration parameters without following a structured workflow.
-Use this mode when the user:
-
-- Asks about a specific configuration section (e.g., "What are my camera settings?")
-- Wants to update specific parameters (e.g., "Change the lick threshold to 500")
-- Needs to reconfigure one aspect of an existing system
-- Asks general questions about system configuration
-
-In flexible mode, respond directly to the user's request using the appropriate query or update tools. Refer to the
-system-specific reference file for parameter details.
-
-### Complete Setup Mode
-
-For users setting up a new machine or performing a full system reconfiguration. Use this mode when the user:
-
-- Explicitly asks to "set up" or "configure" the acquisition system from scratch
-- Is working with a machine that has no existing configuration
-- Asks for a "complete setup" or "full configuration"
-
-In complete setup mode, follow the structured workflow in the [Complete Setup Workflow](#complete-setup-workflow)
-section.
+Each system has a reference file documenting all configurable parameters, their purposes, valid ranges, and default
+values.
 
 ---
 
-## Quick Reference
+## Network Storage Prerequisites
 
-### Check Current Configuration
+The acquisition system requires network storage locations to be mounted via SMB before configuration. These mounts
+must be configured at the operating system level and are not managed by this skill or MCP tools.
 
-| What to Check            | Tool                                       |
-|--------------------------|--------------------------------------------|
-| Working directory        | `get_working_directory_tool()`             |
-| System overview          | `get_system_configuration_tool()`          |
-| Available sections       | `list_system_configuration_sections_tool()`|
-| Directory paths          | `get_filesystem_configuration_tool()`      |
-| Google Sheet IDs         | `get_sheets_configuration_tool()`          |
-| Camera settings          | `get_cameras_configuration_tool()`         |
-| Microcontroller settings | `get_microcontrollers_configuration_tool()`|
-| External assets          | `get_external_assets_configuration_tool()` |
-| Google credentials       | `get_google_credentials_tool()`            |
+### Required SMB Mounts
 
-### Update Configuration
+| Mount Purpose      | Configuration Field    | Description                                    |
+|--------------------|------------------------|------------------------------------------------|
+| Compute server     | `server_directory`     | Long-term hot storage for processed data       |
+| NAS backup         | `nas_directory`        | Archival/cold storage backup                   |
 
-| What to Update           | Tool                                          |
-|--------------------------|-----------------------------------------------|
-| Working directory        | `set_working_directory_tool()`                |
-| Create/replace system    | `create_system_configuration_tool()`          |
-| Directory paths          | `update_filesystem_configuration_tool()`      |
-| Google Sheet IDs         | `update_sheets_configuration_tool()`          |
-| Camera settings          | `update_cameras_configuration_tool()`         |
-| Microcontroller ports    | `update_microcontroller_ports_tool()`         |
-| Wheel/encoder settings   | `update_wheel_configuration_tool()`           |
-| Brake calibration        | `update_brake_configuration_tool()`           |
-| Lick sensor calibration  | `update_lick_sensor_configuration_tool()`     |
-| Torque sensor calibration| `update_torque_sensor_configuration_tool()`   |
-| Valve calibration        | `update_valve_calibration_tool()`             |
-| Timing parameters        | `update_timing_configuration_tool()`          |
-| Zaber/MQTT settings      | `update_external_assets_configuration_tool()` |
-| Google credentials       | `set_google_credentials_tool()`               |
+### Mesoscope-Specific Mounts
+
+For mesoscope systems, an additional mount is required:
+
+| Mount Purpose      | Configuration Field    | Description                                    |
+|--------------------|------------------------|------------------------------------------------|
+| ScanImagePC share  | `mesoscope_directory`  | Shared directory where ScanImagePC saves TIFFs |
+
+The ScanImagePC (MATLAB workstation) must expose a shared directory that the acquisition PC can access. This enables
+the acquisition system to aggregate mesoscope frame data with behavioral data during preprocessing.
+
+### Mount Configuration
+
+Before running this skill, ensure:
+1. All network shares are mounted and accessible from the acquisition PC
+2. The mount points have appropriate read/write permissions
+3. Mounts persist across reboots (add to `/etc/fstab` or use systemd mount units)
+
+Example mount verification:
+```bash
+# Check if mounts are accessible
+ls /mnt/server/data
+ls /mnt/nas/backup
+ls /mnt/mesoscope/data  # Mesoscope systems only
+```
+
+If mounts are not configured, coordinate with system administrators to set up SMB shares before proceeding with
+acquisition system configuration.
 
 ---
 
-## Flexible Mode Guidelines
+## Skill Modes
 
-When operating in flexible mode, follow these guidelines:
+### Discovery Mode
 
-### Responding to Queries
+Use when the user wants to identify connected hardware without modifying configuration.
 
-When the user asks about configuration, query the relevant section and present the information clearly. Refer to the
-system-specific reference file to explain what each parameter controls.
+**When to use:**
+- User asks "What cameras are connected?"
+- User asks "Which serial ports have microcontrollers?"
+- User wants to verify hardware is accessible before configuration
+- Troubleshooting hardware connectivity issues
 
-### Responding to Update Requests
+**Available discovery tools:**
 
-When the user wants to change a parameter:
+| Hardware Type      | MCP Tool                        | Server                  |
+|--------------------|---------------------------------|-------------------------|
+| Cameras            | `list_cameras()`                | ataraxis-video-system   |
+| Microcontrollers   | `list_microcontrollers()`       | ataraxis-comm-interface |
+| Zaber motors       | `get_zaber_devices_tool()`      | sl-experiment           |
+| MQTT broker        | `check_mqtt_broker(host, port)` | ataraxis-comm-interface |
+| Video requirements | `check_runtime_requirements()`  | ataraxis-video-system   |
+| CTI file status    | `get_cti_status()`              | ataraxis-video-system   |
 
-1. Confirm you understand what they want to change
-2. Check the reference file for valid ranges and constraints
-3. Call the appropriate update tool with the new value(s)
-4. Confirm the change was successful
+### Configuration Mode
 
-### Handling Ambiguous Requests
+Use when the user wants to modify system configuration.
 
-If the user's request is ambiguous, ask for clarification. Reference the system-specific documentation to help guide
-them to the correct parameter.
+**When to use:**
+- User asks to "set up" or "configure" the acquisition system
+- User wants to change specific parameters (e.g., "change the lick threshold")
+- User needs to update hardware port assignments after reconnecting devices
 
-### Proactive Assistance
+**Configuration approach:**
+1. Use MCP tools for paths and credentials (working directory, Google credentials, task templates)
+2. Use sl-shared-assets CLI tools for creating and managing configuration files
+3. Use discovery tools to identify correct hardware values
+4. Edit existing configuration files directly only for hardware parameter updates
 
-When the user modifies one parameter, you may suggest related parameters they might also want to check or update based
-on the reference documentation, but do not make changes without explicit confirmation.
+**Important:** Always prefer existing CLIs and MCP tools over manual file operations. Use the `sl-configure` CLI from
+sl-shared-assets for creating and managing system configuration files. Manual YAML editing should only be used to
+update hardware parameters (camera indices, serial ports, sensor calibration) in an existing configuration file.
+
+**MCP tools for configuration:**
+
+| Setting            | Get Tool                              | Set Tool                              |
+|--------------------|---------------------------------------|---------------------------------------|
+| Working directory  | `get_working_directory_tool()`        | `set_working_directory_tool(dir)`     |
+| Google credentials | `get_google_credentials_tool()`       | `set_google_credentials_tool(path)`   |
+| Task templates dir | `get_task_templates_directory_tool()` | `set_task_templates_directory_tool()` |
+| CTI file           | `get_cti_status()`                    | `set_cti_file(path)`                  |
+
+**Direct file editing (hardware parameters only):**
+For hardware parameters (cameras, microcontrollers, sensors, motors), edit the existing YAML configuration file.
+See [Configuration File Reference](#configuration-file-reference) for file location and structure.
+
+### Verification Mode
+
+Use when the user wants to confirm the system is properly configured.
+
+**When to use:**
+- After completing setup
+- Before running an experiment
+- Troubleshooting runtime errors
+
+**Verification checklist:**
+1. Working directory is set and accessible
+2. Configuration file exists and is valid YAML
+3. All hardware is discoverable (cameras, microcontrollers, Zaber motors)
+4. MQTT broker is reachable
+5. Google credentials are configured (if using Google Sheets)
+6. Task templates directory is set (if using Unity tasks)
 
 ---
 
 ## Complete Setup Workflow
 
-Use this workflow when the user requests a complete system setup.
+Use this workflow when setting up a new machine or performing full system reconfiguration.
 
-### Workflow Checklist
+### Phase 1: Prerequisites
 
+**Check video system requirements:**
 ```
-Acquisition System Setup Progress:
-- [ ] Step 1: Check/set working directory
-- [ ] Step 2: Check/create acquisition system configuration
-- [ ] Step 3: Configure system parameters
-- [ ] Step 4: Configure Google credentials
-- [ ] Step 5: Verify complete setup
+check_runtime_requirements()
 ```
 
-### Step 1: Working Directory
+Expected output shows FFMPEG, Nvidia GPU, and CTI file status. If CTI is not configured and using Harvesters cameras:
+```
+set_cti_file("/path/to/gentl_producer.cti")
+```
 
-Check if configured:
-```python
+**Check MQTT broker:**
+```
+check_mqtt_broker(host="127.0.0.1", port=1883)
+```
+
+If MQTT broker is not running, inform the user to start Mosquitto or their MQTT broker service.
+
+### Phase 2: Hardware Discovery
+
+**Discover cameras:**
+```
+list_cameras()
+```
+
+Note the camera indices from the output. For mesoscope systems, identify which index corresponds to the face camera
+and which to the body camera based on resolution/model information.
+
+**Discover microcontrollers:**
+```
+list_microcontrollers()
+```
+
+Note the port assignments. The output shows microcontroller IDs that indicate their function:
+- Actor microcontroller: Controls outputs (valve, brake, screens)
+- Sensor microcontroller: Monitors inputs (lick, torque, TTL)
+- Encoder microcontroller: High-precision wheel encoder
+
+**Discover Zaber motors:**
+```
+get_zaber_devices_tool()
+```
+
+Note the port assignments for each motor group:
+- Headbar motors: Z, Pitch, Roll axes
+- Lickport motors: Z, Y, X axes
+- Wheel motor: X-axis horizontal position
+
+**Device path convention:**
+- Microcontrollers use `/dev/ttyACM*` ports (USB CDC ACM devices)
+- Zaber motors use `/dev/ttyUSB*` ports (USB serial adapters)
+
+Do not confuse these device types when mapping discovered hardware to configuration fields.
+
+### Phase 3: Working Directory and Paths
+
+**Check current working directory:**
+```
 get_working_directory_tool()
 ```
 
-If not configured, ask the user for their preferred location and set it:
-```python
+**Set working directory if not configured:**
+```
 set_working_directory_tool(directory="/path/to/sun_lab_data")
 ```
 
-### Step 2: Acquisition System
-
-Check if configured:
-```python
-get_system_configuration_tool()
+**Create configuration directory if needed:**
+Use the Bash tool to create the directory structure:
+```bash
+mkdir -p /path/to/sun_lab_data/configuration
 ```
 
-If not configured, ask which system type to create:
-```python
-create_system_configuration_tool(system="mesoscope")
+### Phase 4: System Configuration File
+
+**Configuration file location:**
+```
+{working_directory}/configuration/mesoscope_system_configuration.yaml
 ```
 
-If already configured, ask the user if they want to:
-1. Keep the current system and proceed to parameter configuration
-2. Replace with a new configuration
-3. Skip to Google credentials
+**If the file does not exist**, create it using the template in
+[Configuration File Template](#configuration-file-template).
 
-### Step 3: System Parameters
+**If the file exists**, read it and update the following based on discovered hardware:
 
-Show available configuration sections:
-```python
-list_system_configuration_sections_tool()
+| Configuration Field | Discovery Source                  | YAML Path                       |
+|---------------------|-----------------------------------|---------------------------------|
+| `face_camera_index` | `list_cameras()` output           | `cameras.face_camera_index`     |
+| `body_camera_index` | `list_cameras()` output           | `cameras.body_camera_index`     |
+| `actor_port`        | `list_microcontrollers()` output  | `microcontrollers.actor_port`   |
+| `sensor_port`       | `list_microcontrollers()` output  | `microcontrollers.sensor_port`  |
+| `encoder_port`      | `list_microcontrollers()` output  | `microcontrollers.encoder_port` |
+| `headbar_port`      | `get_zaber_devices_tool()` output | `assets.headbar_port`           |
+| `lickport_port`     | `get_zaber_devices_tool()` output | `assets.lickport_port`          |
+| `wheel_port`        | `get_zaber_devices_tool()` output | `assets.wheel_port`             |
+
+**Ask the user for values that cannot be discovered:**
+- Filesystem paths (`root_directory`, `server_directory`, `nas_directory`, `mesoscope_directory`)
+- Google Sheet IDs (`surgery_sheet_id`, `water_log_sheet_id`)
+- MQTT broker settings (`unity_ip`, `unity_port`) if not using defaults
+
+### Phase 5: Credentials and Templates
+
+**Set Google credentials:**
 ```
-
-For each section the user wants to configure:
-1. Query current values with the appropriate `get_*` tool
-2. Reference the system-specific documentation file to explain parameters
-3. Ask which parameters they want to change
-4. Apply changes with the appropriate `update_*` tool
-
-### Step 4: Google Credentials
-
-Check current status:
-```python
 get_google_credentials_tool()
-```
-
-If not configured or user wants to replace, ask for the credentials path:
-```python
 set_google_credentials_tool(credentials_path="/path/to/credentials.json")
 ```
 
-### Step 5: Verification
+**Set task templates directory:**
+```
+get_task_templates_directory_tool()
+set_task_templates_directory_tool(directory="/path/to/sl-unity-tasks/Assets/InfiniteCorridorTask/Configurations")
+```
 
-Verify all configurations are working:
-```python
-get_working_directory_tool()
-get_system_configuration_tool()
-get_google_credentials_tool()  # If configured
+### Phase 6: Verification
+
+**Re-run discovery to confirm hardware:**
+```
+list_cameras()
+list_microcontrollers()
+get_zaber_devices_tool()
+check_mqtt_broker(host="127.0.0.1", port=1883)
+```
+
+**Verify configuration file is valid:**
+Read the configuration file and check for YAML syntax errors.
+
+**Check projects exist:**
+```
+get_projects_tool()
+```
+
+If no projects exist and the user wants to create them, use the `/experiment-design` skill which provides MCP tools
+for creating projects and experiment configurations. Do not create project directories manually.
+
+---
+
+## Next Steps
+
+After completing system configuration, the acquisition system is ready for experiment design and execution.
+
+**Creating experiments:**
+Use the `/experiment-design` skill to create projects and experiment configurations. This skill provides MCP tools
+for selecting task templates, configuring experiment states, and customizing trial parameters.
+
+**Typical workflow sequence:**
+1. `/acquisition-system-setup` - Configure hardware and system (this skill)
+2. `/experiment-design` - Create experiment configurations
+3. `sl-run` CLI - Execute experiments
+
+---
+
+## sl-configure CLI Reference
+
+The `sl-configure` CLI from sl-shared-assets manages configuration files. Use these commands instead of manual file
+operations.
+
+| Command                   | Purpose                                            |
+|---------------------------|----------------------------------------------------|
+| `sl-configure directory`  | Set working directory for configuration storage    |
+| `sl-configure system`     | Create system configuration file (clears existing) |
+| `sl-configure google`     | Set Google credentials file path                   |
+| `sl-configure templates`  | Set task templates directory path                  |
+| `sl-configure project`    | Create project directory structure                 |
+| `sl-configure experiment` | Create experiment from task template               |
+| `sl-configure server`     | Configure remote compute server connection         |
+| `sl-configure mcp`        | Start MCP server for agentic access                |
+
+**Creating a new system configuration:**
+```bash
+sl-configure system -s mesoscope
+```
+
+This command creates a new `mesoscope_system_configuration.yaml` file with default values and removes any existing
+system configuration files. After running, edit the file to set hardware-specific parameters.
+
+---
+
+## Configuration File Reference
+
+### File Location
+
+The system configuration file is located at:
+```
+{working_directory}/configuration/mesoscope_system_configuration.yaml
+```
+
+To find the working directory, use `get_working_directory_tool()`.
+
+### YAML Formatting Rules
+
+When editing the configuration file, follow these formatting rules to maintain compatibility with sl-shared-assets:
+
+| Rule                  | Example                                        |
+|-----------------------|------------------------------------------------|
+| Indent nested fields  | 10 spaces                                      |
+| Document start marker | `---` on first line                            |
+| Document end marker   | `...` on last line                             |
+| Integers              | `500` (no decimal point)                       |
+| Floats                | `15.0333` (include decimal point)              |
+| Strings               | No quotes unless containing special characters |
+| Booleans              | `true` or `false` (lowercase)                  |
+
+### Section Overview
+
+| Section            | Purpose                                            | Discovery Tool             |
+|--------------------|----------------------------------------------------|----------------------------|
+| `filesystem`       | Data storage paths (local, server, NAS, mesoscope) | None (user-provided)       |
+| `sheets`           | Google Sheet IDs for lab records                   | None (user-provided)       |
+| `cameras`          | Camera indices and encoding parameters             | `list_cameras()`           |
+| `microcontrollers` | USB ports and sensor calibration                   | `list_microcontrollers()`  |
+| `assets`           | Zaber motor ports and MQTT settings                | `get_zaber_devices_tool()` |
+
+For detailed parameter documentation, see [MESOSCOPE_REFERENCE.md](MESOSCOPE_REFERENCE.md).
+
+---
+
+## Configuration File Template
+
+Use this template when creating a new configuration file. Replace placeholder values with actual paths and discovered
+hardware values.
+
+```yaml
+---
+name: mesoscope
+filesystem:
+          root_directory: /path/to/local/data
+          server_directory: /mnt/server/data
+          nas_directory: /mnt/nas/backup
+          mesoscope_directory: /mnt/mesoscope/data
+sheets:
+          surgery_sheet_id: ""
+          water_log_sheet_id: ""
+cameras:
+          face_camera_index: 0
+          body_camera_index: 1
+          face_camera_quantization: 20
+          face_camera_preset: 7
+          body_camera_quantization: 20
+          body_camera_preset: 7
+microcontrollers:
+          actor_port: /dev/ttyACM0
+          sensor_port: /dev/ttyACM1
+          encoder_port: /dev/ttyACM2
+          keepalive_interval_ms: 500
+          minimum_brake_strength_g_cm: 43.2047
+          maximum_brake_strength_g_cm: 1152.1246
+          wheel_diameter_cm: 15.0333
+          wheel_encoder_ppr: 8192
+          wheel_encoder_report_cw: false
+          wheel_encoder_report_ccw: true
+          wheel_encoder_delta_threshold_pulse: 15
+          wheel_encoder_polling_delay_us: 500
+          lick_threshold_adc: 600
+          lick_signal_threshold_adc: 300
+          lick_delta_threshold_adc: 300
+          lick_averaging_pool_size: 2
+          torque_baseline_voltage_adc: 2048
+          torque_maximum_voltage_adc: 3443
+          torque_sensor_capacity_g_cm: 720.0779
+          torque_report_cw: true
+          torque_report_ccw: true
+          torque_signal_threshold_adc: 150
+          torque_delta_threshold_adc: 100
+          torque_averaging_pool_size: 4
+          valve_calibration_data:
+                    15000: 1.1
+                    30000: 3.0
+                    45000: 6.25
+                    60000: 10.9
+          sensor_polling_delay_ms: 1
+          screen_trigger_pulse_duration_ms: 500
+          cm_per_unity_unit: 10.0
+assets:
+          headbar_port: /dev/ttyUSB0
+          lickport_port: /dev/ttyUSB1
+          wheel_port: /dev/ttyUSB2
+          unity_ip: 127.0.0.1
+          unity_port: 1883
+...
 ```
 
 ---
 
-## Configuration Sections Overview
+## Quick Reference
 
-Each acquisition system has these configurable sections:
+### Hardware Discovery Commands
 
-| Section           | Purpose                                           |
-|-------------------|---------------------------------------------------|
-| Filesystem        | Directory paths for data storage and network mounts|
-| Google Sheets     | Sheet identifiers for lab records                 |
-| Cameras           | Video camera indices and encoding parameters      |
-| Microcontrollers  | USB ports and hardware calibration parameters     |
-| External Assets   | Motor controllers and communication settings      |
+| Hardware           | MCP Tool                               | What to Look For                   |
+|--------------------|----------------------------------------|------------------------------------|
+| Cameras            | `list_cameras()`                       | Index, resolution, model name      |
+| Microcontrollers   | `list_microcontrollers()`              | Port path, microcontroller ID      |
+| Zaber motors       | `get_zaber_devices_tool()`             | Port path, device name, axis count |
+| MQTT broker        | `check_mqtt_broker("127.0.0.1", 1883)` | Connection success/failure         |
+| Video requirements | `check_runtime_requirements()`         | FFMPEG, GPU, CTI status            |
 
-See the system-specific reference file for detailed parameter documentation including:
-- What each parameter controls in practice
-- Which sl-experiment component uses it
-- Valid ranges and constraints
-- Default values and why they matter
+### Path and Credential Commands
+
+| Setting            | Get Command                           | Set Command                           |
+|--------------------|---------------------------------------|---------------------------------------|
+| Working directory  | `get_working_directory_tool()`        | `set_working_directory_tool(dir)`     |
+| Google credentials | `get_google_credentials_tool()`       | `set_google_credentials_tool(path)`   |
+| Task templates     | `get_task_templates_directory_tool()` | `set_task_templates_directory_tool()` |
+| CTI file           | `get_cti_status()`                    | `set_cti_file(path)`                  |
 
 ---
 
 ## Troubleshooting
 
-| Error                                    | Cause                              | Solution                                  |
-|------------------------------------------|------------------------------------|-------------------------------------------|
-| `Unable to resolve the path`             | Working directory not configured   | Call `set_working_directory_tool()`       |
-| `found 0 files`                          | No system configuration exists     | Call `create_system_configuration_tool()` |
-| `found N files` (N > 1)                  | Multiple configuration files exist | Delete extra files, keep only one         |
-| `Unable to resolve...credentials file`   | Google credentials not set         | Call `set_google_credentials_tool()`      |
+| Error                             | Cause                        | Solution                            |
+|-----------------------------------|------------------------------|-------------------------------------|
+| `Unable to resolve the path`      | Working directory not set    | Use `set_working_directory_tool()`  |
+| `found 0 files`                   | No config file exists        | Use `sl-configure` CLI to create    |
+| `found N files` (N > 1)           | Multiple config files exist  | Use `sl-configure` CLI to clear     |
+| `Unable to resolve...credentials` | Google credentials not set   | Use `set_google_credentials_tool()` |
+| Camera not found at index         | Wrong camera index in config | Run `list_cameras()` and update     |
+| Microcontroller connection failed | Wrong port or disconnected   | Run `list_microcontrollers()`       |
+| Zaber motor not responding        | Wrong port or powered off    | Run `get_zaber_devices_tool()`      |
+| MQTT broker unreachable           | Broker not running           | Start Mosquitto or MQTT broker      |
+| YAML parse error                  | Malformed config file        | Check indentation (10 spaces)       |
