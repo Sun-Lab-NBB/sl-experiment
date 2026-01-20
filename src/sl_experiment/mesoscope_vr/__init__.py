@@ -2,7 +2,7 @@
 system.
 """
 
-from .zaber_bindings import CRCCalculator, discover_zaber_devices
+from .zaber_bindings import CRCCalculator, discover_zaber_devices, get_zaber_devices_info
 from .data_acquisition import (
     experiment_logic,
     maintenance_logic,
@@ -20,6 +20,7 @@ __all__ = [
     "CRCCalculator",
     "discover_zaber_devices",
     "experiment_logic",
+    "get_zaber_devices_info",
     "lick_training_logic",
     "maintenance_logic",
     "migrate_animal_between_projects",
