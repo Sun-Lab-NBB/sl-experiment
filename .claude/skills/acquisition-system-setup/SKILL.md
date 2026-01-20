@@ -17,14 +17,14 @@ workflows.
 
 ## MCP Server Requirements
 
-This skill uses MCP tools from four libraries. You MUST have access to these servers to use this skill effectively.
+This skill uses MCP tools from multiple libraries. Which servers are needed depends on the system's hardware.
 
-| Server                  | CLI Command        | Purpose                                        |
-|-------------------------|--------------------|------------------------------------------------|
-| sl-shared-assets        | `sl-configure mcp` | Working directory, credentials, task templates |
-| sl-experiment           | `sl-get mcp`       | Zaber motor discovery, project listing         |
-| ataraxis-video-system   | `axvs mcp`         | Camera discovery, video requirements check     |
-| ataraxis-comm-interface | `axci-mcp`         | Microcontroller discovery, MQTT broker check   |
+| Server                  | CLI Command        | Purpose                                        | Required For           |
+|-------------------------|--------------------|------------------------------------------------|------------------------|
+| sl-shared-assets        | `sl-configure mcp` | Working directory, credentials, task templates | All systems            |
+| sl-experiment           | `sl-get mcp`       | Zaber motor discovery, project listing         | Systems with Zaber     |
+| ataraxis-video-system   | `axvs mcp`         | Camera discovery, video requirements check     | Systems with cameras   |
+| ataraxis-comm-interface | `axci-mcp`         | Microcontroller discovery, MQTT broker check   | Systems with AMC/MQTT  |
 
 If a required MCP server is unavailable, inform the user which server is needed and the command to start it.
 
@@ -37,25 +37,29 @@ If a required MCP server is unavailable, inform the user which server is needed 
 | `mesoscope` | Two-photon mesoscope with VR behavioral rig | [MESOSCOPE_REFERENCE.md](MESOSCOPE_REFERENCE.md) |
 
 Each system has a reference file documenting all configurable parameters, their purposes, valid ranges, and default
-values.
+values. When working with a specific system, you MUST read that system's reference file for detailed parameter
+documentation.
+
+**Adding new systems:** To add support for a new acquisition system, use the `/adding-acquisition-system` skill which
+guides the creation of configuration classes, CLI integration, and the reference file for this skill.
 
 ---
 
 ## Network Storage Prerequisites
 
-The acquisition system requires network storage locations to be mounted via SMB before configuration. These mounts
+All acquisition systems require network storage locations to be mounted via SMB before configuration. These mounts
 must be configured at the operating system level and are not managed by this skill or MCP tools.
 
-### Required SMB Mounts
+### Required SMB Mounts (All Systems)
 
 | Mount Purpose      | Configuration Field    | Description                                    |
 |--------------------|------------------------|------------------------------------------------|
 | Compute server     | `server_directory`     | Long-term hot storage for processed data       |
 | NAS backup         | `nas_directory`        | Archival/cold storage backup                   |
 
-### Mesoscope-Specific Mounts
+### System-Specific Mounts
 
-For mesoscope systems, an additional mount is required:
+Each system may require additional mounts for its specific hardware. For mesoscope systems:
 
 | Mount Purpose      | Configuration Field    | Description                                    |
 |--------------------|------------------------|------------------------------------------------|
@@ -96,7 +100,7 @@ Use when the user wants to identify connected hardware without modifying configu
 - User wants to verify hardware is accessible before configuration
 - Troubleshooting hardware connectivity issues
 
-**Available discovery tools:**
+**Available discovery tools (use those applicable to your system's hardware):**
 
 | Hardware Type      | MCP Tool                        | Server                  |
 |--------------------|---------------------------------|-------------------------|
@@ -160,7 +164,8 @@ Use when the user wants to confirm the system is properly configured.
 
 ## Complete Setup Workflow
 
-Use this workflow when setting up a new machine or performing full system reconfiguration.
+Use this workflow when setting up a new machine or performing full system reconfiguration. The examples below use the
+mesoscope system. For other systems, adapt the hardware discovery steps based on the system's reference file.
 
 ### Phase 1: Prerequisites
 
@@ -347,8 +352,10 @@ system configuration files. After running, edit the file to set hardware-specifi
 
 The system configuration file is located at:
 ```
-{working_directory}/configuration/mesoscope_system_configuration.yaml
+{working_directory}/configuration/<system_name>_system_configuration.yaml
 ```
+
+For mesoscope: `mesoscope_system_configuration.yaml`
 
 To find the working directory, use `get_working_directory_tool()`.
 
@@ -380,10 +387,10 @@ For detailed parameter documentation, see [MESOSCOPE_REFERENCE.md](MESOSCOPE_REF
 
 ---
 
-## Configuration File Template
+## Configuration File Template (Mesoscope)
 
-Use this template when creating a new configuration file. Replace placeholder values with actual paths and discovered
-hardware values.
+Use this template when creating a new mesoscope configuration file. Replace placeholder values with actual paths and
+discovered hardware values. For other systems, refer to their reference files for the appropriate template structure.
 
 ```yaml
 ---

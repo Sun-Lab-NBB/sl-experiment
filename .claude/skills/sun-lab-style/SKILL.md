@@ -18,7 +18,8 @@ documentation, commits, or skills. You MUST verify your changes against the styl
 
 ## Workflow Selection
 
-Determine what you're modifying and read the appropriate guide:
+**CRITICAL:** You MUST read the appropriate guide before performing any task. The quick reference section below is
+insufficient for compliance. Each guide contains detailed rules and verification checklists that you MUST follow.
 
 | Task                        | Action                                        |
 |-----------------------------|-----------------------------------------------|
@@ -30,6 +31,9 @@ Determine what you're modifying and read the appropriate guide:
 After reading the appropriate guide:
 1. Apply all conventions from that guide
 2. Verify against the guide's checklist before submitting
+
+**Do not skip reading the guide.** The quick reference is only a reminder for frequently used rules, not a substitute
+for the full guide.
 
 ---
 
@@ -44,7 +48,9 @@ After reading the appropriate guide:
 
 ---
 
-## Quick Reference
+## Quick Reference (Not a Substitute for Full Guides)
+
+These are reminders only. You MUST read the full guide for your task before proceeding.
 
 ### Python Code (includes docstrings and inline comments)
 
@@ -61,6 +67,7 @@ After reading the appropriate guide:
 - Start with past tense verb: Added, Fixed, Updated, Refactored, Removed
 - Header line ≤ 72 characters
 - End with a period
+- Multi-line commits: blank line after header, then `-- ` prefixed bullets
 
 ### README Files
 
