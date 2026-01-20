@@ -73,14 +73,15 @@ state to prevent integration errors.
 
 ## Available Skills
 
-| Skill                        | Description                                                                  |
-|------------------------------|------------------------------------------------------------------------------|
-| `/explore-codebase`          | Perform in-depth codebase exploration at session start                       |
-| `/sun-lab-style`             | Apply Sun Lab coding conventions (REQUIRED for all code changes)             |
-| `/camera-interface`          | Guide for using ataraxis-video-system to implement camera functionality      |
-| `/acquisition-system-setup`  | Configure data acquisition systems (uses MCP tools from sl-shared-assets)    |
-| `/experiment-design`         | Interactive guidance for building experiment configurations (uses MCP tools) |
-| `/adding-acquisition-system` | Guide for adding support for new acquisition systems to the framework        |
+| Skill                           | Description                                                                  |
+|---------------------------------|------------------------------------------------------------------------------|
+| `/explore-codebase`             | Perform in-depth codebase exploration at session start                       |
+| `/sun-lab-style`                | Apply Sun Lab coding conventions (REQUIRED for all code changes)             |
+| `/camera-interface`             | Guide for using ataraxis-video-system to implement camera hardware           |
+| `/acquisition-system-setup`     | Configure data acquisition systems (uses MCP tools from sl-shared-assets)    |
+| `/experiment-design`            | Interactive guidance for building experiment configurations (uses MCP tools) |
+| `/adding-acquisition-system`    | Guide for adding support for new acquisition systems to the framework        |
+| `/modifying-mesoscope-vr-system`| Guide for extending mesoscope-vr with new hardware components                |
 
 ## Project Context
 
@@ -120,7 +121,16 @@ Use the `/adding-acquisition-system` skill for comprehensive guidance. The skill
 2. Implementing runtime logic and CLI in sl-experiment (Phase 2)
 3. Updating the acquisition-system-setup skill with system documentation (Phase 3)
 
-**Adding hardware bindings:**
+**Adding hardware to mesoscope-vr:**
+
+Use the `/modifying-mesoscope-vr-system` skill for comprehensive guidance on:
+1. Adding configuration dataclasses in sl-shared-assets
+2. Implementing binding classes in sl-experiment
+3. Integrating with data_acquisition.py lifecycle
+
+For low-level camera hardware implementation, use the `/camera-interface` skill.
+
+**Adding hardware bindings (general):**
 
 1. For shared hardware (microcontrollers), add `ModuleInterface` subclasses to `shared_components/module_interfaces.py`
 2. For system-specific hardware, add wrapper classes to the system's `binding_classes.py`
