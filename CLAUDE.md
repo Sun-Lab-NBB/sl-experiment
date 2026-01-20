@@ -20,6 +20,26 @@ compliance. The style guide covers:
 - Git commit messages (format, verb tense, punctuation)
 - Claude skill files (frontmatter, formatting, voice)
 
+## Acquisition System Configuration
+
+When users want to interact with the acquisition system hardware or configuration, you MUST invoke the
+`/acquisition-system-setup` skill. This skill provides MCP tools for hardware discovery and guides configuration file
+editing.
+
+**Invoke this skill when users want to:**
+- Discover hardware (cameras, microcontrollers, Zaber motors, MQTT broker)
+- Set up or configure an acquisition system
+- Change system parameters (ports, calibration values, thresholds)
+- Verify system configuration before running experiments
+- Troubleshoot hardware connectivity or configuration issues
+
+**Example triggers:**
+- "What cameras are connected?"
+- "Set up the mesoscope system"
+- "Change the lick threshold"
+- "Check if the MQTT broker is running"
+- "Verify my system configuration"
+
 ## Cross-Referenced Library Verification
 
 Sun Lab projects often depend on other `ataraxis-*` or `sl-*` libraries. These libraries may be stored locally in the
