@@ -12,12 +12,12 @@ meaningful defaults.
 
 ### root_directory
 
-| Property    | Value                                              |
-|-------------|----------------------------------------------------|
-| Type        | `str` (path)                                       |
-| Default     | `""` (empty - must be configured)                  |
-| Used by     | `MesoscopeData` class in sl-experiment             |
-| Update tool | `update_filesystem_configuration_tool()`           |
+| Property       | Value                                              |
+|----------------|----------------------------------------------------|
+| Type           | `str` (path)                                       |
+| Default        | `""` (empty - must be configured)                  |
+| Used by        | `MesoscopeData` class in sl-experiment             |
+| Discovery tool | None (user-provided)                               |
 
 **What it controls:**
 - Root storage location for all project data on the VRPC (Virtual Reality PC)
@@ -26,19 +26,18 @@ meaningful defaults.
 
 **Constraints:**
 - Must be a valid, writable filesystem path
-- Should be on fast local storage (NVME or SSD preferred)
 - Directory is auto-created if it does not exist
 
 ---
 
 ### server_directory
 
-| Property    | Value                                              |
-|-------------|----------------------------------------------------|
-| Type        | `str` (path)                                       |
-| Default     | `""` (empty - must be configured)                  |
-| Used by     | `_push_data()` in data_preprocessing module        |
-| Update tool | `update_filesystem_configuration_tool()`           |
+| Property       | Value                                              |
+|----------------|----------------------------------------------------|
+| Type           | `str` (path)                                       |
+| Default        | `""` (empty - must be configured)                  |
+| Used by        | `_push_data()` in data_preprocessing module        |
+| Discovery tool | None (user-provided)                               |
 
 **What it controls:**
 - SMB mount point to the Cornell BioHPC server's shared directory
@@ -54,12 +53,12 @@ meaningful defaults.
 
 ### nas_directory
 
-| Property    | Value                                              |
-|-------------|----------------------------------------------------|
-| Type        | `str` (path)                                       |
-| Default     | `""` (empty - must be configured)                  |
-| Used by     | `_push_data()` in data_preprocessing module        |
-| Update tool | `update_filesystem_configuration_tool()`           |
+| Property       | Value                                              |
+|----------------|----------------------------------------------------|
+| Type           | `str` (path)                                       |
+| Default        | `""` (empty - must be configured)                  |
+| Used by        | `_push_data()` in data_preprocessing module        |
+| Discovery tool | None (user-provided)                               |
 
 **What it controls:**
 - SMB mount point to Synology NAS backup storage
@@ -76,12 +75,12 @@ meaningful defaults.
 
 ### mesoscope_directory
 
-| Property    | Value                                              |
-|-------------|----------------------------------------------------|
-| Type        | `str` (path)                                       |
-| Default     | `""` (empty - must be configured)                  |
-| Used by     | `_ScanImagePCData` class in sl-experiment          |
-| Update tool | `update_filesystem_configuration_tool()`           |
+| Property       | Value                                              |
+|----------------|----------------------------------------------------|
+| Type           | `str` (path)                                       |
+| Default        | `""` (empty - must be configured)                  |
+| Used by        | `_ScanImagePCData` class in sl-experiment          |
+| Discovery tool | None (user-provided)                               |
 
 **What it controls:**
 - Root directory where ScanImagePC (MATLAB) saves raw mesoscope frame stacks (.TIFF files)
@@ -102,12 +101,12 @@ Google Sheet identifiers for lab records. Used during data preprocessing (post-s
 
 ### surgery_sheet_id
 
-| Property    | Value                                              |
-|-------------|----------------------------------------------------|
-| Type        | `str`                                              |
-| Default     | `""` (empty - must be configured)                  |
-| Used by     | `_preprocess_google_sheet_data()` via `SurgeryLog` |
-| Update tool | `update_sheets_configuration_tool()`               |
+| Property       | Value                                              |
+|----------------|----------------------------------------------------|
+| Type           | `str`                                              |
+| Default        | `""` (empty - must be configured)                  |
+| Used by        | `_preprocess_google_sheet_data()` via `SurgeryLog` |
+| Discovery tool | None (user-provided)                               |
 
 **What it controls:**
 - Google Sheets ID for the surgery log containing surgical intervention records
@@ -124,12 +123,12 @@ Google Sheet identifiers for lab records. Used during data preprocessing (post-s
 
 ### water_log_sheet_id
 
-| Property    | Value                                              |
-|-------------|----------------------------------------------------|
-| Type        | `str`                                              |
-| Default     | `""` (empty - must be configured)                  |
-| Used by     | `_preprocess_google_sheet_data()` via `WaterLog`   |
-| Update tool | `update_sheets_configuration_tool()`               |
+| Property       | Value                                              |
+|----------------|----------------------------------------------------|
+| Type           | `str`                                              |
+| Default        | `""` (empty - must be configured)                  |
+| Used by        | `_preprocess_google_sheet_data()` via `WaterLog`   |
+| Discovery tool | None (user-provided)                               |
 
 **What it controls:**
 - Google Sheets ID for the water restriction log
@@ -150,13 +149,13 @@ Video camera indices and H.265 encoding parameters. Cameras are managed via the 
 
 ### face_camera_index
 
-| Property    | Value                                              |
-|-------------|----------------------------------------------------|
-| Type        | `int`                                              |
-| Default     | `0`                                                |
-| Valid range | 0 to N (number of connected cameras - 1)           |
-| Used by     | `VideoSystems` class via `VideoSystem` constructor |
-| Update tool | `update_cameras_configuration_tool()`              |
+| Property       | Value                                              |
+|----------------|----------------------------------------------------|
+| Type           | `int`                                              |
+| Default        | `0`                                                |
+| Valid range    | 0 to N (number of connected cameras - 1)           |
+| Used by        | `VideoSystems` class via `VideoSystem` constructor |
+| Discovery tool | `list_cameras()` from ataraxis-video-system        |
 
 **What it controls:**
 - Index of the face camera in the Harvester camera interface list
@@ -173,13 +172,13 @@ Video camera indices and H.265 encoding parameters. Cameras are managed via the 
 
 ### body_camera_index
 
-| Property    | Value                                              |
-|-------------|----------------------------------------------------|
-| Type        | `int`                                              |
-| Default     | `1`                                                |
-| Valid range | 0 to N (number of connected cameras - 1)           |
-| Used by     | `VideoSystems` class via `VideoSystem` constructor |
-| Update tool | `update_cameras_configuration_tool()`              |
+| Property       | Value                                              |
+|----------------|----------------------------------------------------|
+| Type           | `int`                                              |
+| Default        | `1`                                                |
+| Valid range    | 0 to N (number of connected cameras - 1)           |
+| Used by        | `VideoSystems` class via `VideoSystem` constructor |
+| Discovery tool | `list_cameras()` from ataraxis-video-system        |
 
 **What it controls:**
 - Index of the body camera in the Harvester camera interface
@@ -193,13 +192,13 @@ Video camera indices and H.265 encoding parameters. Cameras are managed via the 
 
 ### face_camera_quantization
 
-| Property    | Value                                              |
-|-------------|----------------------------------------------------|
-| Type        | `int`                                              |
-| Default     | `20`                                               |
-| Valid range | 0-51 (H.265 quantization parameter scale)          |
-| Used by     | `VideoSystem` via ataraxis-video-system            |
-| Update tool | `update_cameras_configuration_tool()`              |
+| Property       | Value                                              |
+|----------------|----------------------------------------------------|
+| Type           | `int`                                              |
+| Default        | `20`                                               |
+| Valid range    | 0-51 (H.265 quantization parameter scale)          |
+| Used by        | `VideoSystem` via ataraxis-video-system            |
+| Discovery tool | None (user preference)                             |
 
 **What it controls:**
 - H.265 video encoding quantization parameter for face camera
@@ -215,13 +214,13 @@ Video camera indices and H.265 encoding parameters. Cameras are managed via the 
 
 ### face_camera_preset
 
-| Property    | Value                                              |
-|-------------|----------------------------------------------------|
-| Type        | `int`                                              |
-| Default     | `7`                                                |
-| Valid range | 0-9 (H.265 speed preset values)                    |
-| Used by     | `VideoSystem` via `EncoderSpeedPresets` enum       |
-| Update tool | `update_cameras_configuration_tool()`              |
+| Property       | Value                                              |
+|----------------|----------------------------------------------------|
+| Type           | `int`                                              |
+| Default        | `7`                                                |
+| Valid range    | 0-9 (H.265 speed preset values)                    |
+| Used by        | `VideoSystem` via `EncoderSpeedPresets` enum       |
+| Discovery tool | None (user preference)                             |
 
 **What it controls:**
 - H.265 encoding speed preset for face camera
@@ -246,13 +245,13 @@ USB ports and hardware calibration parameters for the three microcontroller boar
 
 ### USB Port Assignments
 
-| Parameter      | Default          | Controller Function                              |
-|----------------|------------------|--------------------------------------------------|
-| `actor_port`   | `/dev/ttyACM0`   | Controls outputs: valve, brake, gas puff, screens|
-| `sensor_port`  | `/dev/ttyACM1`   | Monitors inputs: lick, torque, mesoscope TTL     |
-| `encoder_port` | `/dev/ttyACM2`   | High-precision wheel encoder with HW interrupts  |
+| Parameter      | Default          | Controller Function                               |
+|----------------|------------------|---------------------------------------------------|
+| `actor_port`   | `/dev/ttyACM0`   | Controls outputs: valve, brake, gas puff, screens |
+| `sensor_port`  | `/dev/ttyACM1`   | Monitors inputs: lick, torque, mesoscope TTL      |
+| `encoder_port` | `/dev/ttyACM2`   | High-precision wheel encoder with HW interrupts   |
 
-**Update tool:** `update_microcontroller_ports_tool()`
+**Discovery tool:** `list_microcontrollers()` from ataraxis-communication-interface
 
 **Constraints:**
 - Valid Linux device paths: `/dev/ttyACM0`, `/dev/ttyACM1`, `/dev/ttyACM2`, etc.
@@ -263,13 +262,13 @@ USB ports and hardware calibration parameters for the three microcontroller boar
 
 ### keepalive_interval_ms
 
-| Property    | Value                                              |
-|-------------|----------------------------------------------------|
-| Type        | `int`                                              |
-| Default     | `500`                                              |
-| Valid range | 100-5000 ms                                        |
-| Used by     | All `MicroControllerInterface` instances           |
-| Update tool | `update_timing_configuration_tool()`               |
+| Property       | Value                                              |
+|----------------|----------------------------------------------------|
+| Type           | `int`                                              |
+| Default        | `500`                                              |
+| Valid range    | 100-5000 ms                                        |
+| Used by        | All `MicroControllerInterface` instances           |
+| Discovery tool | None (user preference)                             |
 
 **What it controls:**
 - How frequently microcontrollers must send keepalive messages to confirm responsiveness
@@ -283,10 +282,12 @@ USB ports and hardware calibration parameters for the three microcontroller boar
 
 ### Brake Calibration
 
-| Parameter                     | Type    | Default   | Update Tool                        |
-|-------------------------------|---------|-----------|------------------------------------|
-| `minimum_brake_strength_g_cm` | `float` | `43.2047` | `update_brake_configuration_tool()`|
-| `maximum_brake_strength_g_cm` | `float` | `1152.1246`| `update_brake_configuration_tool()`|
+| Parameter                     | Type    | Default     |
+|-------------------------------|---------|-------------|
+| `minimum_brake_strength_g_cm` | `float` | `43.2047`   |
+| `maximum_brake_strength_g_cm` | `float` | `1152.1246` |
+
+**Discovery tool:** None (hardware-specific calibration required)
 
 **What they control:**
 - Calibration curve for electromagnetic particle brake on running wheel
@@ -303,16 +304,16 @@ USB ports and hardware calibration parameters for the three microcontroller boar
 
 ### Wheel Configuration
 
-| Parameter                             | Type    | Default | Valid Range       |
-|---------------------------------------|---------|---------|-------------------|
-| `wheel_diameter_cm`                   | `float` | `15.0333`| 10-25 cm         |
-| `wheel_encoder_ppr`                   | `int`   | `8192`  | 256-8192          |
-| `wheel_encoder_report_cw`             | `bool`  | `False` | true/false        |
-| `wheel_encoder_report_ccw`            | `bool`  | `True`  | true/false        |
-| `wheel_encoder_delta_threshold_pulse` | `int`   | `15`    | 0-255 pulses      |
-| `wheel_encoder_polling_delay_us`      | `int`   | `500`   | 100-10000 µs      |
+| Parameter                             | Type    | Default   | Valid Range  |
+|---------------------------------------|---------|-----------|--------------|
+| `wheel_diameter_cm`                   | `float` | `15.0333` | 10-25 cm     |
+| `wheel_encoder_ppr`                   | `int`   | `8192`    | 256-8192     |
+| `wheel_encoder_report_cw`             | `bool`  | `false`   | true/false   |
+| `wheel_encoder_report_ccw`            | `bool`  | `true`    | true/false   |
+| `wheel_encoder_delta_threshold_pulse` | `int`   | `15`      | 0-255 pulses |
+| `wheel_encoder_polling_delay_us`      | `int`   | `500`     | 100-10000 us |
 
-**Update tool:** `update_wheel_configuration_tool()`
+**Discovery tool:** None (hardware-specific)
 
 **What they control:**
 - `wheel_diameter_cm`: Physical wheel diameter, converts encoder pulses to distance traveled
@@ -327,14 +328,14 @@ USB ports and hardware calibration parameters for the three microcontroller boar
 
 ### Lick Sensor Calibration
 
-| Parameter                   | Type  | Default | Valid Range | Description                     |
-|-----------------------------|-------|---------|-------------|---------------------------------|
-| `lick_threshold_adc`        | `int` | `600`   | 0-4095      | ADC threshold for tongue contact|
-| `lick_signal_threshold_adc` | `int` | `300`   | 0-4095      | Minimum ADC to report (noise floor)|
-| `lick_delta_threshold_adc`  | `int` | `300`   | 0-4095      | Minimum change between readings |
-| `lick_averaging_pool_size`  | `int` | `2`     | 1-4         | Number of readings to average   |
+| Parameter                   | Type  | Default | Valid Range | Description                         |
+|-----------------------------|-------|---------|-------------|-------------------------------------|
+| `lick_threshold_adc`        | `int` | `600`   | 0-4095      | ADC threshold for tongue contact    |
+| `lick_signal_threshold_adc` | `int` | `300`   | 0-4095      | Minimum ADC to report (noise floor) |
+| `lick_delta_threshold_adc`  | `int` | `300`   | 0-4095      | Minimum change between readings     |
+| `lick_averaging_pool_size`  | `int` | `2`     | 1-4         | Number of readings to average       |
 
-**Update tool:** `update_lick_sensor_configuration_tool()`
+**Discovery tool:** None (hardware-specific calibration)
 
 **What they control:**
 - Thresholds and filtering for capacitive lick sensor on water spout
@@ -352,18 +353,18 @@ USB ports and hardware calibration parameters for the three microcontroller boar
 
 ### Torque Sensor Calibration
 
-| Parameter                     | Type    | Default   | Valid Range | Description                      |
-|-------------------------------|---------|-----------|-------------|----------------------------------|
-| `torque_baseline_voltage_adc` | `int`   | `2048`    | 0-4095      | ADC reading at zero torque       |
-| `torque_maximum_voltage_adc`  | `int`   | `3443`    | 0-4095      | ADC reading at max torque        |
-| `torque_sensor_capacity_g_cm` | `float` | `720.0779`| 500-1000    | Maximum measurable torque (g·cm) |
-| `torque_report_cw`            | `bool`  | `True`    | true/false  | Report clockwise torque          |
-| `torque_report_ccw`           | `bool`  | `True`    | true/false  | Report counter-clockwise torque  |
-| `torque_signal_threshold_adc` | `int`   | `150`     | 0-4095      | Minimum ADC to report            |
-| `torque_delta_threshold_adc`  | `int`   | `100`     | 0-4095      | Minimum change between readings  |
-| `torque_averaging_pool_size`  | `int`   | `4`       | 2-8         | Number of readings to average    |
+| Parameter                     | Type    | Default    | Valid Range | Description                      |
+|-------------------------------|---------|------------|-------------|----------------------------------|
+| `torque_baseline_voltage_adc` | `int`   | `2048`     | 0-4095      | ADC reading at zero torque       |
+| `torque_maximum_voltage_adc`  | `int`   | `3443`     | 0-4095      | ADC reading at max torque        |
+| `torque_sensor_capacity_g_cm` | `float` | `720.0779` | 500-1000    | Maximum measurable torque (g·cm) |
+| `torque_report_cw`            | `bool`  | `true`     | true/false  | Report clockwise torque          |
+| `torque_report_ccw`           | `bool`  | `true`     | true/false  | Report counter-clockwise torque  |
+| `torque_signal_threshold_adc` | `int`   | `150`      | 0-4095      | Minimum ADC to report            |
+| `torque_delta_threshold_adc`  | `int`   | `100`      | 0-4095      | Minimum change between readings  |
+| `torque_averaging_pool_size`  | `int`   | `4`        | 2-8         | Number of readings to average    |
 
-**Update tool:** `update_torque_sensor_configuration_tool()`
+**Discovery tool:** None (hardware-specific calibration)
 
 **What they control:**
 - Calibration and filtering for wheel torque sensor
@@ -380,51 +381,59 @@ USB ports and hardware calibration parameters for the three microcontroller boar
 
 ### Valve Calibration
 
-| Property    | Value                                              |
-|-------------|----------------------------------------------------|
-| Type        | JSON string of `[[time_us, volume_ul], ...]` pairs |
-| Default     | `[[15000, 1.1], [30000, 3.0], [45000, 6.25], [60000, 10.9]]` |
-| Used by     | `ValveInterface` class                             |
-| Update tool | `update_valve_calibration_tool()`                  |
+| Property       | Value                                                |
+|----------------|------------------------------------------------------|
+| Type           | Dict mapping `int` (time_us) to `float` (volume_ul)  |
+| Default        | `{15000: 1.1, 30000: 3.0, 45000: 6.25, 60000: 10.9}` |
+| Used by        | `ValveInterface` class                               |
+| Discovery tool | None (hardware-specific calibration)                 |
 
 **What it controls:**
 - Water delivery solenoid valve calibration curve
 - Maps valve open time (microseconds) to water volume delivered (microliters)
 - Critical for precise reward delivery during training
 
-**Format:**
-```json
-[[15000, 1.1], [30000, 3.0], [45000, 6.25], [60000, 10.9]]
+**YAML Format:**
+```yaml
+valve_calibration_data:
+          15000: 1.1
+          30000: 3.0
+          45000: 6.25
+          60000: 10.9
 ```
-Each pair: `[open_time_microseconds, water_volume_microliters]`
+
+Each entry: `open_time_microseconds: water_volume_microliters`
 
 **Constraints:**
 - Minimum 2 calibration points (for linear interpolation)
 - Points should be sorted by time (increasing)
-- Time range: typically 10000-60000 µs
-- Volume range: typically 0.5-15 µL
+- Time range: typically 10000-60000 us
+- Volume range: typically 0.5-15 uL
 
 **Calibration procedure:**
 1. Collect water dispensed at multiple valve open times
-2. Weigh water to determine volume (1 mg ≈ 1 µL)
-3. Enter calibration points as JSON array
+2. Weigh water to determine volume (1 mg = 1 uL)
+3. Enter calibration points in YAML format
 
 ---
 
 ### Timing Configuration
 
-| Parameter                          | Type    | Default | Valid Range | Description                          |
-|------------------------------------|---------|---------|-------------|--------------------------------------|
-| `sensor_polling_delay_ms`          | `int`   | `1`     | 1-10 ms     | Time between sensor readouts         |
-| `screen_trigger_pulse_duration_ms` | `int`   | `500`   | 100-1000 ms | TTL pulse width for screen toggle    |
-| `cm_per_unity_unit`                | `float` | `10.0`  | 5-50 cm     | Real cm per Unity distance unit      |
+| Parameter                             | Type    | Default | Valid Range | Description                         |
+|---------------------------------------|---------|---------|-------------|-------------------------------------|
+| `sensor_polling_delay_ms`             | `int`   | `1`     | 1-10 ms     | Time between sensor readouts        |
+| `screen_trigger_pulse_duration_ms`    | `int`   | `500`   | 100-1000 ms | TTL pulse width for screen toggle   |
+| `cm_per_unity_unit`                   | `float` | `10.0`  | 5-50 cm     | Real cm per Unity distance unit     |
+| `mesoscope_frame_averaging_pool_size` | `int`   | `0`     | 0-4         | TTL signal averaging for frame sync |
 
-**Update tool:** `update_timing_configuration_tool()`
+**Discovery tool:** None (user preference / VR configuration)
 
 **What they control:**
 - `sensor_polling_delay_ms`: Affects temporal resolution of lick, torque, and TTL sensors
 - `screen_trigger_pulse_duration_ms`: Duration of TTL pulse to toggle VR screen power
 - `cm_per_unity_unit`: Conversion factor for synchronizing VR corridor with physical space
+- `mesoscope_frame_averaging_pool_size`: Number of digital pin readouts to average when determining the logic level
+  of the incoming TTL signal from the mesoscope at frame acquisition onset. Set to 0 to disable averaging.
 
 ---
 
@@ -440,7 +449,7 @@ Zaber motor controllers and MQTT broker settings.
 | `lickport_port` | `/dev/ttyUSB1`   | Lickport motors (Z, Y, X axes)           |
 | `wheel_port`    | `/dev/ttyUSB2`   | Wheel motor (X-axis horizontal position) |
 
-**Update tool:** `update_external_assets_configuration_tool()`
+**Discovery tool:** `get_zaber_devices_tool()` from sl-experiment
 
 **What they control:**
 - Serial port connections to three independent Zaber motor controller groups
@@ -467,14 +476,18 @@ Zaber motor controllers and MQTT broker settings.
 | `unity_ip`   | `str` | `"127.0.0.1"` | MQTT broker IP address         |
 | `unity_port` | `int` | `1883`        | MQTT broker port number        |
 
-**Update tool:** `update_external_assets_configuration_tool()`
+**Discovery tool:** `check_mqtt_broker(host, port)` from ataraxis-communication-interface
 
-**Current status:** These parameters are **not currently used** in sl-experiment. The MQTT communication is
-instantiated with hardcoded default values. These configuration fields exist for future use or external systems.
+**Used by:** `MQTTCommunication` in data_acquisition module for Unity game engine communication.
 
-**Intended use:**
-- IP address and port of MQTT broker for Unity game engine communication
-- Enables bidirectional messaging between VRPC and Unity PC
+**What they control:**
+- `unity_ip`: IP address of the MQTT broker for VR communication
+- `unity_port`: Port number of the MQTT broker
+
+**Constraints:**
+- The MQTT broker (typically Mosquitto) must be running at the specified address before starting experiments
+- For local Unity instances, use the default `127.0.0.1:1883`
+- For remote Unity PCs, configure the appropriate network address
 
 **MQTT topics used by sl-experiment:**
 - `CUE_SEQUENCE`: Wall cue sequence from VR
@@ -504,33 +517,35 @@ These parameters have empty defaults and must be configured before system use:
 
 ### Should Verify (Hardware-Dependent)
 
-These parameters have defaults but should be verified for your specific hardware:
+These parameters have defaults but should be verified for your specific hardware using MCP discovery tools:
 
-| Parameter                     | Section          | Why Verify                            |
-|-------------------------------|------------------|---------------------------------------|
-| `face_camera_index`           | Cameras          | USB enumeration order varies          |
-| `body_camera_index`           | Cameras          | USB enumeration order varies          |
-| `actor_port`                  | Microcontrollers | USB enumeration order varies          |
-| `sensor_port`                 | Microcontrollers | USB enumeration order varies          |
-| `encoder_port`                | Microcontrollers | USB enumeration order varies          |
-| `headbar_port`                | External Assets  | USB enumeration order varies          |
-| `lickport_port`               | External Assets  | USB enumeration order varies          |
-| `wheel_port`                  | External Assets  | USB enumeration order varies          |
-| `valve_calibration_data`      | Microcontrollers | Valve-specific calibration required   |
-| `minimum_brake_strength_g_cm` | Microcontrollers | Brake-specific calibration required   |
-| `maximum_brake_strength_g_cm` | Microcontrollers | Brake-specific calibration required   |
+| Parameter                     | Section          | Discovery Tool                   |
+|-------------------------------|------------------|----------------------------------|
+| `face_camera_index`           | Cameras          | `list_cameras()`                 |
+| `body_camera_index`           | Cameras          | `list_cameras()`                 |
+| `actor_port`                  | Microcontrollers | `list_microcontrollers()`        |
+| `sensor_port`                 | Microcontrollers | `list_microcontrollers()`        |
+| `encoder_port`                | Microcontrollers | `list_microcontrollers()`        |
+| `headbar_port`                | External Assets  | `get_zaber_devices_tool()`       |
+| `lickport_port`               | External Assets  | `get_zaber_devices_tool()`       |
+| `wheel_port`                  | External Assets  | `get_zaber_devices_tool()`       |
+| `valve_calibration_data`      | Microcontrollers | None (hardware calibration)      |
+| `minimum_brake_strength_g_cm` | Microcontrollers | None (hardware calibration)      |
+| `maximum_brake_strength_g_cm` | Microcontrollers | None (hardware calibration)      |
 
 ### Can Use Defaults (Typically Unchanged)
 
 These parameters have sensible defaults that work for most setups:
 
-| Parameter                   | Section          | Default | Notes                         |
-|-----------------------------|------------------|---------|-------------------------------|
-| `face_camera_quantization`  | Cameras          | 20      | Good quality/size balance     |
-| `face_camera_preset`        | Cameras          | 7       | Good encoding efficiency      |
-| `keepalive_interval_ms`     | Microcontrollers | 500     | Responsive failure detection  |
-| `wheel_diameter_cm`         | Microcontrollers | 15.03   | Standard mouse wheel          |
-| `wheel_encoder_ppr`         | Microcontrollers | 8192    | High-resolution encoder       |
-| `lick_threshold_adc`        | Microcontrollers | 600     | Typical lick detection        |
-| `sensor_polling_delay_ms`   | Microcontrollers | 1       | 1 kHz sampling rate           |
-| `cm_per_unity_unit`         | Microcontrollers | 10.0    | Standard VR scaling           |
+| Parameter                   | Section          | Default  | Notes                         |
+|-----------------------------|------------------|----------|-------------------------------|
+| `face_camera_quantization`  | Cameras          | `20`     | Good quality/size balance     |
+| `face_camera_preset`        | Cameras          | `7`      | Good encoding efficiency      |
+| `body_camera_quantization`  | Cameras          | `20`     | Good quality/size balance     |
+| `body_camera_preset`        | Cameras          | `7`      | Good encoding efficiency      |
+| `keepalive_interval_ms`     | Microcontrollers | `500`    | Responsive failure detection  |
+| `wheel_diameter_cm`         | Microcontrollers | `15.03`  | Standard mouse wheel          |
+| `wheel_encoder_ppr`         | Microcontrollers | `8192`   | High-resolution encoder       |
+| `lick_threshold_adc`        | Microcontrollers | `600`    | Typical lick detection        |
+| `sensor_polling_delay_ms`   | Microcontrollers | `1`      | 1 kHz sampling rate           |
+| `cm_per_unity_unit`         | Microcontrollers | `10.0`   | Standard VR scaling           |

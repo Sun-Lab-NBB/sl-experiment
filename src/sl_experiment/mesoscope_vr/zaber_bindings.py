@@ -167,6 +167,22 @@ def discover_zaber_devices() -> None:
     print(formatted_info)
 
 
+def get_zaber_devices_info() -> str:
+    """Scans all available serial ports for Zaber devices and returns formatted device information.
+
+    Returns:
+        A formatted table string containing port, device, and axis information for all discovered Zaber devices.
+        Ports with connection errors are listed as having "No Devices".
+
+    Notes:
+        This function is designed for programmatic access to Zaber device information, such as from MCP tools.
+        Connection errors encountered during scanning are logged at DEBUG level and do not interrupt
+        the discovery process.
+    """
+    port_info_list = _scan_active_ports()
+    return _format_device_info(port_info_list=port_info_list)
+
+
 class CRCCalculator:
     """Exposes methods for calculating CRC32-XFER checksums for ASCII strings.
 

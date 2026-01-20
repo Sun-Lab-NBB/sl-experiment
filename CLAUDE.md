@@ -10,15 +10,39 @@ This ensures you:
 - Follow existing patterns and conventions
 - Don't introduce inconsistencies or break integrations
 
-## Code Contributions and Review
+## Style Guide Requirements
 
-Before writing, modifying, or reviewing any code, you MUST invoke the `/sun-lab-style` skill to load the Sun Lab
-coding conventions. All code contributions must strictly follow these conventions and all code reviews must check for
-compliance. The style guide covers:
-- Python code (docstrings, type annotations, naming, error handling)
-- README files (structure, voice, tense)
-- Git commit messages (format, verb tense, punctuation)
-- Claude skill files (frontmatter, formatting, voice)
+You MUST invoke `/sun-lab-style` and read the appropriate guide before performing ANY of the following tasks:
+
+| Task                              | Guide to Read      |
+|-----------------------------------|--------------------|
+| Writing or modifying Python code  | PYTHON_STYLE.md    |
+| Writing or modifying README files | README_STYLE.md    |
+| Writing git commit messages       | COMMIT_STYLE.md    |
+| Writing or modifying skill files  | SKILL_STYLE.md     |
+
+This is non-negotiable. The skill contains verification checklists that you MUST complete before submitting any work.
+Failure to read the appropriate guide results in style violations.
+
+## Acquisition System Configuration
+
+When users want to interact with the acquisition system hardware or configuration, you MUST invoke the
+`/acquisition-system-setup` skill. This skill provides MCP tools for hardware discovery and guides configuration file
+editing.
+
+**Invoke this skill when users want to:**
+- Discover hardware (cameras, microcontrollers, Zaber motors, MQTT broker)
+- Set up or configure an acquisition system
+- Change system parameters (ports, calibration values, thresholds)
+- Verify system configuration before running experiments
+- Troubleshoot hardware connectivity or configuration issues
+
+**Example triggers:**
+- "What cameras are connected?"
+- "Set up the mesoscope system"
+- "Change the lick threshold"
+- "Check if the MQTT broker is running"
+- "Verify my system configuration"
 
 ## Cross-Referenced Library Verification
 
@@ -49,13 +73,14 @@ state to prevent integration errors.
 
 ## Available Skills
 
-| Skill                      | Description                                                                            |
-|----------------------------|----------------------------------------------------------------------------------------|
-| `/explore-codebase`        | Perform in-depth codebase exploration at session start                                 |
-| `/sun-lab-style`           | Apply Sun Lab coding conventions (REQUIRED for all code changes)                       |
-| `/camera-interface`        | Guide for using ataraxis-video-system to implement camera functionality                |
-| `/acquisition-system-setup`| Configure data acquisition systems (uses MCP tools from sl-shared-assets)              |
-| `/experiment-design`       | Interactive guidance for building experiment configurations (uses MCP tools)           |
+| Skill                        | Description                                                                  |
+|------------------------------|------------------------------------------------------------------------------|
+| `/explore-codebase`          | Perform in-depth codebase exploration at session start                       |
+| `/sun-lab-style`             | Apply Sun Lab coding conventions (REQUIRED for all code changes)             |
+| `/camera-interface`          | Guide for using ataraxis-video-system to implement camera functionality      |
+| `/acquisition-system-setup`  | Configure data acquisition systems (uses MCP tools from sl-shared-assets)    |
+| `/experiment-design`         | Interactive guidance for building experiment configurations (uses MCP tools) |
+| `/adding-acquisition-system` | Guide for adding support for new acquisition systems to the framework        |
 
 ## Project Context
 
@@ -90,15 +115,10 @@ which combines brain imaging with virtual reality behavioral tasks.
 
 **Adding a new acquisition system:**
 
-1. Create a new package under `src/sl_experiment/` (e.g., `src/sl_experiment/new_system/`)
-2. Follow the `mesoscope_vr` structure:
-   - `__init__.py` - Export logic functions (e.g., `experiment_logic`, `maintenance_logic`)
-   - `binding_classes.py` - Hardware wrapper classes managing device lifecycles
-   - `data_acquisition.py` - Runtime logic for sessions
-   - `data_preprocessing.py` - Post-session data processing
-   - Additional modules as needed (UI, tools, visualizers)
-3. Define system configuration in `sl-shared-assets` before implementation (see below)
-4. Update CLI modules in `command_line_interfaces/` to include new system commands
+Use the `/adding-acquisition-system` skill for comprehensive guidance. The skill covers:
+1. Creating configuration dataclasses in sl-shared-assets (Phase 1)
+2. Implementing runtime logic and CLI in sl-experiment (Phase 2)
+3. Updating the acquisition-system-setup skill with system documentation (Phase 3)
 
 **Adding hardware bindings:**
 
@@ -116,17 +136,11 @@ which combines brain imaging with virtual reality behavioral tasks.
 
 **Modifying sl-shared-assets (configuration dataclasses):**
 
-Changes to system configuration require updates in `sl-shared-assets` (`../sl-shared-assets/`):
-
-1. For new acquisition systems, create a configuration module in `src/sl_shared_assets/configuration/`
-   - Define system-specific dataclasses (cameras, microcontrollers, external assets, filesystem paths)
-   - Follow `mesoscope_configuration.py` as a reference for structure and patterns
-   - Add exports to `configuration/__init__.py` and the top-level `__init__.py`
-2. For experiment configuration changes, modify `experiment_configuration.py` (trial types, states)
-3. For VR environment changes, modify `vr_configuration.py` (cues, segments, environments)
-4. For new runtime/session data structures, add dataclasses to `data_classes/`
-5. Update MCP tools in `interfaces/mcp_server.py` if configuration needs programmatic access
-6. Bump the `sl-shared-assets` version and update the dependency in sl-experiment's `pyproject.toml`
+Changes to system configuration require updates in `sl-shared-assets` (`../sl-shared-assets/`). See the
+`/adding-acquisition-system` skill for detailed guidance on:
+- Creating system-specific configuration modules
+- Registering systems in the configuration utilities
+- Exporting new classes at all levels
 
 **Modifying sl-micro-controllers (hardware modules):**
 

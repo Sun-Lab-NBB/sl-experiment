@@ -8,6 +8,7 @@ import click
 from sl_shared_assets import SessionData, get_system_configuration_data
 from ataraxis_base_utilities import console
 
+from .mcp_servers import run_manage_server
 from ..mesoscope_vr import (
     purge_session,
     preprocess_session_data,
@@ -110,3 +111,17 @@ def delete_session(session_path: Path) -> None:
 def migrate_animal(source: str, destination: str, animal: str) -> None:
     """Transfers all sessions for the specified animal from the source project to the target project."""
     migrate_animal_between_projects(source_project=source, target_project=destination, animal=animal)
+
+
+@manage.command("mcp")
+@click.option(
+    "-t",
+    "--transport",
+    type=str,
+    default="stdio",
+    show_default=True,
+    help="The MCP transport type ('stdio', 'sse', or 'streamable-http').",
+)
+def start_manage_mcp_server(transport: str) -> None:  # pragma: no cover
+    """Starts the MCP server for agentic access to sl-manage tools."""
+    run_manage_server(transport=transport)  # type: ignore[arg-type]

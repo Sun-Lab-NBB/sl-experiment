@@ -12,6 +12,7 @@ from ataraxis_base_utilities import LogLevel, console
 from ataraxis_transport_layer_pc import print_available_ports
 from ataraxis_communication_interface import print_microcontroller_ids
 
+from .mcp_servers import run_get_server
 from ..mesoscope_vr import (
     CRCCalculator,
     discover_zaber_devices,
@@ -156,3 +157,17 @@ def calculate_crc(input_string: str) -> None:
     calculator = CRCCalculator()
     crc_checksum = calculator.string_checksum(input_string)
     click.echo(f"The CRC32-XFER checksum for the input string '{input_string}' is: {crc_checksum}.")
+
+
+@get.command("mcp")
+@click.option(
+    "-t",
+    "--transport",
+    type=str,
+    default="stdio",
+    show_default=True,
+    help="The MCP transport type ('stdio', 'sse', or 'streamable-http').",
+)
+def start_get_mcp_server(transport: str) -> None:  # pragma: no cover
+    """Starts the MCP server for agentic access to sl-get tools."""
+    run_get_server(transport=transport)  # type: ignore[arg-type]

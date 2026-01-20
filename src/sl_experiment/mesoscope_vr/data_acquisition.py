@@ -985,7 +985,11 @@ class _MesoscopeVRSystem:
             _MesoscopeVRMQTTTopics.STIMULUS,
             _MesoscopeVRMQTTTopics.TRIGGER_DELAY,
         )  # The list of topics monitored for the incoming data sent from the Unity game engine.
-        self._unity: MQTTCommunication = MQTTCommunication(monitored_topics=monitored_topics)
+        self._unity: MQTTCommunication = MQTTCommunication(
+            ip=self._system_configuration.assets.unity_ip,
+            port=self._system_configuration.assets.unity_port,
+            monitored_topics=monitored_topics,
+        )
         self._mesoscope_timer: PrecisionTimer = PrecisionTimer(precision=TimerPrecisions.MILLISECOND)
         self._motif_decomposer = CachedMotifDecomposer()
 
