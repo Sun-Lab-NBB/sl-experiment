@@ -35,7 +35,7 @@ Each acquisition system independently defines:
 | Data collection tool   | Two-photon mesoscope, widefield imaging, electrophysiology, etc.    |
 | PC configuration       | Single PC, multi-PC with separate imaging workstation, etc.         |
 | Hardware requirements  | Cameras, microcontrollers, motors, sensors (any combination)        |
-| Runtime approach       | VR-based tasks, pure Python logic, or hybrid approaches             |
+| Runtime approach       | VR-based tasks using Unity (currently required)                     |
 | Session types          | Whatever session types make sense for the system's workflow         |
 | CLI commands           | Whatever commands make sense for the system's workflow              |
 
@@ -91,10 +91,9 @@ Every system needs `[System]SystemConfiguration` with nested dataclasses for its
 ### Experiment Configuration (REQUIRED)
 
 Every system MUST define `[System]ExperimentConfiguration` for structured experiments. All valid experiments use the
-experiment configuration system with trials and interface zones. If the system uses VR-based tasks, it can reuse
-building blocks from `vr_configuration.py` (Cue, Segment, VREnvironment, TrialStructure, TaskTemplate). If the system
-uses pure Python runtime logic without VR, it still needs experiment configuration but may define simpler trial
-structures.
+experiment configuration system with trials and interface zones. Systems reuse the VR building blocks from
+`vr_configuration.py` (Cue, Segment, VREnvironment, TrialStructure, TaskTemplate) to define corridor-based behavioral
+tasks that run in Unity.
 
 ### Registry Updates
 
