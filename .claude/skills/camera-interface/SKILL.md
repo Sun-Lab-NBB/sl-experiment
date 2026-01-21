@@ -42,12 +42,12 @@ Follow the **Cross-Referenced Library Verification** procedure in `CLAUDE.md`:
 
 ### Step 1: Content Verification
 
-| File                                                                     | What to Check                                    |
-|--------------------------------------------------------------------------|--------------------------------------------------|
-| `/home/cyberaxolotl/Desktop/GitHubRepos/ataraxis-video-system/README.md` | Current usage instructions and MCP server setup  |
-| `ataraxis-video-system/src/ataraxis_video_system/__init__.py`            | Exported classes, functions, and public API      |
-| `ataraxis-video-system/src/ataraxis_video_system/video_system.py`        | VideoSystem constructor parameters and methods   |
-| sl-experiment `pyproject.toml`                                           | Current pinned version dependency                |
+| File                                                         | What to Check                                    |
+|--------------------------------------------------------------|--------------------------------------------------|
+| `../ataraxis-video-system/README.md`                         | Current usage instructions and MCP server setup  |
+| `../ataraxis-video-system/src/ataraxis_video_system/__init__.py` | Exported classes, functions, and public API  |
+| `../ataraxis-video-system/src/ataraxis_video_system/video_system.py` | VideoSystem constructor parameters and methods |
+| sl-experiment `pyproject.toml`                               | Current pinned version dependency                |
 
 ---
 

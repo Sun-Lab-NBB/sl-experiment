@@ -22,8 +22,11 @@ Use this skill when:
 - Updating CLI commands for mesoscope-vr
 - Understanding the mesoscope-vr architecture
 
-For low-level hardware interface implementation (ataraxis-video-system API, camera discovery, testing), use the
+For low-level camera hardware implementation (ataraxis-video-system API, camera discovery, testing), use the
 `/camera-interface` skill instead.
+
+For low-level microcontroller hardware implementation (firmware modules, PC interfaces), use the
+`/microcontroller-interface` skill instead.
 
 For adding an entirely new acquisition system (not mesoscope-vr), use the `/adding-acquisition-system` skill.
 
@@ -483,5 +486,188 @@ Current mesoscope-vr allocations:
 - [ ] Updated CLI commands (if needed)
 - [ ] Updated pyproject.toml dependency version
 - [ ] Allocated unique system ID
+- [ ] MyPy strict passes
+```
+
+---
+
+## Adding Microcontroller Hardware Modules
+
+For hardware controlled by Teensy microcontrollers (sensors, actuators, digital I/O), use the `/microcontroller-interface`
+skill for the low-level firmware and PC interface implementation. This section covers the mesoscope-vr specific
+integration steps.
+
+### Hardware Type Decision Tree
+
+```
+New hardware component
+├── Camera (video acquisition)
+│   └── Use /camera-interface skill → Integrate via VideoSystems class
+│
+├── Microcontroller-based (sensors, actuators)
+│   └── Use /microcontroller-interface skill → Integrate via MicroControllerInterfaces class
+│
+└── External device (motors, network services)
+    └── Create custom binding class → Integrate directly in data_acquisition.py
+```
+
+### Microcontroller Module Integration Workflow
+
+After implementing the firmware module and PC interface using `/microcontroller-interface`:
+
+```
+Phase 1: Configuration (sl-shared-assets)
+├── 1.1 Add configuration fields to MesoscopeMicroControllers
+└── 1.2 Export and bump version
+
+Phase 2: Integration (sl-experiment)
+├── 2.1 Import new ModuleInterface in module_interfaces.py (if not already there)
+├── 2.2 Add interface to MicroControllerInterfaces binding class
+├── 2.3 Add to appropriate controller's module_interfaces tuple
+├── 2.4 Call initialize_local_assets() in binding class start()
+├── 2.5 Configure parameters in binding class start()
+└── 2.6 Use interface in data_acquisition.py runtime
+```
+
+### Step 1.1: Add Configuration to MesoscopeMicroControllers
+
+**File:** `sl-shared-assets/src/sl_shared_assets/configuration/mesoscope_configuration.py`
+
+```python
+@dataclass()
+class MesoscopeMicroControllers:
+    """Configuration for microcontroller-managed hardware."""
+
+    # Existing fields...
+    actor_port: str = "/dev/ttyACM0"
+    sensor_port: str = "/dev/ttyACM1"
+    encoder_port: str = "/dev/ttyACM2"
+
+    # ADD NEW MODULE CONFIGURATION
+    new_module_parameter_a: int = 1000
+    """Description of parameter A for the new module."""
+
+    new_module_parameter_b: float = 2.5
+    """Description of parameter B for the new module."""
+```
+
+### Step 2.2: Add Interface to MicroControllerInterfaces
+
+**File:** `sl-experiment/src/sl_experiment/mesoscope_vr/binding_classes.py`
+
+```python
+from sl_experiment.shared_components import (
+    # Existing imports...
+    BrakeInterface,
+    ValveInterface,
+    NewModuleInterface,  # ADD IMPORT
+)
+
+class MicroControllerInterfaces:
+    """Manages microcontroller communication for Mesoscope-VR."""
+
+    def __init__(
+        self,
+        data_logger: DataLogger,
+        config: MesoscopeMicroControllers,
+    ) -> None:
+        # Existing interfaces...
+        self.brake = BrakeInterface(...)
+        self.valve = ValveInterface(...)
+
+        # ADD NEW INTERFACE
+        self.new_module = NewModuleInterface(
+            parameter_a=config.new_module_parameter_a,
+            parameter_b=config.new_module_parameter_b,
+        )
+
+        # Add to appropriate controller's module_interfaces tuple
+        self._actor: MicroControllerInterface = MicroControllerInterface(
+            controller_id=np.uint8(101),
+            data_logger=data_logger,
+            module_interfaces=(
+                self.brake,
+                self.valve,
+                self.gas_puff_valve,
+                self.screens,
+                self.new_module,  # ADD TO TUPLE
+            ),
+            buffer_size=8192,
+            port=config.actor_port,
+            baudrate=115200,
+        )
+
+    def start(self) -> None:
+        """Starts all microcontroller communication."""
+        self._actor.start()
+        self._sensor.start()
+        self._encoder.start()
+
+        # Initialize local assets for interfaces that need them
+        self.wheel_encoder.initialize_local_assets()
+        self.valve.initialize_local_assets()
+        self.new_module.initialize_local_assets()  # ADD THIS
+
+        # Configure module parameters
+        self.new_module.set_parameters(
+            parameter_a=np.uint32(...),
+            parameter_b=np.float32(...),
+        )
+```
+
+### Controller Assignment
+
+Assign modules to the appropriate microcontroller:
+
+| Controller | ID  | Use For                                     | Modules Tuple Location            |
+|------------|-----|---------------------------------------------|-----------------------------------|
+| ACTOR      | 101 | Output control (valves, brakes, LEDs)       | `self._actor` module_interfaces   |
+| SENSOR     | 152 | Input monitoring (lick, torque, TTL)        | `self._sensor` module_interfaces  |
+| ENCODER    | 203 | High-speed timing (quadrature encoders)     | `self._encoder` module_interfaces |
+
+### Step 2.6: Use in data_acquisition.py
+
+```python
+# Enable monitoring (for sensor modules)
+self._microcontrollers.new_module.start_monitoring()
+
+# Trigger commands
+self._microcontrollers.new_module.execute_action()
+
+# Read state
+if self._microcontrollers.new_module.is_active:
+    value = self._microcontrollers.new_module.current_value
+
+# Disable monitoring
+self._microcontrollers.new_module.stop_monitoring()
+```
+
+### Existing Module Type Codes
+
+Current allocations in mesoscope-vr (must not reuse):
+
+| Type Code | Module           | Controller |
+|-----------|------------------|------------|
+| 1         | TTLModule        | SENSOR     |
+| 2         | EncoderModule    | ENCODER    |
+| 3         | BrakeModule      | ACTOR      |
+| 4         | LickModule       | SENSOR     |
+| 5         | ValveModule      | ACTOR      |
+| 6         | TorqueModule     | SENSOR     |
+| 7         | ScreenModule     | ACTOR      |
+
+**Next available type code:** 8
+
+### Microcontroller Module Checklist
+
+```
+- [ ] Firmware module implemented (see /microcontroller-interface skill)
+- [ ] PC interface implemented (see /microcontroller-interface skill)
+- [ ] Configuration fields added to MesoscopeMicroControllers
+- [ ] Interface instantiated in MicroControllerInterfaces.__init__
+- [ ] Interface added to correct controller's module_interfaces tuple
+- [ ] initialize_local_assets() called in MicroControllerInterfaces.start()
+- [ ] Parameters configured in MicroControllerInterfaces.start()
+- [ ] Interface used in data_acquisition.py runtime
 - [ ] MyPy strict passes
 ```
