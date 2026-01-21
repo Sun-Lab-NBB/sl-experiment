@@ -43,11 +43,59 @@ New hardware component
 
 ---
 
+## Pre-Implementation Verification
+
+**Before writing any hardware code, verify the hardware is connected and accessible using MCP tools.**
+
+Each hardware category has associated MCP tools for discovery and verification. Use these to confirm hardware presence
+and identify configuration values (camera indices, serial ports, etc.).
+
+### MCP Servers Required
+
+| Hardware Type     | MCP Server                  | Start Command      |
+|-------------------|-----------------------------|--------------------|
+| Cameras           | ataraxis-video-system       | `axvs mcp`         |
+| Microcontrollers  | ataraxis-comm-interface     | `axci-mcp`         |
+| Zaber motors      | sl-experiment               | `sl-get mcp`       |
+
+### Verification Tools by Hardware Type
+
+| Hardware Type     | MCP Tool                        | Purpose                                    |
+|-------------------|---------------------------------|--------------------------------------------|
+| Cameras           | `list_cameras()`                | Discover cameras and their indices         |
+| Cameras           | `check_runtime_requirements()`  | Verify FFMPEG and GPU availability         |
+| Cameras           | `get_cti_status()`              | Check GenTL Producer configuration         |
+| Microcontrollers  | `list_microcontrollers()`       | Discover controllers and their ports       |
+| Microcontrollers  | `check_mqtt_broker()`           | Verify MQTT broker is running              |
+| Zaber motors      | `get_zaber_devices_tool()`      | Discover motors and their ports            |
+
+### Pre-Implementation Checklist
+
+Before modifying code for new hardware:
+
+```
+- [ ] Started appropriate MCP server for the hardware type
+- [ ] Ran discovery tool and confirmed hardware is detected
+- [ ] Recorded hardware identifiers (camera index, serial port, device ID)
+- [ ] Verified any dependencies (FFMPEG, CTI file, MQTT broker)
+```
+
+If hardware is not detected:
+- Check physical connections and power
+- Verify drivers are installed
+- Check port permissions (`sudo usermod -a -G dialout $USER` for serial devices)
+- For cameras, ensure CTI file is configured (`set_cti_file()`)
+
+---
+
 ## Modification Workflow
 
 Adding new hardware to mesoscope-vr requires changes in both repositories:
 
 ```
+Phase 0: Pre-Implementation Verification
+└── 0.1 Use MCP tools to verify hardware is connected and accessible
+
 Phase 1: sl-shared-assets (Configuration)
 ├── 1.1 Add fields to existing configuration dataclass
 ├── 1.2 Export (if adding new classes for complex types)
@@ -58,6 +106,9 @@ Phase 2: sl-experiment (Implementation)
 ├── 2.2 Integrate into data_acquisition.py lifecycle
 ├── 2.3 Update CLI commands (if needed)
 └── 2.4 Update pyproject.toml dependency
+
+Phase 3: Post-Implementation Verification
+└── 3.1 Use MCP tools to verify hardware works with new configuration
 ```
 
 ---
@@ -548,6 +599,13 @@ Current allocations in mesoscope-vr (must not reuse):
 ### Camera Hardware
 
 ```
+Pre-Implementation (MCP verification via axvs mcp):
+- [ ] Ran list_cameras() and confirmed new camera is detected
+- [ ] Recorded camera index from discovery output
+- [ ] Ran check_runtime_requirements() to verify FFMPEG/GPU
+- [ ] Verified CTI file is configured (for Harvesters cameras)
+
+Implementation:
 - [ ] Added fields to MesoscopeCameras (index, quantization, preset)
 - [ ] Each field has docstring explaining its purpose
 - [ ] Bumped sl-shared-assets version
@@ -557,11 +615,21 @@ Current allocations in mesoscope-vr (must not reuse):
 - [ ] Integrated into data_acquisition.py lifecycle
 - [ ] Updated pyproject.toml dependency version
 - [ ] MyPy strict passes
+
+Post-Implementation:
+- [ ] Tested camera with MCP start_video_session() tool
+- [ ] Verified frames are acquired and displayed correctly
 ```
 
 ### Microcontroller Hardware (Adding to Existing Controller)
 
 ```
+Pre-Implementation (MCP verification via axci-mcp):
+- [ ] Ran list_microcontrollers() and confirmed target controller is detected
+- [ ] Recorded controller port from discovery output
+- [ ] Verified controller ID matches expected (ACTOR=101, SENSOR=152, ENCODER=203)
+
+Implementation:
 - [ ] Firmware module implemented (see /microcontroller-interface skill)
 - [ ] PC interface implemented (see /microcontroller-interface skill)
 - [ ] Module parameter fields added to MesoscopeMicroControllers
@@ -573,6 +641,10 @@ Current allocations in mesoscope-vr (must not reuse):
 - [ ] Interface used in data_acquisition.py runtime
 - [ ] Updated pyproject.toml dependency version
 - [ ] MyPy strict passes
+
+Post-Implementation:
+- [ ] Ran list_microcontrollers() to verify controller still responds
+- [ ] Tested module commands through binding class
 ```
 
 ### Microcontroller Hardware (Adding New Controller)
@@ -581,6 +653,12 @@ Use only when existing controllers cannot accommodate the module (communication 
 conflicts, or timing isolation requirements).
 
 ```
+Pre-Implementation (MCP verification via axci-mcp):
+- [ ] Ran list_microcontrollers() and confirmed new controller is detected
+- [ ] Recorded new controller port from discovery output
+- [ ] Verified new controller has unique ID (not 101, 152, or 203)
+
+Implementation:
 - [ ] Firmware module implemented (see /microcontroller-interface skill)
 - [ ] PC interface implemented (see /microcontroller-interface skill)
 - [ ] New controller port field added to MesoscopeMicroControllers
@@ -596,11 +674,21 @@ conflicts, or timing isolation requirements).
 - [ ] Interface used in data_acquisition.py runtime
 - [ ] Updated pyproject.toml dependency version
 - [ ] MyPy strict passes
+
+Post-Implementation:
+- [ ] Ran list_microcontrollers() to verify all controllers respond
+- [ ] Tested module commands through binding class
 ```
 
 ### External Asset Hardware
 
 ```
+Pre-Implementation (MCP verification via sl-get mcp for Zaber motors):
+- [ ] Ran get_zaber_devices_tool() and confirmed device is detected (if Zaber)
+- [ ] Recorded device port from discovery output
+- [ ] Verified device axes and capabilities match requirements
+
+Implementation:
 - [ ] Added fields to MesoscopeExternalAssets
 - [ ] Each field has docstring explaining its purpose
 - [ ] Bumped sl-shared-assets version
@@ -610,4 +698,8 @@ conflicts, or timing isolation requirements).
       - [ ] Added direct integration in data_acquisition.py (for simple cases)
 - [ ] Updated pyproject.toml dependency version
 - [ ] MyPy strict passes
+
+Post-Implementation:
+- [ ] Ran get_zaber_devices_tool() to verify device still responds (if Zaber)
+- [ ] Tested device commands through binding class
 ```

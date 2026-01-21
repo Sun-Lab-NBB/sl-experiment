@@ -52,6 +52,40 @@ Follow the **Cross-Referenced Library Verification** procedure in `CLAUDE.md`:
 | ataraxis-communication-interface | `README.md`              | Current API and usage patterns                |
 | sl-experiment                    | `module_interfaces.py`   | Existing PC interface patterns                |
 
+### Step 2: Hardware Verification
+
+**Before implementing a new module, verify microcontrollers are connected and accessible using MCP tools.**
+
+The ataraxis-communication-interface library provides an MCP server for hardware discovery. Start the server with:
+```bash
+axci-mcp
+```
+
+**MCP Tools for Microcontroller Verification:**
+
+| Tool                      | Purpose                                              |
+|---------------------------|------------------------------------------------------|
+| `list_microcontrollers()` | Discovers connected microcontrollers and their ports |
+| `check_mqtt_broker()`     | Verifies MQTT broker is running (for Unity comms)    |
+
+**Verification workflow:**
+
+1. **Discover microcontrollers**: Run `list_microcontrollers()` to identify connected devices
+2. **Note port assignments**: Record which port corresponds to which controller (ACTOR, SENSOR, ENCODER)
+3. **Verify MQTT** (if applicable): Run `check_mqtt_broker(host="127.0.0.1", port=1883)`
+
+**Expected output from `list_microcontrollers()`:**
+```
+Port: /dev/ttyACM0, Controller ID: 101 (ACTOR)
+Port: /dev/ttyACM1, Controller ID: 152 (SENSOR)
+Port: /dev/ttyACM2, Controller ID: 203 (ENCODER)
+```
+
+If the target microcontroller is not listed:
+- Check USB connection
+- Verify firmware is uploaded with correct controller ID
+- Check for port permission issues (`sudo usermod -a -G dialout $USER`)
+
 ---
 
 ## Architecture Overview
