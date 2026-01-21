@@ -1,155 +1,277 @@
 ---
-name: using-camera-interface
+name: implementing-camera-interface
 description: >-
-  Guide for using ataraxis-video-system to implement camera functionality in sl-experiment.
-  Maps library architecture, public API, and integration patterns used in this codebase.
+  Guides implementation of camera hardware interfaces using ataraxis-video-system. Covers camera discovery,
+  configuration verification, interactive testing, and binding class patterns. Use when adding camera support
+  to any acquisition system or troubleshooting camera connectivity.
 ---
 
-# Camera Interface Usage Guide
+# Camera Interface Implementation
 
-When implementing camera functionality in sl-experiment, use the ataraxis-video-system library
-following the patterns established in this codebase.
+Guides the implementation of camera hardware interfaces using the ataraxis-video-system library. This skill focuses on
+the low-level hardware integration patterns applicable to any acquisition system.
 
-See [CAMERA_INTERFACE_GUIDE.md](CAMERA_INTERFACE_GUIDE.md) for complete API reference and integration patterns.
+---
 
-## IMPORTANT: Verification Requirement
+## When to Use This Skill
 
-**Before writing any camera code, you MUST verify the current state of the dependent libraries.**
-The documentation in this skill may be outdated.
+Use this skill when:
+
+- Adding camera support to an acquisition system
+- Troubleshooting camera connectivity issues
+- Verifying camera configuration before runtime
+- Testing cameras with interactive acquisition
+- Understanding the VideoSystem API
+
+For system-specific integration (modifying sl-shared-assets configuration, integrating into mesoscope-vr), use the
+`/modifying-mesoscope-vr-system` skill instead.
+
+---
+
+## Verification Requirements
+
+**Before writing any camera code, verify the current state of dependent libraries.**
 
 ### Step 0: Version Verification
 
-Follow the **Cross-Referenced Library Verification** procedure in `CLAUDE.md` to ensure local copies
-of `ataraxis-video-system` and `sl-shared-assets` are up to date with their GitHub repositories.
-If version mismatches exist, ask the user how to proceed before continuing.
+Follow the **Cross-Referenced Library Verification** procedure in `CLAUDE.md`:
 
-### Content Verification
+1. Check local ataraxis-video-system version against GitHub
+2. If version mismatch exists, ask the user how to proceed
+3. Use the verified source for API reference
 
-After version verification, perform the following content checks:
+### Step 1: Content Verification
 
-### 1. Verify ataraxis-video-system
-
-- Read `README.md` in `/home/cyberaxolotl/Desktop/GitHubRepos/ataraxis-video-system/` for current
-  usage instructions
-- Read examples in `/home/cyberaxolotl/Desktop/GitHubRepos/ataraxis-video-system/examples/` for
-  recommended patterns
-- Read `src/ataraxis_video_system/__init__.py` to confirm exported classes and functions
-- Read `src/ataraxis_video_system/video_system.py` to verify `VideoSystem` constructor parameters
-  and methods
-- Check `pyproject.toml` in sl-experiment for the current version dependency
-
-### 2. Verify sl-shared-assets
-
-- Read `README.md` in `/home/cyberaxolotl/Desktop/GitHubRepos/sl-shared-assets/` for current
-  conventions
-- Read `src/sl_shared_assets/data_classes/configuration_data.py` to confirm camera configuration
-  patterns
-- Verify `AcquisitionSystems` enum members for existing systems
-- Check existing camera dataclasses (e.g., `MesoscopeCameras`) for current field conventions
-- Review `__init__.py` exports to understand public API
-
-### 3. Verify sl-experiment binding patterns
-
-- Read `src/sl_experiment/mesoscope_vr/binding_classes.py` to confirm current `VideoSystems`
-  implementation
-- Check for any new patterns or conventions introduced since this skill was written
-
-**If any discrepancies are found between this guide and the actual library state, follow the
-current library implementation rather than this documentation.**
+| File                                                                     | What to Check                                    |
+|--------------------------------------------------------------------------|--------------------------------------------------|
+| `/home/cyberaxolotl/Desktop/GitHubRepos/ataraxis-video-system/README.md` | Current usage instructions and MCP server setup  |
+| `ataraxis-video-system/src/ataraxis_video_system/__init__.py`            | Exported classes, functions, and public API      |
+| `ataraxis-video-system/src/ataraxis_video_system/video_system.py`        | VideoSystem constructor parameters and methods   |
+| sl-experiment `pyproject.toml`                                           | Current pinned version dependency                |
 
 ---
 
-## Decision Logic
+## Camera Discovery
 
-```
-Does the acquisition system already have a binding class?
-│
-├─ YES → Add camera wrapper to existing binding_classes.py
-│
-└─ NO  → Create full binding hierarchy (see de-novo system guide)
-```
+Use the ataraxis-video-system MCP tools for camera discovery. These tools provide programmatic access to connected
+cameras.
 
-**Existing binding classes:** `src/sl_experiment/mesoscope_vr/binding_classes.py`
+### MCP Tools Available
 
-## Quick Reference
+| Tool                         | Purpose                                                |
+|------------------------------|--------------------------------------------------------|
+| `list_cameras`               | Discovers all OpenCV and Harvesters cameras            |
+| `get_cti_status`             | Checks if GenTL Producer (.cti) file is configured     |
+| `set_cti_file`               | Configures the CTI file path for GeniCam cameras       |
+| `check_runtime_requirements` | Verifies FFMPEG and GPU availability                   |
 
-### Core Import
+### Discovery Workflow
 
-```python
-from ataraxis_video_system import (
-    VideoSystem,
-    VideoEncoders,
-    CameraInterfaces,
-    OutputPixelFormats,
-    EncoderSpeedPresets,
-)
-```
+1. **Check runtime requirements**: Verify FFMPEG and GPU availability
+2. **Check CTI status**: Ensure GenTL Producer is configured for Harvesters cameras
+3. **List cameras**: Discover all connected cameras with their indices and properties
+4. **Record camera indices**: Note the indices for configuration files
 
-### VideoSystem Instantiation
+---
 
-```python
-camera = VideoSystem(
-    system_id=np.uint8(51),
-    data_logger=logger,
-    output_directory=output_path,
-    camera_interface=CameraInterfaces.HARVESTERS,
-    camera_index=camera_config.camera_index,
-    display_frame_rate=25,
-    video_encoder=VideoEncoders.H265,
-    gpu=0,
-    encoder_speed_preset=EncoderSpeedPresets(camera_config.preset),
-    output_pixel_format=OutputPixelFormats.YUV420,
-    quantization_parameter=camera_config.quantization,
-)
-```
+## Interactive Camera Testing
 
-### Lifecycle Pattern
+Test cameras using the MCP video session tools before integrating into the acquisition system.
 
-```python
-camera.start()              # Begin frame acquisition
-camera.start_frame_saving() # Begin recording to disk
-# ... acquisition runs ...
-camera.stop_frame_saving()  # Stop recording
-camera.stop()               # Release resources
-```
+### Test Session Workflow
 
-## sl-shared-assets Requirements
+1. **Start video session**: Initialize camera with test parameters
+2. **Verify preview**: Check that frames are being acquired and displayed
+3. **Start frame saving**: Test recording to temporary directory
+4. **Stop session**: Clean up resources
 
-Camera configuration must be defined in sl-shared-assets before sl-experiment implementation.
+### MCP Session Tools
 
-**For existing systems:** Add camera dataclass if not present
-**For de-novo systems:** Create full configuration hierarchy
+| Tool                   | Purpose                                    |
+|------------------------|--------------------------------------------|
+| `start_video_session`  | Starts capture with camera/encoding params |
+| `stop_video_session`   | Stops capture and releases resources       |
+| `start_frame_saving`   | Begins recording to video file             |
+| `stop_frame_saving`    | Stops recording, keeps session active      |
+| `get_session_status`   | Returns current session state              |
 
-### Required Configuration Classes
+### Test Parameters
+
+For testing, use conservative parameters with a temporary directory:
 
 ```python
-# sl-shared-assets/src/sl_shared_assets/data_classes/configuration_data.py
+# Test configuration
+output_directory = None          # Use temp directory (or specify path for manual verification)
+camera_interface = "harvesters"  # or "opencv"
+camera_index = 0                 # From discovery
+display_frame_rate = 15          # Low for testing
+video_encoder = "h264"           # CPU encoding for compatibility
+quantization_parameter = 25      # Moderate quality
+```
 
+The MCP tools use a temporary directory by default for test recordings. Specify an output directory only if the user
+wants to manually verify the recorded video file.
+
+---
+
+## VideoSystem API Reference
+
+See [CAMERA_INTERFACE_GUIDE.md](CAMERA_INTERFACE_GUIDE.md) for the complete API reference including:
+
+- VideoSystem constructor parameters
+- Enumeration values (CameraInterfaces, VideoEncoders, EncoderSpeedPresets)
+- Lifecycle methods (start, stop, start_frame_saving, stop_frame_saving)
+- Discovery functions (discover_camera_ids, check_cti_file, add_cti_file)
+
+---
+
+## Binding Class Patterns
+
+When implementing camera support in a binding class, follow these patterns:
+
+### Basic Structure
+
+```python
+class VideoSystems:
+    """Manages video acquisition from cameras.
+
+    Args:
+        data_logger: DataLogger instance for timestamp logging.
+        output_directory: Directory path for video file output.
+        camera_configuration: Camera settings from system configuration.
+
+    Attributes:
+        _camera: VideoSystem instance for frame acquisition.
+        _camera_started: Tracks whether acquisition has started.
+    """
+
+    def __init__(
+        self,
+        data_logger: DataLogger,
+        output_directory: Path,
+        camera_configuration: CameraConfig,
+    ) -> None:
+        self._camera: VideoSystem = VideoSystem(
+            system_id=np.uint8(51),
+            data_logger=data_logger,
+            output_directory=output_directory,
+            camera_index=camera_configuration.camera_index,
+            camera_interface=CameraInterfaces.HARVESTERS,
+            # ... other parameters from configuration
+        )
+        self._camera_started: bool = False
+
+    def start(self) -> None:
+        """Starts frame acquisition (does not save frames)."""
+        if self._camera_started:
+            return
+        self._camera.start()
+        self._camera_started = True
+
+    def start_saving(self) -> None:
+        """Begins saving frames to disk."""
+        self._camera.start_frame_saving()
+
+    def stop(self) -> None:
+        """Stops acquisition and releases resources."""
+        if self._camera_started:
+            self._camera.stop_frame_saving()
+        self._camera.stop()
+        self._camera_started = False
+```
+
+### Key Patterns
+
+| Pattern              | Purpose                                       |
+|----------------------|-----------------------------------------------|
+| Idempotency guards   | Prevent double-start with `_started` flags    |
+| Destructor cleanup   | `__del__` method calls `stop()` for safety    |
+| Separate start/save  | Preview mode before recording                 |
+| Configuration inject | Pass dataclass from sl-shared-assets          |
+
+### System ID Allocation
+
+| ID Range | Purpose                                                                    |
+|----------|----------------------------------------------------------------------------|
+| 1-49     | Reserved for non-camera hardware systems                                   |
+| 50-99    | Camera and video acquisition systems                                       |
+| 100+     | Reserved for future expansion                                              |
+
+Current allocations in mesoscope-vr: `51` (face camera), `62` (body camera).
+
+---
+
+## Configuration Requirements
+
+Camera configuration must be defined in sl-shared-assets before implementation.
+
+### Required Configuration Fields
+
+| Field                    | Type  | Range | Description                                |
+|--------------------------|-------|-------|--------------------------------------------|
+| `*_camera_index`         | `int` | 0+    | Camera index from discovery                |
+| `*_camera_quantization`  | `int` | 0-51  | Encoding quality (lower = higher quality)  |
+| `*_camera_preset`        | `int` | 1-7   | Encoding speed preset (maps to IntEnum)    |
+
+### Configuration Dataclass Pattern
+
+```python
 @dataclass()
-class YourSystemCameras:
+class SystemCameras:
+    """Camera configuration for the acquisition system."""
+
     camera_index: int = 0
-    camera_quantization: int = 20  # 0-51, lower = better
-    camera_preset: int = 7         # 0-5, maps to EncoderSpeedPresets
+    """Camera index from the discovery function output."""
+
+    camera_quantization: int = 15
+    """Quantization parameter (0-51). Lower values produce higher quality."""
+
+    camera_preset: int = 5
+    """Encoding speed preset (1-7). Maps to EncoderSpeedPresets enum (SLOW=5 default)."""
 ```
 
-### System Configuration Container
+---
 
-```python
-@dataclass()
-class YourSystemConfiguration(YamlConfig):
-    cameras: YourSystemCameras = field(default_factory=YourSystemCameras)
-    # ... other components
+## Troubleshooting
+
+### Camera Not Detected
+
+1. Verify driver software is installed
+2. For Harvesters: check CTI file is configured (`axvs cti status`)
+3. Check physical connections and power
+4. Run `axvs list` to see available cameras
+
+### Encoding Failures
+
+1. Verify FFMPEG installation: `axvs check`
+2. Check GPU availability for hardware encoding
+3. Monitor GPU memory and thermal status
+
+### Frame Drops
+
+1. Reduce `display_frame_rate` or disable preview (`None`)
+2. Use faster `encoder_speed_preset`
+3. Increase `quantization_parameter` (reduces quality)
+
+### Process Crashes
+
+1. Ensure DataLogger is initialized before VideoSystem
+2. Verify output directory exists and is writable
+3. Check available disk space
+
+---
+
+## Implementation Checklist
+
+Before integrating cameras into an acquisition system:
+
 ```
-
-## Existing Integration
-
-See `src/sl_experiment/mesoscope_vr/binding_classes.py` for the `VideoSystems` wrapper class that
-manages face and body cameras in this codebase.
-
-## System ID Allocation
-
-| ID Range | Purpose        |
-|----------|----------------|
-| 50-99    | Camera systems |
-
-Current: `51` (face), `62` (body)
+- [ ] Verified ataraxis-video-system version matches requirements
+- [ ] Confirmed FFMPEG and GPU availability
+- [ ] Configured CTI file (for Harvesters cameras)
+- [ ] Discovered cameras and recorded indices
+- [ ] Tested camera with interactive session
+- [ ] Created configuration dataclass in sl-shared-assets
+- [ ] Implemented binding class with lifecycle methods
+- [ ] Allocated unique system IDs for each camera
+```
