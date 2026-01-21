@@ -73,16 +73,15 @@ state to prevent integration errors.
 
 ## Available Skills
 
-| Skill                           | Description                                                                  |
-|---------------------------------|------------------------------------------------------------------------------|
-| `/explore-codebase`             | Perform in-depth codebase exploration at session start                       |
-| `/sun-lab-style`                | Apply Sun Lab coding conventions (REQUIRED for all code changes)             |
-| `/camera-interface`             | Guide for using ataraxis-video-system to implement camera hardware           |
-| `/microcontroller-interface`    | Guide for implementing microcontroller modules and PC interfaces             |
-| `/acquisition-system-setup`     | Configure data acquisition systems (uses MCP tools from sl-shared-assets)    |
-| `/experiment-design`            | Interactive guidance for building experiment configurations (uses MCP tools) |
-| `/adding-acquisition-system`    | Guide for adding support for new acquisition systems to the framework        |
-| `/modifying-mesoscope-vr-system`| Guide for extending mesoscope-vr with new hardware components                |
+| Skill                            | Description                                                                  |
+|----------------------------------|------------------------------------------------------------------------------|
+| `/explore-codebase`              | Perform in-depth codebase exploration at session start                       |
+| `/sun-lab-style`                 | Apply Sun Lab coding conventions (REQUIRED for all code changes)             |
+| `/camera-interface`              | Guide for using ataraxis-video-system to implement camera hardware           |
+| `/microcontroller-interface`     | Guide for implementing microcontroller modules and PC interfaces             |
+| `/acquisition-system-setup`      | Configure data acquisition systems (uses MCP tools from sl-shared-assets)    |
+| `/experiment-design`             | Interactive guidance for building experiment configurations (uses MCP tools) |
+| `/modifying-mesoscope-vr-system` | Guide for extending mesoscope-vr with new hardware components                |
 
 ## Project Context
 
@@ -115,13 +114,6 @@ which combines brain imaging with virtual reality behavioral tasks.
 
 ### Workflow Guidance
 
-**Adding a new acquisition system:**
-
-Use the `/adding-acquisition-system` skill for comprehensive guidance. The skill covers:
-1. Creating configuration dataclasses in sl-shared-assets (Phase 1)
-2. Implementing runtime logic and CLI in sl-experiment (Phase 2)
-3. Updating the acquisition-system-setup skill with system documentation (Phase 3)
-
 **Adding hardware to mesoscope-vr:**
 
 Use the `/modifying-mesoscope-vr-system` skill for comprehensive guidance on:
@@ -149,11 +141,8 @@ For low-level microcontroller hardware implementation, use the `/microcontroller
 
 **Modifying sl-shared-assets (configuration dataclasses):**
 
-Changes to system configuration require updates in `sl-shared-assets` (`../sl-shared-assets/`). See the
-`/adding-acquisition-system` skill for detailed guidance on:
-- Creating system-specific configuration modules
-- Registering systems in the configuration utilities
-- Exporting new classes at all levels
+Changes to system configuration require updates in `sl-shared-assets` (`../sl-shared-assets/`). For mesoscope-vr
+hardware modifications, see the `/modifying-mesoscope-vr-system` skill which covers adding configuration dataclasses.
 
 **Modifying sl-micro-controllers (hardware modules):**
 
