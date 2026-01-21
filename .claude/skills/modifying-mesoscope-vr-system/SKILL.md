@@ -54,7 +54,7 @@ Follow the **Cross-Referenced Library Verification** procedure in `CLAUDE.md`:
 
 ```
 ┌────────────────────────────────────────────────────────────────────────────┐
-│                           sl-shared-assets                                  │
+│                           sl-shared-assets                                 │
 │  ┌──────────────────────────────────────────────────────────────────────┐  │
 │  │  mesoscope_configuration.py                                          │  │
 │  │  ───────────────────────────                                         │  │
@@ -67,7 +67,7 @@ Follow the **Cross-Referenced Library Verification** procedure in `CLAUDE.md`:
 └─────────────────────────────────┬──────────────────────────────────────────┘
                                   │ imports configuration
 ┌─────────────────────────────────▼──────────────────────────────────────────┐
-│                              sl-experiment                                  │
+│                              sl-experiment                                 │
 │  ┌──────────────────────────────────────────────────────────────────────┐  │
 │  │  binding_classes.py                                                  │  │
 │  │  ──────────────────                                                  │  │
