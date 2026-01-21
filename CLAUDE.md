@@ -78,6 +78,7 @@ state to prevent integration errors.
 | `/explore-codebase`             | Perform in-depth codebase exploration at session start                       |
 | `/sun-lab-style`                | Apply Sun Lab coding conventions (REQUIRED for all code changes)             |
 | `/camera-interface`             | Guide for using ataraxis-video-system to implement camera hardware           |
+| `/microcontroller-interface`    | Guide for implementing microcontroller modules and PC interfaces             |
 | `/acquisition-system-setup`     | Configure data acquisition systems (uses MCP tools from sl-shared-assets)    |
 | `/experiment-design`            | Interactive guidance for building experiment configurations (uses MCP tools) |
 | `/adding-acquisition-system`    | Guide for adding support for new acquisition systems to the framework        |
@@ -130,6 +131,8 @@ Use the `/modifying-mesoscope-vr-system` skill for comprehensive guidance on:
 
 For low-level camera hardware implementation, use the `/camera-interface` skill.
 
+For low-level microcontroller hardware implementation, use the `/microcontroller-interface` skill.
+
 **Adding hardware bindings (general):**
 
 1. For shared hardware (microcontrollers), add `ModuleInterface` subclasses to `shared_components/module_interfaces.py`
@@ -154,14 +157,11 @@ Changes to system configuration require updates in `sl-shared-assets` (`../sl-sh
 
 **Modifying sl-micro-controllers (hardware modules):**
 
-Changes to microcontroller firmware require updates in `sl-micro-controllers` (`../sl-micro-controllers/`):
+Use the `/microcontroller-interface` skill for comprehensive guidance on adding microcontroller hardware. The skill
+covers:
+1. Firmware module implementation in sl-micro-controllers (C++ templates, command handlers)
+2. PC interface implementation in sl-experiment (ModuleInterface subclasses)
+3. Integration with MicroControllerInterfaces binding class
 
-1. For new hardware modules, create a header file in `src/` (e.g., `new_module.h`)
-   - Follow existing module patterns (e.g., `valve_module.h`, `encoder_module.h`)
-   - Define module type code, command codes, and data codes
-   - Implement the module class with required command handlers
-2. Register the module in `main.cpp` under the appropriate microcontroller type (ACTOR, SENSOR, or ENCODER)
-3. Create corresponding `ModuleInterface` subclass in sl-experiment's `shared_components/module_interfaces.py`
-   - Match type codes, command codes, and data codes with the firmware
-4. Upload updated firmware to microcontrollers using PlatformIO
-5. Document hardware assembly requirements if new physical components are needed
+Changes require updates in `sl-micro-controllers` (`../sl-micro-controllers/`) for firmware and `sl-experiment` for the
+PC interface.
