@@ -26,8 +26,6 @@ Use this skill when:
 For system-specific integration (modifying sl-shared-assets configuration, integrating into mesoscope-vr), use the
 `/modifying-mesoscope-vr-system` skill instead.
 
-For adding an entirely new acquisition system (not mesoscope-vr), use the `/adding-acquisition-system` skill.
-
 ---
 
 ## Verification Requirements

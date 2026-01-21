@@ -40,9 +40,6 @@ Each system has a reference file documenting all configurable parameters, their 
 values. When working with a specific system, you MUST read that system's reference file for detailed parameter
 documentation.
 
-**Adding new systems:** To add support for a new acquisition system, use the `/adding-acquisition-system` skill which
-guides the creation of configuration classes, CLI integration, and the reference file for this skill.
-
 ---
 
 ## Network Storage Prerequisites

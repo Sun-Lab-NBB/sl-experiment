@@ -47,7 +47,6 @@ Use this skill when:
 |----------------------------------------------|------------------------------|
 | Low-level camera API (ataraxis-video-system) | `/camera-interface`          |
 | Low-level microcontroller firmware           | `/microcontroller-interface` |
-| Adding an entirely new acquisition system    | `/adding-acquisition-system` |
 
 ---
 
@@ -183,11 +182,8 @@ Need to modify mesoscope-vr?
 ├── Adding system state (like REST, RUN)?
 │   └── Read RUNTIME_MODE_GUIDE.md
 │
-├── Adding CLI command?
-│   └── Read RUNTIME_MODE_GUIDE.md
-│
-└── Creating new acquisition system (not mesoscope-vr)?
-    └── Use /adding-acquisition-system skill instead
+└── Adding CLI command?
+    └── Read RUNTIME_MODE_GUIDE.md
 ```
 
 ---
