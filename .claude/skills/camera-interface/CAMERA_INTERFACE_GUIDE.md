@@ -141,7 +141,7 @@ class EncoderSpeedPresets(IntEnum):
 
 **Trade-offs:**
 - Faster presets reduce CPU/GPU load but increase file size
-- Slower presets improve compression but may cause frame drops under load
+- Slower presets improve compression but cause frame buffering under load, risking OOM errors
 - For real-time acquisition, start with `MEDIUM` and adjust based on system performance
 
 ### OutputPixelFormats
@@ -153,7 +153,7 @@ class OutputPixelFormats(StrEnum):
 ```
 
 **Recommendation:** Default YUV444 provides minimal chromatic data loss. Use YUV420 for smaller file sizes when color
-accuracy is less critical.
+accuracy is less critical, for example, when using Monochrome cameras.
 
 ### InputPixelFormats
 
@@ -348,25 +348,25 @@ ataraxis-data-structures>=5.0.0
 ┌────────────────────────────────────────────────────────────────┐
 │                        VideoSystem                             │
 │  ┌──────────────────────────────────────────────────────────┐  │
-│  │  Main Process                                             │  │
-│  │  - Initialization and configuration                       │  │
-│  │  - Lifecycle management (start/stop)                      │  │
-│  │  - Frame saving control                                   │  │
+│  │  Main Process                                            │  │
+│  │  - Initialization and configuration                      │  │
+│  │  - Lifecycle management (start/stop)                     │  │
+│  │  - Frame saving control                                  │  │
 │  └──────────────────────────────────────────────────────────┘  │
 │           │                           │                        │
 │           ▼                           ▼                        │
-│  ┌────────────────────┐   ┌────────────────────────────────┐  │
-│  │  Producer Process  │   │      Consumer Process          │  │
-│  │  ─────────────────│   │  ──────────────────────────────│  │
-│  │  - Camera driver   │   │  - Frame encoding (FFMPEG)     │  │
-│  │  - Frame grabbing  │──▶│  - MP4 container writing       │  │
-│  │  - Timestamp gen   │   │  - Live preview display        │  │
-│  └────────────────────┘   └────────────────────────────────┘  │
+│  ┌────────────────────┐   ┌────────────────────────────────┐   │
+│  │  Producer Process  │   │      Consumer Process          │   │
+│  │  ───────────────── │   │  ──────────────────────────────│   │
+│  │  - Camera driver   │   │  - Frame encoding (FFMPEG)     │   │
+│  │  - Frame grabbing  │──▶│  - MP4 container writing       │   │
+│  │  - Timestamp gen   │   │  - Live preview display        │   │
+│  └────────────────────┘   └────────────────────────────────┘   │
 │           │                                                    │
 │           ▼                                                    │
 │  ┌────────────────────┐                                        │
 │  │    DataLogger      │                                        │
-│  │  ─────────────────│                                        │
+│  │  ───────────────── │                                        │
 │  │  - Timestamp I/O   │                                        │
 │  │  - .npy file write │                                        │
 │  └────────────────────┘                                        │
