@@ -11,6 +11,7 @@ Conventions for Python code in Sun Lab projects.
 - [Naming Conventions](#naming-conventions)
 - [Function Calls](#function-calls)
 - [Error Handling](#error-handling)
+- [Ataraxis Library Preferences](#ataraxis-library-preferences)
 - [Numba Functions](#numba-functions)
 - [Comments](#comments)
 - [Imports](#imports)
@@ -309,6 +310,259 @@ def process_data(self, data: NDArray[np.float32], threshold: float) -> None:
 - Explain the constraint: "The [parameter] must be [constraint]"
 - Show actual value: "but got {value}."
 - Use f-strings for interpolation
+
+---
+
+## Ataraxis Library Preferences
+
+Sun Lab projects use a suite of ataraxis libraries that provide standardized, high-performance utilities. **Always prefer
+these libraries** over standard library alternatives or reimplementation for their designated tasks.
+
+### Console Output (ataraxis-base-utilities)
+
+Use `console.echo()` for **all console output** instead of `print()`:
+
+```python
+from ataraxis_base_utilities import console
+
+# Good - use console.echo() for all output
+console.echo(message="Processing frame 1 of 100...")
+console.echo(message="Analysis complete.", level="SUCCESS")
+console.echo(message="Potential memory issue detected.", level="WARNING")
+
+# Avoid - do not use print()
+print("Processing frame 1 of 100...")  # Wrong - use console.echo()
+```
+
+**Log levels**: `DEBUG`, `INFO` (default), `SUCCESS`, `WARNING`, `ERROR`, `CRITICAL`
+
+The global `console` instance is pre-configured and shared across all Sun Lab projects. Call `console.enable()` at
+application entry points if needed.
+
+**Exception**: Use `print()` or `click.echo()` when output requires specific formatting that would be disrupted by
+console's line-width formatting, such as tables created with `tabulate` or manually aligned ASCII tables:
+
+```python
+from tabulate import tabulate
+
+# Good - print() for pre-formatted tabulate output
+table = tabulate(data, headers=["Port", "Device", "Status"], tablefmt="grid")
+print("Device Information:")
+print(table)
+
+# Good - click.echo() for manually aligned CLI tables
+click.echo("Precision | Duration | Mean Time")
+click.echo("----------+----------+----------")
+for row in results:
+    click.echo(f"{row.precision:9} | {row.duration:8} | {row.mean:9.3f}")
+```
+
+When using this exception, add a comment explaining why standard console output is not used (see
+`sl-experiment/mesoscope_vr/zaber_bindings.py:164` for an example).
+
+### List Conversion (ataraxis-base-utilities)
+
+Use `ensure_list()` to normalize inputs to list form:
+
+```python
+from ataraxis_base_utilities import ensure_list
+
+# Good - handles scalars, numpy arrays, and iterables
+items = ensure_list(input_item=user_input)
+
+# Avoid - manual type checking
+if isinstance(user_input, list):
+    items = user_input
+elif isinstance(user_input, np.ndarray):
+    items = user_input.tolist()
+else:
+    items = [user_input]
+```
+
+### Iterable Chunking (ataraxis-base-utilities)
+
+Use `chunk_iterable()` for batching operations:
+
+```python
+from ataraxis_base_utilities import chunk_iterable
+
+# Good - preserves numpy array types
+for batch in chunk_iterable(iterable=large_array, chunk_size=100):
+    process_batch(batch=batch)
+
+# Avoid - manual slicing logic
+for i in range(0, len(large_array), 100):
+    batch = large_array[i:i + 100]
+```
+
+### Timing and Delays (ataraxis-time)
+
+Use `PrecisionTimer` for all timing operations:
+
+```python
+from ataraxis_time import PrecisionTimer, TimerPrecisions
+
+# Good - high-precision interval timing
+timer = PrecisionTimer(precision=TimerPrecisions.MICROSECOND)
+timer.reset()
+# ... operation ...
+elapsed_us = timer.elapsed
+
+# Good - non-blocking delay (releases GIL for other threads)
+timer.delay(delay=5000, allow_sleep=True, block=False)  # 5ms delay
+
+# Avoid - time.sleep() for precision timing
+import time
+time.sleep(0.005)  # Wrong for microsecond precision work
+```
+
+**Precision options**: `NANOSECOND`, `MICROSECOND` (default), `MILLISECOND`, `SECOND`
+
+### Timestamps (ataraxis-time)
+
+Use `get_timestamp()` for generating timestamps:
+
+```python
+from ataraxis_time import get_timestamp, TimestampFormats
+
+# Good - string format for filenames
+timestamp = get_timestamp(output_format=TimestampFormats.STRING)
+output_path = data_directory / f"session_{timestamp}.npy"
+
+# Good - integer format for calculations (microseconds since epoch)
+timestamp_us = get_timestamp(output_format=TimestampFormats.INTEGER)
+
+# Good - bytes format for binary serialization
+timestamp_bytes = get_timestamp(output_format=TimestampFormats.BYTES)
+
+# Avoid - datetime manipulation
+from datetime import datetime
+timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")  # Wrong
+```
+
+### Time Unit Conversion (ataraxis-time)
+
+Use `convert_time()` for converting between time units:
+
+```python
+from ataraxis_time import convert_time, TimeUnits
+
+# Good - explicit unit conversion
+duration_seconds = convert_time(
+    time=elapsed_microseconds,
+    from_units=TimeUnits.MICROSECOND,
+    to_units=TimeUnits.SECOND,
+)
+
+# Avoid - manual conversion with magic numbers
+duration_seconds = elapsed_microseconds / 1_000_000  # Wrong
+```
+
+**Supported units**: `NANOSECOND`, `MICROSECOND`, `MILLISECOND`, `SECOND`, `MINUTE`, `HOUR`, `DAY`
+
+### YAML Configuration (ataraxis-data-structures)
+
+Use `YamlConfig` as a base class for configuration dataclasses:
+
+```python
+from dataclasses import dataclass
+from pathlib import Path
+from ataraxis_data_structures import YamlConfig
+
+# Good - subclass YamlConfig for YAML serialization
+@dataclass
+class ExperimentConfig(YamlConfig):
+    """Defines experiment configuration parameters."""
+
+    animal_id: str
+    """The unique identifier for the animal."""
+    session_duration: float
+    """The duration in seconds."""
+
+# Saving and loading
+config = ExperimentConfig(animal_id="M001", session_duration=3600.0)
+config.to_yaml(file_path=Path("config.yaml"))
+loaded_config = ExperimentConfig.from_yaml(file_path=Path("config.yaml"))
+
+# Avoid - manual YAML handling
+import yaml
+with open("config.yaml", "w") as file:
+    yaml.dump(config.__dict__, file)  # Wrong
+```
+
+### Shared Memory (ataraxis-data-structures)
+
+Use `SharedMemoryArray` for inter-process data sharing:
+
+```python
+from ataraxis_data_structures import SharedMemoryArray
+import numpy as np
+
+# Good - create shared array in main process
+prototype = np.zeros((100, 100), dtype=np.float32)
+shared_array = SharedMemoryArray.create_array(name="frame_buffer", prototype=prototype)
+
+# In child process - connect before use
+shared_array.connect()
+with shared_array.array() as arr:  # Thread-safe access
+    arr[:] = new_data
+shared_array.disconnect()
+
+# Cleanup in main process
+shared_array.destroy()
+
+# Avoid - multiprocessing.Array or manual shared memory
+from multiprocessing import Array
+shared = Array('f', 10000)  # Wrong for complex array operations
+```
+
+### Data Logging (ataraxis-data-structures)
+
+Use `DataLogger` and `LogPackage` for high-throughput logging:
+
+```python
+from pathlib import Path
+from ataraxis_data_structures import DataLogger, LogPackage
+import numpy as np
+
+# Good - dedicated logger process for parallel I/O
+logger = DataLogger(
+    output_directory=Path("/data/experiment"),
+    instance_name="neural_data",
+    thread_count=5,
+)
+logger.start()
+
+# Package and submit data
+package = LogPackage(
+    source_id=np.uint8(1),
+    acquisition_time=np.uint64(elapsed_us),
+    serialized_data=data_array.tobytes(),
+)
+logger.input_queue.put(package)
+
+# Cleanup
+logger.stop()
+
+# Avoid - direct file writes in acquisition loop
+np.save(f"frame_{i}.npy", data)  # Wrong - blocks acquisition
+```
+
+### Quick Reference Table
+
+| Task                    | Use This                    | Not This                                |
+|-------------------------|-----------------------------|-----------------------------------------|
+| Console output          | `console.echo()`            | `print()` (exception: formatted tables) |
+| Error handling          | `console.error()`           | `raise Exception()`                     |
+| Convert to list         | `ensure_list()`             | Manual type checking                    |
+| Batch iteration         | `chunk_iterable()`          | Manual slicing                          |
+| Precision timing        | `PrecisionTimer`            | `time.time()`, `time.perf_counter()`    |
+| Delays                  | `PrecisionTimer.delay()`    | `time.sleep()`                          |
+| Timestamps              | `get_timestamp()`           | `datetime.now().strftime()`             |
+| Time unit conversion    | `convert_time()`            | Manual division/multiplication          |
+| YAML serialization      | `YamlConfig` subclass       | `yaml.dump()`/`yaml.load()`             |
+| Inter-process arrays    | `SharedMemoryArray`         | `multiprocessing.Array`                 |
+| High-throughput logging | `DataLogger` + `LogPackage` | Direct file writes                      |
 
 ---
 
@@ -779,16 +1033,22 @@ def has_nvidia():
 
 Transform code to match Sun Lab style:
 
-| Input (What you wrote)                                 | Output (Correct style)                                       |
-|--------------------------------------------------------|--------------------------------------------------------------|
-| `def calc(x):`                                         | `def calculate_value(x: float) -> float:`                    |
-| `pos = get_pos()`                                      | `position = get_position()`                                  |
-| `np.zeros((4,), np.float32)`                           | `np.zeros((4,), dtype=np.float32)`                           |
-| `# set x to 5`                                         | Remove comment (self-explanatory code)                       |
-| `data: NDArray`                                        | `data: NDArray[np.float32]`                                  |
-| `"""A class that processes data."""`                   | `"""Processes experimental data."""`                         |
-| `"""Whether to enable filtering."""`                   | `"""Determines whether to enable filtering."""`              |
-| `raise ValueError("Bad input")`                        | `console.error(message="...", error=ValueError)`             |
+| Input (What you wrote)                 | Output (Correct style)                                         |
+|----------------------------------------|----------------------------------------------------------------|
+| `def calc(x):`                         | `def calculate_value(x: float) -> float:`                      |
+| `pos = get_pos()`                      | `position = get_position()`                                    |
+| `np.zeros((4,), np.float32)`           | `np.zeros((4,), dtype=np.float32)`                             |
+| `# set x to 5`                         | Remove comment (self-explanatory code)                         |
+| `data: NDArray`                        | `data: NDArray[np.float32]`                                    |
+| `"""A class that processes data."""`   | `"""Processes experimental data."""`                           |
+| `"""Whether to enable filtering."""`   | `"""Determines whether to enable filtering."""`                |
+| `raise ValueError("Bad input")`        | `console.error(message="...", error=ValueError)`               |
+| `print("Starting...")`                 | `console.echo(...)` (exception: tabulate/formatted tables)     |
+| `time.sleep(0.005)`                    | `timer.delay(delay=5000)`  (microseconds)                      |
+| `elapsed = time.time() - start`        | `elapsed = timer.elapsed` (use PrecisionTimer)                 |
+| `datetime.now().strftime("%Y-%m-%d")`  | `get_timestamp(output_format=TimestampFormats.STRING)`         |
+| `duration_s = duration_us / 1_000_000` | `convert_time(time=duration_us, from_units=..., to_units=...)` |
+| `yaml.dump(config.__dict__, file)`     | `config.to_yaml(file_path=path)` (subclass YamlConfig)         |
 
 ---
 
@@ -796,14 +1056,14 @@ Transform code to match Sun Lab style:
 
 ### Documentation Anti-Patterns
 
-| Anti-Pattern                            | Problem                    | Solution                                          |
-|-----------------------------------------|----------------------------|---------------------------------------------------|
-| `"""A class that processes data."""`    | Noun phrase, not imperative | `"""Processes experimental data."""`             |
-| Bullet lists in docstrings              | Breaks prose flow          | Use complete sentences instead                    |
-| `# Set x to 5` before `x = 5`           | States the obvious         | Remove or explain *why*                           |
-| Missing dtype in `NDArray`              | Type checking fails        | Always specify `NDArray[np.float32]`              |
-| `Whether to...` for booleans            | Incomplete phrasing        | Use `Determines whether to...`                    |
-| `# ======` section separators           | Visual clutter             | Use blank lines to separate sections              |
+| Anti-Pattern                         | Problem                     | Solution                             |
+|--------------------------------------|-----------------------------|--------------------------------------|
+| `"""A class that processes data."""` | Noun phrase, not imperative | `"""Processes experimental data."""` |
+| Bullet lists in docstrings           | Breaks prose flow           | Use complete sentences instead       |
+| `# Set x to 5` before `x = 5`        | States the obvious          | Remove or explain *why*              |
+| Missing dtype in `NDArray`           | Type checking fails         | Always specify `NDArray[np.float32]` |
+| `Whether to...` for booleans         | Incomplete phrasing         | Use `Determines whether to...`       |
+| `# ======` section separators        | Visual clutter              | Use blank lines to separate sections |
 
 ### Naming Anti-Patterns
 
@@ -823,6 +1083,21 @@ Transform code to match Sun Lab style:
 | `from typing import Optional`        | Old-style optional       | Use `Type | None` instead                     |
 | `@numba.njit` without `cache=True`   | Recompiles every run     | `@numba.njit(cache=True)`                     |
 | Inconsistent f-string prefixes       | Confusing multi-line     | Use `f` prefix on all lines                   |
+
+### Ataraxis Library Anti-Patterns
+
+| Anti-Pattern                         | Problem                         | Solution                                                             |
+|--------------------------------------|---------------------------------|----------------------------------------------------------------------|
+| `print("message")` for plain text    | No logging, inconsistent        | `console.echo(message="...")` (exception: tabulate/formatted tables) |
+| `time.sleep(0.001)`                  | Low precision, blocks GIL       | `PrecisionTimer.delay(delay=1000)`                                   |
+| `time.time()` for intervals          | Insufficient precision          | `PrecisionTimer.elapsed`                                             |
+| `datetime.now().strftime(...)`       | Inconsistent format             | `get_timestamp()`                                                    |
+| `elapsed_us / 1_000_000`             | Magic number conversion         | `convert_time(time=..., from_units=..., to_units=...)`               |
+| Manual YAML dump/load                | No type safety                  | Subclass `YamlConfig`                                                |
+| `multiprocessing.Array`              | Limited dtype support           | `SharedMemoryArray`                                                  |
+| Direct file writes in loops          | Blocks acquisition              | `DataLogger` with `LogPackage`                                       |
+| Manual `isinstance()` for list check | Verbose, error-prone            | `ensure_list()`                                                      |
+| Manual slice batching                | Verbose, doesn't preserve dtype | `chunk_iterable()`                                                   |
 
 ---
 
@@ -854,4 +1129,17 @@ Python Style Compliance:
 - [ ] Pathlib used for path manipulation (not string concatenation)
 - [ ] Two blank lines between top-level definitions
 - [ ] Trailing commas in multi-line structures
+
+Ataraxis Library Preferences:
+- [ ] Console output uses console.echo() instead of print() (exception: tabulate/formatted tables)
+- [ ] Error handling uses console.error() instead of raise
+- [ ] List conversion uses ensure_list() instead of manual type checks
+- [ ] Batch iteration uses chunk_iterable() instead of manual slicing
+- [ ] Precision timing uses PrecisionTimer instead of time.time()/perf_counter()
+- [ ] Delays use PrecisionTimer.delay() instead of time.sleep()
+- [ ] Timestamps use get_timestamp() instead of datetime.strftime()
+- [ ] Time unit conversion uses convert_time() instead of manual math
+- [ ] YAML-serializable configs subclass YamlConfig
+- [ ] Inter-process arrays use SharedMemoryArray instead of multiprocessing.Array
+- [ ] High-throughput logging uses DataLogger/LogPackage instead of direct writes
 ```
