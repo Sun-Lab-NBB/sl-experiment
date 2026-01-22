@@ -4,6 +4,8 @@ This module exposes tools from the 'sl-get' and 'sl-manage' CLI groups through t
 enabling AI agents to programmatically interact with data acquisition system features.
 """
 
+import os
+import uuid
 from typing import Literal
 from pathlib import Path
 
@@ -231,6 +233,120 @@ def validate_zaber_configuration_tool(port: str, device_index: int) -> str:
             parts.append(f"Warnings: {'; '.join(result.warnings)}")
 
         return " | ".join(parts)
+    except Exception as exception:
+        return f"Error: {exception}"
+
+
+@get_mcp.tool()
+def check_mount_accessibility_tool(path: str) -> str:
+    """Verifies that a filesystem path is accessible and writable.
+
+    Checks whether the specified path exists, is a mount point, and supports write operations. Use this to verify
+    SMB/NFS mounts are properly configured before running acquisition sessions.
+
+    Args:
+        path: Filesystem path to verify (e.g., "/mnt/server/data").
+
+    Returns:
+        Status message indicating existence, mount status, write capability, and any errors.
+    """
+    try:
+        target = Path(path)
+
+        # Checks path existence.
+        if not target.exists():
+            return f"Path: {path} | Exists: No | Mount: N/A | Writable: N/A | Status: FAIL"
+
+        # Checks if path is a mount point.
+        is_mount = os.path.ismount(path)
+
+        # Tests write capability by creating and removing a temporary file.
+        writable = False
+        write_error = None
+        try:
+            test_file = target / f".mount_test_{uuid.uuid4().hex[:8]}"
+            test_file.write_text("test")
+            test_file.unlink()
+            writable = True
+        except PermissionError:
+            write_error = "Permission denied"
+        except OSError as os_error:
+            write_error = str(os_error)
+
+        mount_str = "Yes" if is_mount else "No"
+        write_str = "Yes" if writable else "No"
+        status = "OK" if writable else "FAIL"
+        result = f"Path: {path} | Exists: Yes | Mount: {mount_str} | Writable: {write_str} | Status: {status}"
+
+        if write_error:
+            result += f" | Error: {write_error}"
+
+        return result
+    except Exception as exception:
+        return f"Error: {exception}"
+
+
+@get_mcp.tool()
+def check_system_mounts_tool() -> str:
+    """Verifies all filesystem paths in the system configuration are accessible and writable.
+
+    Reads the active system configuration and checks each filesystem path (root_directory, server_directory,
+    nas_directory, and system-specific directories like mesoscope_directory) for existence, mount status, and
+    write capability.
+
+    Returns:
+        A formatted report showing the status of each configured filesystem path with a summary line.
+    """
+
+    def check_path(name: str, directory: Path) -> str:
+        """Checks a single path and returns a status line."""
+        path_str = str(directory)
+        if not directory or path_str in ("", "."):
+            return f"{name}: (not configured)"
+
+        if not directory.exists():
+            return f"{name}: {path_str} | Exists: No | FAIL"
+
+        is_mount = os.path.ismount(path_str)
+        mount_str = "Yes" if is_mount else "No"
+
+        # Tests write capability.
+        writable = False
+        try:
+            test_file = directory / f".mount_test_{uuid.uuid4().hex[:8]}"
+            test_file.write_text("test")
+            test_file.unlink()
+            writable = True
+        except Exception:
+            pass
+
+        write_str = "Yes" if writable else "No"
+        status = "OK" if writable else "FAIL"
+        return f"{name}: {path_str} | Mount: {mount_str} | Writable: {write_str} | {status}"
+
+    try:
+        system_config = get_system_configuration_data()
+        filesystem = system_config.filesystem
+
+        results = [
+            f"System: {system_config.name}",
+            check_path(name="root_directory", directory=filesystem.root_directory),
+            check_path(name="server_directory", directory=filesystem.server_directory),
+            check_path(name="nas_directory", directory=filesystem.nas_directory),
+        ]
+
+        # Adds system-specific directories (mesoscope has mesoscope_directory).
+        if hasattr(filesystem, "mesoscope_directory"):
+            results.append(check_path(name="mesoscope_directory", directory=filesystem.mesoscope_directory))
+
+        # Computes summary statistics.
+        fail_count = sum(1 for r in results[1:] if "FAIL" in r)
+        ok_count = sum(1 for r in results[1:] if "OK" in r)
+        not_configured = sum(1 for r in results[1:] if "not configured" in r)
+
+        results.append(f"Summary: {ok_count} OK, {fail_count} FAIL, {not_configured} not configured")
+
+        return "\n".join(results)
     except Exception as exception:
         return f"Error: {exception}"
 
