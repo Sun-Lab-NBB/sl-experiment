@@ -344,6 +344,120 @@ def get_zaber_devices_info() -> str
 
 ---
 
+## Configuration Functions
+
+### get_zaber_device_settings
+
+Reads all configuration settings from a device's non-volatile memory.
+
+```python
+def get_zaber_device_settings(port: str, device_index: int) -> ZaberDeviceSettings
+```
+
+**Parameters:**
+
+| Parameter      | Type  | Description                                           |
+|----------------|-------|-------------------------------------------------------|
+| `port`         | `str` | Serial port path (e.g., `/dev/ttyUSB0`)               |
+| `device_index` | `int` | Zero-based index in daisy-chain (0 = closest to USB)  |
+
+**Returns:** `ZaberDeviceSettings` dataclass containing:
+
+| Attribute              | Type    | Source         |
+|------------------------|---------|----------------|
+| `device_label`         | `str`   | device.label   |
+| `axis_label`           | `str`   | axis.label     |
+| `checksum`             | `int`   | USER_DATA_0    |
+| `shutdown_flag`        | `int`   | USER_DATA_1    |
+| `unsafe_flag`          | `int`   | USER_DATA_10   |
+| `park_position`        | `int`   | USER_DATA_11   |
+| `maintenance_position` | `int`   | USER_DATA_12   |
+| `mount_position`       | `int`   | USER_DATA_13   |
+| `limit_min`            | `float` | LIMIT_MIN      |
+| `limit_max`            | `float` | LIMIT_MAX      |
+| `current_position`     | `float` | POS            |
+
+**Raises:**
+
+- `ConnectionError`: If unable to connect to the specified port.
+- `IndexError`: If device_index is out of range for the connected devices.
+
+### set_zaber_device_setting
+
+Writes a single setting to device non-volatile memory with validation.
+
+```python
+def set_zaber_device_setting(
+    port: str,
+    device_index: int,
+    setting: str,
+    value: int | str
+) -> str
+```
+
+**Parameters:**
+
+| Parameter      | Type        | Description                                               |
+|----------------|-------------|-----------------------------------------------------------|
+| `port`         | `str`       | Serial port path                                          |
+| `device_index` | `int`       | Zero-based index in daisy-chain                           |
+| `setting`      | `str`       | Setting name (see table below)                            |
+| `value`        | `int \| str`| Value to write (int for positions/flags, str for labels)  |
+
+**Valid Settings:**
+
+| Setting                | Type  | Validation                            |
+|------------------------|-------|---------------------------------------|
+| `park_position`        | `int` | Must be within [limit_min, limit_max] |
+| `maintenance_position` | `int` | Must be within [limit_min, limit_max] |
+| `mount_position`       | `int` | Must be within [limit_min, limit_max] |
+| `unsafe_flag`          | `int` | Must be 0 or 1                        |
+| `device_label`         | `str` | Auto-updates checksum                 |
+| `axis_label`           | `str` | No validation                         |
+
+**Returns:** Success message containing old and new values.
+
+**Raises:**
+
+- `ConnectionError`: If unable to connect to the specified port.
+- `IndexError`: If device_index is out of range.
+- `ValueError`: If setting name is invalid, value type is incorrect, or value is out of range.
+
+**Notes:** Label changes automatically update USER_DATA_0 (checksum) to maintain device validation. The `shutdown_flag`
+and `checksum` settings cannot be modified directly as they are managed by the binding library.
+
+### validate_zaber_device_configuration
+
+Validates device configuration for use with the binding library.
+
+```python
+def validate_zaber_device_configuration(port: str, device_index: int) -> ZaberValidationResult
+```
+
+**Parameters:**
+
+| Parameter      | Type  | Description                            |
+|----------------|-------|----------------------------------------|
+| `port`         | `str` | Serial port path                       |
+| `device_index` | `int` | Zero-based index in daisy-chain        |
+
+**Returns:** `ZaberValidationResult` dataclass containing:
+
+| Attribute         | Type              | Description                                              |
+|-------------------|-------------------|----------------------------------------------------------|
+| `is_valid`        | `bool`            | Overall validation result                                |
+| `checksum_valid`  | `bool`            | Whether stored checksum matches calculated               |
+| `positions_valid` | `bool`            | Whether all positions are within motion limits           |
+| `errors`          | `tuple[str, ...]` | Critical issues preventing use with binding library      |
+| `warnings`        | `tuple[str, ...]` | Non-critical issues that may affect device operation     |
+
+**Raises:**
+
+- `ConnectionError`: If unable to connect to the specified port.
+- `IndexError`: If device_index is out of range.
+
+---
+
 ## Dependencies
 
 ### External Requirements

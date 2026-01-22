@@ -174,6 +174,73 @@ sl-shared-assets. This enables consistent animal positioning across sessions.
 
 ---
 
+## Agentic Configuration Management
+
+Use MCP tools to read and modify Zaber motor configuration stored in non-volatile memory.
+
+### Available MCP Tools
+
+| Tool                                                                          | Purpose                        |
+|-------------------------------------------------------------------------------|--------------------------------|
+| `get_zaber_devices_tool()`                                                    | Discover connected motors      |
+| `get_zaber_device_settings_tool(port, device_index)`                          | Read device configuration      |
+| `set_zaber_device_setting_tool(port, device_index, setting, value, confirm)`  | Modify device setting          |
+| `validate_zaber_configuration_tool(port, device_index)`                       | Validate device configuration  |
+| `get_checksum_tool(input_string)`                                             | Calculate CRC32-XFER checksum  |
+
+### Configuration Workflow
+
+#### Reading Current Configuration
+
+1. Discover devices: `get_zaber_devices_tool()`
+2. Read settings: `get_zaber_device_settings_tool(port="/dev/ttyUSB0", device_index=0)`
+3. Validate configuration: `validate_zaber_configuration_tool(port="/dev/ttyUSB0", device_index=0)`
+
+#### Modifying Configuration
+
+**Safety Protocol:**
+
+1. Read current value using `get_zaber_device_settings_tool()`
+2. Show user the current value and proposed change
+3. Preview change: `set_zaber_device_setting_tool(..., confirm=False)`
+4. Execute change: `set_zaber_device_setting_tool(..., confirm=True)`
+5. Verify change: `get_zaber_device_settings_tool()`
+
+### Configurable Settings
+
+| Setting                  | Type  | Description                              | Constraints                   |
+|--------------------------|-------|------------------------------------------|-------------------------------|
+| `park_position`          | `int` | Shutdown position (native units)         | Must be within motion limits  |
+| `maintenance_position`   | `int` | Maintenance position (native units)      | Must be within motion limits  |
+| `mount_position`         | `int` | Animal mounting position (native units)  | Must be within motion limits  |
+| `unsafe_flag`            | `int` | Requires safe position for homing        | 0 or 1                        |
+| `device_label`           | `str` | Device identifier                        | Auto-updates checksum         |
+| `axis_label`             | `str` | Axis identifier                          | No constraints                |
+
+### Read-Only Settings
+
+| Setting            | Description                      |
+|--------------------|----------------------------------|
+| `checksum`         | Auto-calculated from device_label|
+| `shutdown_flag`    | Managed by binding library       |
+| `limit_min`        | Hardware motion limit            |
+| `limit_max`        | Hardware motion limit            |
+| `current_position` | Live motor position              |
+
+### Initial Device Setup Workflow
+
+For new motors not yet configured for use with the binding library:
+
+1. **Discover device**: `get_zaber_devices_tool()`
+2. **Set device label**: `set_zaber_device_setting_tool(port, index, "device_label", "HeadBar", confirm=True)`
+   (This automatically calculates and sets the checksum)
+3. **Set axis label**: `set_zaber_device_setting_tool(port, index, "axis_label", "Z", confirm=True)`
+4. **Set positions**: Configure park, maintenance, and mount positions
+5. **Set unsafe flag**: If motor requires safe position for homing
+6. **Validate**: `validate_zaber_configuration_tool(port, index)`
+
+---
+
 ## Safety Patterns
 
 ### Park/Unpark Workflow

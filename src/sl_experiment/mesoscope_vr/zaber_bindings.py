@@ -53,6 +53,50 @@ class _ZaberPortData:
         return len(self.devices) > 0
 
 
+@dataclass(frozen=True)
+class ZaberDeviceSettings:
+    """Stores configuration settings read from a Zaber device's non-volatile memory."""
+
+    device_label: str
+    """The user-assigned name of the device."""
+    axis_label: str
+    """The user-assigned name of the axis."""
+    checksum: int
+    """The CRC32-XFER checksum stored in USER_DATA_0."""
+    shutdown_flag: int
+    """The shutdown flag stored in USER_DATA_1 (1 = proper shutdown, 0 = abnormal)."""
+    unsafe_flag: int
+    """The unsafe flag stored in USER_DATA_10 (1 = requires safe position for homing)."""
+    park_position: int
+    """The park position in native motor units stored in USER_DATA_11."""
+    maintenance_position: int
+    """The maintenance position in native motor units stored in USER_DATA_12."""
+    mount_position: int
+    """The mount position in native motor units stored in USER_DATA_13."""
+    limit_min: float
+    """The minimum allowed position relative to home in native motor units."""
+    limit_max: float
+    """The maximum allowed position relative to home in native motor units."""
+    current_position: float
+    """The current absolute position of the motor in native motor units."""
+
+
+@dataclass(frozen=True)
+class ZaberValidationResult:
+    """Stores the results of validating a Zaber device's configuration."""
+
+    is_valid: bool
+    """Determines whether the device configuration is valid for use with the binding library."""
+    checksum_valid: bool
+    """Determines whether the stored checksum matches the calculated checksum for the device label."""
+    positions_valid: bool
+    """Determines whether all predefined positions are within the device motion limits."""
+    errors: tuple[str, ...]
+    """Contains critical issues that prevent the device from being used with the binding library."""
+    warnings: tuple[str, ...]
+    """Contains non-critical issues that may affect device operation."""
+
+
 def _attempt_connection(port: str) -> list[_ZaberDeviceData]:
     """Checks the specified USB port for Zaber devices and parses identification data for any discovered device.
 
@@ -181,6 +225,269 @@ def get_zaber_devices_info() -> str:
     """
     port_info_list = _scan_active_ports()
     return _format_device_info(port_info_list=port_info_list)
+
+
+def get_zaber_device_settings(port: str, device_index: int) -> ZaberDeviceSettings:
+    """Reads configuration settings from a Zaber device's non-volatile memory.
+
+    Args:
+        port: Serial port path (e.g., "/dev/ttyUSB0").
+        device_index: Zero-based index in the daisy-chain (0 = closest to USB port).
+
+    Returns:
+        A ZaberDeviceSettings instance containing the device configuration including labels, positions,
+        flags, and motion limits.
+
+    Raises:
+        ConnectionError: If unable to connect to the specified port.
+        IndexError: If device_index is out of range for the connected devices.
+    """
+    try:
+        with Connection.open_serial_port(port_name=port, direct=False) as connection:
+            devices = connection.detect_devices()
+
+            if device_index < 0 or device_index >= len(devices):
+                message = (
+                    f"Unable to read settings from device at index {device_index}. The port {port} has "
+                    f"{len(devices)} device(s) connected (valid indices: 0 to {len(devices) - 1})."
+                )
+                console.error(message=message, error=IndexError)
+
+            device = devices[device_index]
+            axis = device.get_axis(axis_number=1)
+
+            # Reads all configuration settings from non-volatile memory.
+            return ZaberDeviceSettings(
+                device_label=device.label or "",
+                axis_label=axis.label or "",
+                checksum=int(device.settings.get(setting=SettingConstants.USER_DATA_0)),
+                shutdown_flag=int(device.settings.get(setting=SettingConstants.USER_DATA_1)),
+                unsafe_flag=int(device.settings.get(setting=SettingConstants.USER_DATA_10)),
+                park_position=int(device.settings.get(setting=SettingConstants.USER_DATA_11)),
+                maintenance_position=int(device.settings.get(setting=SettingConstants.USER_DATA_12)),
+                mount_position=int(device.settings.get(setting=SettingConstants.USER_DATA_13)),
+                limit_min=axis.settings.get(setting=SettingConstants.LIMIT_MIN),
+                limit_max=axis.settings.get(setting=SettingConstants.LIMIT_MAX),
+                current_position=axis.get_position(),
+            )
+
+    except Exception as exception:
+        if isinstance(exception, (IndexError,)):
+            raise
+        message = f"Unable to connect to Zaber device on port {port}: {exception}"
+        console.error(message=message, error=ConnectionError)
+        raise  # Unreachable but satisfies type checker
+
+
+def set_zaber_device_setting(port: str, device_index: int, setting: str, value: int | str) -> str:
+    """Writes a configuration setting to a Zaber device's non-volatile memory.
+
+    Notes:
+        Position values are validated against device motion limits before writing. Label changes automatically
+        update the checksum (USER_DATA_0) to maintain device validation. The shutdown_flag and checksum settings
+        cannot be modified directly as they are managed by the binding library.
+
+    Args:
+        port: Serial port path (e.g., "/dev/ttyUSB0").
+        device_index: Zero-based index in the daisy-chain (0 = closest to USB port).
+        setting: Setting name. Valid options are park_position, maintenance_position, mount_position,
+            unsafe_flag, device_label, and axis_label.
+        value: Value to write. Use integers for positions and flags, strings for labels.
+
+    Returns:
+        A success message containing the old and new values.
+
+    Raises:
+        ConnectionError: If unable to connect to the specified port.
+        IndexError: If device_index is out of range for the connected devices.
+        ValueError: If the setting name is invalid, the value type is incorrect, or the value is out of range.
+    """
+    valid_settings = {"park_position", "maintenance_position", "mount_position", "unsafe_flag", "device_label",
+                      "axis_label"}
+    protected_settings = {"shutdown_flag", "checksum"}
+
+    if setting in protected_settings:
+        message = (
+            f"Unable to modify the '{setting}' setting directly. This setting is managed by the binding library "
+            f"and cannot be changed through this interface."
+        )
+        console.error(message=message, error=ValueError)
+
+    if setting not in valid_settings:
+        message = (
+            f"Unable to modify setting '{setting}'. Valid settings are: {', '.join(sorted(valid_settings))}."
+        )
+        console.error(message=message, error=ValueError)
+
+    try:
+        with Connection.open_serial_port(port_name=port, direct=False) as connection:
+            devices = connection.detect_devices()
+
+            if device_index < 0 or device_index >= len(devices):
+                message = (
+                    f"Unable to write setting to device at index {device_index}. The port {port} has "
+                    f"{len(devices)} device(s) connected (valid indices: 0 to {len(devices) - 1})."
+                )
+                console.error(message=message, error=IndexError)
+
+            device = devices[device_index]
+            axis = device.get_axis(axis_number=1)
+
+            # Handles label settings.
+            if setting == "device_label":
+                if not isinstance(value, str):
+                    message = f"Unable to set device_label. Expected a string value, but got {type(value).__name__}."
+                    console.error(message=message, error=ValueError)
+                    raise ValueError(message)  # Unreachable, but satisfies type checker.
+
+                old_value = device.label or ""
+                device.set_label(label=value)
+
+                # Calculates and updates the checksum to match the new label.
+                calculator = CRCCalculator()
+                new_checksum = calculator.string_checksum(string=value)
+                device.settings.set(setting=SettingConstants.USER_DATA_0, value=new_checksum)
+
+                return f"device_label: '{old_value}' -> '{value}' (checksum updated to {new_checksum})"
+
+            if setting == "axis_label":
+                if not isinstance(value, str):
+                    message = f"Unable to set axis_label. Expected a string value, but got {type(value).__name__}."
+                    console.error(message=message, error=ValueError)
+                    raise ValueError(message)  # Unreachable, but satisfies type checker.
+
+                old_value = axis.label or ""
+                axis.set_label(label=value)
+                return f"axis_label: '{old_value}' -> '{value}'"
+
+            # Handles numeric settings. Ensures the value is an integer.
+            if not isinstance(value, int):
+                message = (
+                    f"Unable to set {setting}. Expected an integer value, but got {type(value).__name__}."
+                )
+                console.error(message=message, error=ValueError)
+                raise ValueError(message)  # Unreachable, but satisfies type checker.
+
+            # Validates position values against motion limits.
+            if setting in {"park_position", "maintenance_position", "mount_position"}:
+                limit_min = axis.settings.get(setting=SettingConstants.LIMIT_MIN)
+                limit_max = axis.settings.get(setting=SettingConstants.LIMIT_MAX)
+
+                if value < limit_min or value > limit_max:
+                    message = (
+                        f"Unable to set {setting} to {value}. The value must be within the device motion limits "
+                        f"[{limit_min}, {limit_max}]."
+                    )
+                    console.error(message=message, error=ValueError)
+
+            # Validates unsafe_flag value.
+            if setting == "unsafe_flag" and value not in (0, 1):
+                message = f"Unable to set unsafe_flag to {value}. The value must be 0 or 1."
+                console.error(message=message, error=ValueError)
+
+            # Maps setting names to USER_DATA constants.
+            setting_map = {
+                "park_position": SettingConstants.USER_DATA_11,
+                "maintenance_position": SettingConstants.USER_DATA_12,
+                "mount_position": SettingConstants.USER_DATA_13,
+                "unsafe_flag": SettingConstants.USER_DATA_10,
+            }
+
+            user_data_setting = setting_map[setting]
+            old_int_value = int(device.settings.get(setting=user_data_setting))
+            device.settings.set(setting=user_data_setting, value=float(value))
+
+            return f"{setting}: {old_int_value} -> {value}"
+
+    except Exception as exception:
+        if isinstance(exception, (IndexError, ValueError)):
+            raise
+        message = f"Unable to connect to Zaber device on port {port}: {exception}"
+        console.error(message=message, error=ConnectionError)
+        raise  # Unreachable but satisfies type checker
+
+
+def validate_zaber_device_configuration(port: str, device_index: int) -> ZaberValidationResult:
+    """Validates a Zaber device's configuration for use with the binding library.
+
+    Notes:
+        Performs comprehensive validation including checksum verification against the device label,
+        position bounds checking against motion limits, and configuration completeness verification.
+
+    Args:
+        port: Serial port path (e.g., "/dev/ttyUSB0").
+        device_index: Zero-based index in the daisy-chain (0 = closest to USB port).
+
+    Returns:
+        A ZaberValidationResult instance containing validation status, error messages, and warnings.
+
+    Raises:
+        ConnectionError: If unable to connect to the specified port.
+        IndexError: If device_index is out of range for the connected devices.
+    """
+    try:
+        settings = get_zaber_device_settings(port=port, device_index=device_index)
+    except (ConnectionError, IndexError):
+        raise
+    except Exception as exception:
+        message = f"Unable to validate device configuration: {exception}"
+        console.error(message=message, error=ConnectionError)
+        raise  # Unreachable but satisfies type checker
+
+    errors: list[str] = []
+    warnings: list[str] = []
+
+    # Validates checksum against device label.
+    calculator = CRCCalculator()
+    expected_checksum = calculator.string_checksum(string=settings.device_label) if settings.device_label else 0
+    stored_checksum = settings.checksum
+    checksum_valid = expected_checksum == stored_checksum
+
+    if not checksum_valid:
+        if not settings.device_label:
+            errors.append("Device label is not set. Set device_label before using with binding library.")
+        else:
+            errors.append(
+                f"Checksum mismatch: stored {stored_checksum}, expected {expected_checksum} for label "
+                f"'{settings.device_label}'. Update device_label to recalculate checksum."
+            )
+
+    # Validates position values against motion limits.
+    limit_min = settings.limit_min
+    limit_max = settings.limit_max
+    positions_valid = True
+
+    position_checks = [
+        ("park_position", settings.park_position),
+        ("maintenance_position", settings.maintenance_position),
+        ("mount_position", settings.mount_position),
+    ]
+    for position_name, position_value in position_checks:
+        if position_value < limit_min or position_value > limit_max:
+            positions_valid = False
+            errors.append(
+                f"{position_name} ({position_value}) is outside motion limits [{limit_min}, {limit_max}]."
+            )
+
+    # Checks for potential configuration issues.
+    if not settings.axis_label:
+        warnings.append("Axis label is not set. Consider setting axis_label for identification.")
+
+    if settings.shutdown_flag == 0 and settings.unsafe_flag == 1:
+        warnings.append(
+            "Device was not properly shut down and is marked as unsafe. Manual verification may be "
+            "required before homing."
+        )
+
+    is_valid = checksum_valid and positions_valid and len(errors) == 0
+
+    return ZaberValidationResult(
+        is_valid=is_valid,
+        checksum_valid=checksum_valid,
+        positions_valid=positions_valid,
+        errors=tuple(errors),
+        warnings=tuple(warnings),
+    )
 
 
 class CRCCalculator:

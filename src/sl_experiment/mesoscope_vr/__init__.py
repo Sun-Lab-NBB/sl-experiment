@@ -2,7 +2,16 @@
 system.
 """
 
-from .zaber_bindings import CRCCalculator, discover_zaber_devices, get_zaber_devices_info
+from .zaber_bindings import (
+    CRCCalculator,
+    ZaberDeviceSettings,
+    ZaberValidationResult,
+    discover_zaber_devices,
+    get_zaber_devices_info,
+    get_zaber_device_settings,
+    set_zaber_device_setting,
+    validate_zaber_device_configuration,
+)
 from .data_acquisition import (
     experiment_logic,
     maintenance_logic,
@@ -18,8 +27,11 @@ from .data_preprocessing import (
 
 __all__ = [
     "CRCCalculator",
+    "ZaberDeviceSettings",
+    "ZaberValidationResult",
     "discover_zaber_devices",
     "experiment_logic",
+    "get_zaber_device_settings",
     "get_zaber_devices_info",
     "lick_training_logic",
     "maintenance_logic",
@@ -27,5 +39,7 @@ __all__ = [
     "preprocess_session_data",
     "purge_session",
     "run_training_logic",
+    "set_zaber_device_setting",
+    "validate_zaber_device_configuration",
     "window_checking_logic",
 ]
