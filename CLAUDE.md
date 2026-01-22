@@ -79,6 +79,7 @@ state to prevent integration errors.
 | `/sun-lab-style`                 | Apply Sun Lab coding conventions (REQUIRED for all code changes)             |
 | `/camera-interface`              | Guide for using ataraxis-video-system to implement camera hardware           |
 | `/microcontroller-interface`     | Guide for implementing microcontroller modules and PC interfaces             |
+| `/zaber-interface`               | Guide for implementing Zaber motor interfaces and binding classes            |
 | `/acquisition-system-setup`      | Configure data acquisition systems (uses MCP tools from sl-shared-assets)    |
 | `/experiment-design`             | Interactive guidance for building experiment configurations (uses MCP tools) |
 | `/modifying-mesoscope-vr-system` | Guide for extending mesoscope-vr with new hardware components                |
@@ -124,6 +125,8 @@ Use the `/modifying-mesoscope-vr-system` skill for comprehensive guidance on:
 For low-level camera hardware implementation, use the `/camera-interface` skill.
 
 For low-level microcontroller hardware implementation, use the `/microcontroller-interface` skill.
+
+For low-level Zaber motor hardware implementation, use the `/zaber-interface` skill.
 
 **Adding hardware bindings (general):**
 

@@ -4,6 +4,8 @@ This module exposes tools from the 'sl-get' and 'sl-manage' CLI groups through t
 enabling AI agents to programmatically interact with data acquisition system features.
 """
 
+import os
+import uuid
 from typing import Literal
 from pathlib import Path
 
@@ -15,6 +17,9 @@ from ..mesoscope_vr import (
     CRCCalculator,
     purge_session,
     get_zaber_devices_info,
+    get_zaber_device_settings,
+    set_zaber_device_setting,
+    validate_zaber_device_configuration,
     preprocess_session_data,
     migrate_animal_between_projects,
 )
@@ -118,6 +123,232 @@ def get_checksum_tool(input_string: str) -> str:
         return f"Error: {exception}"
     else:
         return f"CRC32-XFER checksum for '{input_string}': {checksum}"
+
+
+@get_mcp.tool()
+def get_zaber_device_settings_tool(port: str, device_index: int) -> str:
+    """Reads configuration settings from a Zaber device's non-volatile memory.
+
+    Args:
+        port: Serial port path (e.g., "/dev/ttyUSB0").
+        device_index: Zero-based index in the daisy-chain (0 = closest to USB port).
+
+    Returns:
+        A formatted string containing device settings including labels, positions, flags, and motion limits.
+    """
+    try:
+        settings = get_zaber_device_settings(port=port, device_index=device_index)
+        return (
+            f"Device: {settings.device_label or '(not set)'} | Axis: {settings.axis_label or '(not set)'} | "
+            f"Checksum: {settings.checksum} | Shutdown: {settings.shutdown_flag} | Unsafe: {settings.unsafe_flag} | "
+            f"Park: {settings.park_position} | Maintenance: {settings.maintenance_position} | "
+            f"Mount: {settings.mount_position} | Limits: [{settings.limit_min}, {settings.limit_max}] | "
+            f"Position: {settings.current_position}"
+        )
+    except Exception as exception:
+        return f"Error: {exception}"
+
+
+@get_mcp.tool()
+def set_zaber_device_setting_tool(
+    port: str,
+    device_index: int,
+    setting: str,
+    value: str,
+    confirm: bool = False,
+) -> str:
+    """Writes a configuration setting to a Zaber device's non-volatile memory.
+
+    Important:
+        This operation modifies hardware non-volatile memory. The AI agent MUST show the user the current value
+        and proposed change before calling with confirm=True.
+
+    Args:
+        port: Serial port path (e.g., "/dev/ttyUSB0").
+        device_index: Zero-based index in the daisy-chain (0 = closest to USB port).
+        setting: Setting name. Valid options are park_position, maintenance_position, mount_position,
+            unsafe_flag, device_label, and axis_label.
+        value: Value to write. Use integer strings for positions and flags, regular strings for labels.
+        confirm: Must be True to execute the write operation. When False, returns a preview without modifying hardware.
+
+    Returns:
+        Success message with old and new values, or a preview message if confirm is False.
+    """
+    if not confirm:
+        try:
+            settings = get_zaber_device_settings(port=port, device_index=device_index)
+            current_values = {
+                "park_position": settings.park_position,
+                "maintenance_position": settings.maintenance_position,
+                "mount_position": settings.mount_position,
+                "unsafe_flag": settings.unsafe_flag,
+                "device_label": settings.device_label,
+                "axis_label": settings.axis_label,
+            }
+            if setting not in current_values:
+                return f"Error: Invalid setting '{setting}'. Valid: {', '.join(sorted(current_values.keys()))}"
+            current = current_values[setting]
+            return f"Preview: {setting} would change from '{current}' to '{value}'. Set confirm=True to apply."
+        except Exception as exception:
+            return f"Error: {exception}"
+
+    try:
+        # Converts value to appropriate type based on setting.
+        if setting in {"park_position", "maintenance_position", "mount_position", "unsafe_flag"}:
+            typed_value: int | str = int(value)
+        else:
+            typed_value = value
+
+        result = set_zaber_device_setting(
+            port=port,
+            device_index=device_index,
+            setting=setting,
+            value=typed_value,
+        )
+        return f"Success: {result}"
+    except Exception as exception:
+        return f"Error: {exception}"
+
+
+@get_mcp.tool()
+def validate_zaber_configuration_tool(port: str, device_index: int) -> str:
+    """Validates a Zaber device's configuration for use with the binding library.
+
+    Args:
+        port: Serial port path (e.g., "/dev/ttyUSB0").
+        device_index: Zero-based index in the daisy-chain (0 = closest to USB port).
+
+    Returns:
+        A validation report including checksum verification, position bounds checking, and any errors or warnings.
+    """
+    try:
+        result = validate_zaber_device_configuration(port=port, device_index=device_index)
+        status = "VALID" if result.is_valid else "INVALID"
+        parts = [f"Status: {status} | Checksum: {'OK' if result.checksum_valid else 'FAIL'} | "
+                 f"Positions: {'OK' if result.positions_valid else 'FAIL'}"]
+
+        if result.errors:
+            parts.append(f"Errors: {'; '.join(result.errors)}")
+        if result.warnings:
+            parts.append(f"Warnings: {'; '.join(result.warnings)}")
+
+        return " | ".join(parts)
+    except Exception as exception:
+        return f"Error: {exception}"
+
+
+@get_mcp.tool()
+def check_mount_accessibility_tool(path: str) -> str:
+    """Verifies that a filesystem path is accessible and writable.
+
+    Checks whether the specified path exists, is a mount point, and supports write operations. Use this to verify
+    SMB/NFS mounts are properly configured before running acquisition sessions.
+
+    Args:
+        path: Filesystem path to verify (e.g., "/mnt/server/data").
+
+    Returns:
+        Status message indicating existence, mount status, write capability, and any errors.
+    """
+    try:
+        target = Path(path)
+
+        # Checks path existence.
+        if not target.exists():
+            return f"Path: {path} | Exists: No | Mount: N/A | Writable: N/A | Status: FAIL"
+
+        # Checks if path is a mount point.
+        is_mount = os.path.ismount(path)
+
+        # Tests write capability by creating and removing a temporary file.
+        writable = False
+        write_error = None
+        try:
+            test_file = target / f".mount_test_{uuid.uuid4().hex[:8]}"
+            test_file.write_text("test")
+            test_file.unlink()
+            writable = True
+        except PermissionError:
+            write_error = "Permission denied"
+        except OSError as os_error:
+            write_error = str(os_error)
+
+        mount_str = "Yes" if is_mount else "No"
+        write_str = "Yes" if writable else "No"
+        status = "OK" if writable else "FAIL"
+        result = f"Path: {path} | Exists: Yes | Mount: {mount_str} | Writable: {write_str} | Status: {status}"
+
+        if write_error:
+            result += f" | Error: {write_error}"
+
+        return result
+    except Exception as exception:
+        return f"Error: {exception}"
+
+
+@get_mcp.tool()
+def check_system_mounts_tool() -> str:
+    """Verifies all filesystem paths in the system configuration are accessible and writable.
+
+    Reads the active system configuration and checks each filesystem path (root_directory, server_directory,
+    nas_directory, and system-specific directories like mesoscope_directory) for existence, mount status, and
+    write capability.
+
+    Returns:
+        A formatted report showing the status of each configured filesystem path with a summary line.
+    """
+
+    def check_path(name: str, directory: Path) -> str:
+        """Checks a single path and returns a status line."""
+        path_str = str(directory)
+        if not directory or path_str in ("", "."):
+            return f"{name}: (not configured)"
+
+        if not directory.exists():
+            return f"{name}: {path_str} | Exists: No | FAIL"
+
+        is_mount = os.path.ismount(path_str)
+        mount_str = "Yes" if is_mount else "No"
+
+        # Tests write capability.
+        writable = False
+        try:
+            test_file = directory / f".mount_test_{uuid.uuid4().hex[:8]}"
+            test_file.write_text("test")
+            test_file.unlink()
+            writable = True
+        except Exception:
+            pass
+
+        write_str = "Yes" if writable else "No"
+        status = "OK" if writable else "FAIL"
+        return f"{name}: {path_str} | Mount: {mount_str} | Writable: {write_str} | {status}"
+
+    try:
+        system_config = get_system_configuration_data()
+        filesystem = system_config.filesystem
+
+        results = [
+            f"System: {system_config.name}",
+            check_path(name="root_directory", directory=filesystem.root_directory),
+            check_path(name="server_directory", directory=filesystem.server_directory),
+            check_path(name="nas_directory", directory=filesystem.nas_directory),
+        ]
+
+        # Adds system-specific directories (mesoscope has mesoscope_directory).
+        if hasattr(filesystem, "mesoscope_directory"):
+            results.append(check_path(name="mesoscope_directory", directory=filesystem.mesoscope_directory))
+
+        # Computes summary statistics.
+        fail_count = sum(1 for r in results[1:] if "FAIL" in r)
+        ok_count = sum(1 for r in results[1:] if "OK" in r)
+        not_configured = sum(1 for r in results[1:] if "not configured" in r)
+
+        results.append(f"Summary: {ok_count} OK, {fail_count} FAIL, {not_configured} not configured")
+
+        return "\n".join(results)
+    except Exception as exception:
+        return f"Error: {exception}"
 
 
 @get_mcp.tool()

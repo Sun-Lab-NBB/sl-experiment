@@ -482,6 +482,14 @@ self._microcontrollers.new_module.stop_monitoring()
 
 External assets include Zaber motors and network services like Google Sheets integration.
 
+For Zaber motor hardware, use the `/zaber-interface` skill for the low-level API documentation including:
+- ZaberConnection/ZaberDevice/ZaberAxis class hierarchy
+- Motor discovery and configuration validation
+- Position management (park, mount, maintenance)
+- Safety patterns (park/unpark workflow)
+
+This section covers the mesoscope-vr specific integration steps.
+
 ### Phase 1: Configuration (sl-shared-assets)
 
 **File:** `sl-shared-assets/src/sl_shared_assets/configuration/mesoscope_configuration.py`
@@ -515,6 +523,15 @@ External assets have flexible binding options:
 - **Zaber motors**: Extend the existing `ZaberMotors` class in `binding_classes.py`
 - **New device type**: Create a new binding class in `binding_classes.py`
 - **Simple integration**: Add directly in `data_acquisition.py` without a dedicated binding class
+
+**For Zaber motors**, follow the patterns documented in `/zaber-interface`:
+
+1. Add a new `ZaberConnection` for the motor group in `ZaberMotors.__init__`
+2. Connect and extract `ZaberAxis` instances for each motor
+3. Add position methods following the existing pattern (unpark → move → wait → park)
+4. Update `wait_until_idle()` to include new motor axes
+5. Update `disconnect()` to close the new connection
+6. Update `ZaberPositions` dataclass in sl-shared-assets if position restoration is needed
 
 ---
 
