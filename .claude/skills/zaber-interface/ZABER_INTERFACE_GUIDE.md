@@ -264,6 +264,16 @@ Zaber controllers store configuration in non-volatile USER_DATA variables:
 | `axis_maintenance_position` | USER_DATA_12 | Maintenance position in native units          |
 | `axis_mount_position`       | USER_DATA_13 | Mount position in native units                |
 
+**Understanding shutdown_flag vs unsafe_flag:**
+
+- **shutdown_flag**: Managed during runtime. Set to `0` at startup, set to `1` during proper shutdown. If a motor with
+  `unsafe_flag=1` has `shutdown_flag=0`, the system will prompt for manual verification before homing. To recover from
+  improper shutdown, have the user verify the motor is safe, then set `shutdown_flag` to `1`.
+
+- **unsafe_flag**: Set once during initial hardware setup. Reflects whether the motor's physical mounting allows it to
+  be positioned in a way that makes homing dangerous (e.g., could cause collision). This flag should NOT be modified
+  to work around improper shutdown - use `shutdown_flag` instead.
+
 ### Motion Limit Settings
 
 | Setting         | Zaber Constant | Purpose                                     |
@@ -411,9 +421,10 @@ def set_zaber_device_setting(
 | `park_position`        | `int` | Must be within [limit_min, limit_max] |
 | `maintenance_position` | `int` | Must be within [limit_min, limit_max] |
 | `mount_position`       | `int` | Must be within [limit_min, limit_max] |
-| `unsafe_flag`          | `int` | Must be 0 or 1                        |
+| `shutdown_flag`        | `int` | Must be 0 or 1                        |
+| `unsafe_flag`          | `int` | Must be 0 or 1 (rarely modified)      |
 | `device_label`         | `str` | Auto-updates checksum                 |
-| `axis_label`           | `str` | No validation                         |
+| `axis_label`           | `str` | Optional, no validation               |
 
 **Returns:** Success message containing old and new values.
 
@@ -423,8 +434,19 @@ def set_zaber_device_setting(
 - `IndexError`: If device_index is out of range.
 - `ValueError`: If setting name is invalid, value type is incorrect, or value is out of range.
 
-**Notes:** Label changes automatically update USER_DATA_0 (checksum) to maintain device validation. The `shutdown_flag`
-and `checksum` settings cannot be modified directly as they are managed by the binding library.
+**Notes:** Label changes automatically update USER_DATA_0 (checksum) to maintain device validation. The `checksum`
+setting cannot be modified directly as it is managed by the binding library.
+
+**Important - shutdown_flag vs unsafe_flag:**
+- `shutdown_flag`: Set to 1 for proper shutdown recovery. Use this when a motor wasn't properly shut down and the user
+  has verified the motor is in a safe position for homing.
+- `unsafe_flag`: Reflects physical hardware constraints. Only modify during initial setup if the hardware assembly
+  changes. Do NOT modify this flag to work around improper shutdown issues.
+
+**Note on axis_label:**
+- The `axis_label` is optional and typically unused for Zaber motors. A missing axis_label is not a configuration issue.
+- Axis labels are primarily used for third-party motors where the label reflects the motor name.
+- For Zaber single-axis controllers, the `device_label` is sufficient for identification.
 
 ### validate_zaber_device_configuration
 

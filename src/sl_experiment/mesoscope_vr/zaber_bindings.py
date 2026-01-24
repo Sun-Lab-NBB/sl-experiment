@@ -284,14 +284,14 @@ def set_zaber_device_setting(port: str, device_index: int, setting: str, value: 
 
     Notes:
         Position values are validated against device motion limits before writing. Label changes automatically
-        update the checksum (USER_DATA_0) to maintain device validation. The shutdown_flag and checksum settings
-        cannot be modified directly as they are managed by the binding library.
+        update the checksum (USER_DATA_0) to maintain device validation. The checksum setting cannot be modified
+        directly as it is managed by the binding library.
 
     Args:
         port: Serial port path (e.g., "/dev/ttyUSB0").
         device_index: Zero-based index in the daisy-chain (0 = closest to USB port).
         setting: Setting name. Valid options are park_position, maintenance_position, mount_position,
-            unsafe_flag, device_label, and axis_label.
+            unsafe_flag, shutdown_flag, device_label, and axis_label.
         value: Value to write. Use integers for positions and flags, strings for labels.
 
     Returns:
@@ -302,9 +302,9 @@ def set_zaber_device_setting(port: str, device_index: int, setting: str, value: 
         IndexError: If device_index is out of range for the connected devices.
         ValueError: If the setting name is invalid, the value type is incorrect, or the value is out of range.
     """
-    valid_settings = {"park_position", "maintenance_position", "mount_position", "unsafe_flag", "device_label",
-                      "axis_label"}
-    protected_settings = {"shutdown_flag", "checksum"}
+    valid_settings = {"park_position", "maintenance_position", "mount_position", "unsafe_flag", "shutdown_flag",
+                      "device_label", "axis_label"}
+    protected_settings = {"checksum"}
 
     if setting in protected_settings:
         message = (
@@ -380,9 +380,13 @@ def set_zaber_device_setting(port: str, device_index: int, setting: str, value: 
                     )
                     console.error(message=message, error=ValueError)
 
-            # Validates unsafe_flag value.
+            # Validates flag values.
             if setting == "unsafe_flag" and value not in (0, 1):
                 message = f"Unable to set unsafe_flag to {value}. The value must be 0 or 1."
+                console.error(message=message, error=ValueError)
+
+            if setting == "shutdown_flag" and value not in (0, 1):
+                message = f"Unable to set shutdown_flag to {value}. The value must be 0 or 1."
                 console.error(message=message, error=ValueError)
 
             # Maps setting names to USER_DATA constants.
@@ -391,6 +395,7 @@ def set_zaber_device_setting(port: str, device_index: int, setting: str, value: 
                 "maintenance_position": SettingConstants.USER_DATA_12,
                 "mount_position": SettingConstants.USER_DATA_13,
                 "unsafe_flag": SettingConstants.USER_DATA_10,
+                "shutdown_flag": SettingConstants.USER_DATA_1,
             }
 
             user_data_setting = setting_map[setting]
@@ -470,9 +475,6 @@ def validate_zaber_device_configuration(port: str, device_index: int) -> ZaberVa
             )
 
     # Checks for potential configuration issues.
-    if not settings.axis_label:
-        warnings.append("Axis label is not set. Consider setting axis_label for identification.")
-
     if settings.shutdown_flag == 0 and settings.unsafe_flag == 1:
         warnings.append(
             "Device was not properly shut down and is marked as unsafe. Manual verification may be "
