@@ -213,19 +213,51 @@ Use MCP tools to read and modify Zaber motor configuration stored in non-volatil
 | `park_position`          | `int` | Shutdown position (native units)         | Must be within motion limits  |
 | `maintenance_position`   | `int` | Maintenance position (native units)      | Must be within motion limits  |
 | `mount_position`         | `int` | Animal mounting position (native units)  | Must be within motion limits  |
-| `unsafe_flag`            | `int` | Requires safe position for homing        | 0 or 1                        |
+| `shutdown_flag`          | `int` | Proper shutdown indicator (see below)    | 0 or 1                        |
+| `unsafe_flag`            | `int` | Requires safe position for homing        | 0 or 1 (rarely modified)      |
 | `device_label`           | `str` | Device identifier                        | Auto-updates checksum         |
-| `axis_label`             | `str` | Axis identifier                          | No constraints                |
+| `axis_label`             | `str` | Axis identifier (optional, see below)    | No constraints                |
 
 ### Read-Only Settings
 
 | Setting            | Description                      |
 |--------------------|----------------------------------|
 | `checksum`         | Auto-calculated from device_label|
-| `shutdown_flag`    | Managed by binding library       |
 | `limit_min`        | Hardware motion limit            |
 | `limit_max`        | Hardware motion limit            |
 | `current_position` | Live motor position              |
+
+### Understanding shutdown_flag vs unsafe_flag
+
+**shutdown_flag (USER_DATA_1):**
+- Set to `1` during proper system shutdown, set to `0` at startup
+- If a motor with `unsafe_flag=1` has `shutdown_flag=0`, the system prompts for manual verification before homing
+- **This is the flag you typically manage** when recovering from improper shutdown (power loss, crash, etc.)
+- To recover: manually verify the motor is in a safe position, then set `shutdown_flag` to `1`
+
+**unsafe_flag (USER_DATA_10):**
+- Indicates whether the motor can be positioned unsafely for homing (e.g., where homing could cause collision)
+- **This flag is set during initial hardware setup** and reflects physical assembly constraints
+- **Do NOT modify this flag** unless the physical hardware configuration has changed
+- If a motor's physical mounting allows safe homing from any position, `unsafe_flag` should be `0`
+- If a motor could be left in a position that makes homing dangerous, `unsafe_flag` should be `1`
+
+**Recovery workflow for improper shutdown:**
+1. User confirms the motor is physically positioned safely for homing
+2. Agent sets `shutdown_flag` to `1` using `set_zaber_device_setting_tool`
+3. System can now initialize normally without the improper shutdown warning
+
+### Understanding axis_label vs device_label
+
+**device_label:**
+- Required for all motors. Used for checksum validation to verify the device is configured for the binding library.
+- Examples: "HeadBar", "Wheel", "Lickport"
+
+**axis_label:**
+- Optional and typically unused for Zaber motors. A missing axis_label is not an issue.
+- Axis labels are primarily used for third-party motors where the label reflects the specific motor name.
+- For Zaber single-axis controllers, the device_label is sufficient for identification.
+- Do not flag missing axis_label as a configuration problem.
 
 ### Initial Device Setup Workflow
 
@@ -236,8 +268,21 @@ For new motors not yet configured for use with the binding library:
    (This automatically calculates and sets the checksum)
 3. **Set axis label**: `set_zaber_device_setting_tool(port, index, "axis_label", "Z", confirm=True)`
 4. **Set positions**: Configure park, maintenance, and mount positions
-5. **Set unsafe flag**: If motor requires safe position for homing
+5. **Set unsafe flag** (if needed): Only set this during initial setup based on physical hardware constraints.
+   Set to `1` if the motor can be positioned unsafely for homing (e.g., where homing could cause collision).
 6. **Validate**: `validate_zaber_configuration_tool(port, index)`
+
+### Improper Shutdown Recovery Workflow
+
+When a motor with `unsafe_flag=1` was not properly shut down:
+
+1. **Read current settings**: `get_zaber_device_settings_tool(port, index)` to confirm `shutdown_flag=0`
+2. **User verification**: Ask the user to physically verify the motor is in a safe position for homing
+3. **Reset shutdown flag**: `set_zaber_device_setting_tool(port, index, "shutdown_flag", "1", confirm=True)`
+4. **Validate**: `validate_zaber_configuration_tool(port, index)` should now show no warnings
+
+**Important:** Never modify `unsafe_flag` to work around improper shutdown. The `unsafe_flag` reflects physical
+hardware constraints and should only be changed if the hardware assembly changes.
 
 ---
 

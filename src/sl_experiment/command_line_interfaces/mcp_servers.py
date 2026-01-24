@@ -167,7 +167,7 @@ def set_zaber_device_setting_tool(
         port: Serial port path (e.g., "/dev/ttyUSB0").
         device_index: Zero-based index in the daisy-chain (0 = closest to USB port).
         setting: Setting name. Valid options are park_position, maintenance_position, mount_position,
-            unsafe_flag, device_label, and axis_label.
+            unsafe_flag, shutdown_flag, device_label, and axis_label.
         value: Value to write. Use integer strings for positions and flags, regular strings for labels.
         confirm: Must be True to execute the write operation. When False, returns a preview without modifying hardware.
 
@@ -182,6 +182,7 @@ def set_zaber_device_setting_tool(
                 "maintenance_position": settings.maintenance_position,
                 "mount_position": settings.mount_position,
                 "unsafe_flag": settings.unsafe_flag,
+                "shutdown_flag": settings.shutdown_flag,
                 "device_label": settings.device_label,
                 "axis_label": settings.axis_label,
             }
@@ -194,7 +195,7 @@ def set_zaber_device_setting_tool(
 
     try:
         # Converts value to appropriate type based on setting.
-        if setting in {"park_position", "maintenance_position", "mount_position", "unsafe_flag"}:
+        if setting in {"park_position", "maintenance_position", "mount_position", "unsafe_flag", "shutdown_flag"}:
             typed_value: int | str = int(value)
         else:
             typed_value = value
