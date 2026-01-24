@@ -190,13 +190,14 @@ def _setup_zaber_motors(zaber_motors: ZaberMotors) -> None:
 
     # Blocks until a valid answer is received from the user.
     while True:
-        answer = input("Enter 'yes' or 'no': ").lower()[0]
+        user_input = input("Enter 'yes' or 'no': ").strip().lower()
+        answer = user_input[0] if user_input else ""
 
-        if answer.lower() == "n":
+        if answer == "n":
             # Aborts method runtime, as no further Zaber setup is required.
             return
 
-        if answer.lower() == "y":
+        if answer == "y":
             # Proceeds with the setup sequence.
             break
 
@@ -264,14 +265,15 @@ def _reset_zaber_motors(zaber_motors: ZaberMotors) -> None:
     _response_delay_timer.delay(delay=_RESPONSE_DELAY, block=False)
 
     while True:
-        answer = input("Enter 'yes' or 'no': ").lower()[0]
+        user_input = input("Enter 'yes' or 'no': ").strip().lower()
+        answer = user_input[0] if user_input else ""
 
         # Continues with the rest of the shutdown runtime
-        if answer.lower() == "y":
+        if answer == "y":
             break
 
         # Ends the runtime, as there is no need to move Zaber motors.
-        if answer.lower() == "n":
+        if answer == "n":
             # Disconnects from Zaber motors. This does not change motor positions but does lock (park) all motors
             # before disconnecting.
             zaber_motors.disconnect()
@@ -405,14 +407,15 @@ def _setup_mesoscope(session_data: SessionData, mesoscope_data: MesoscopeData) -
 
         # Blocks until a valid answer is received from the user
         while True:
-            answer = input("Enter 'yes' or 'no': ").lower()[0]
+            user_input = input("Enter 'yes' or 'no': ").strip().lower()
+            answer = user_input[0] if user_input else ""
 
-            if answer.lower() == "n":
+            if answer == "n":
                 # Aborts the runtime if the user does not intend to generate the ROI and MotionEstimator data
                 console.echo(message="Mesoscope preparation: Complete.", level=LogLevel.SUCCESS)
                 return
 
-            if answer.lower() == "y":
+            if answer == "y":
                 # Proceeds with the metadata file acquisition sequence
                 break
 
@@ -1433,7 +1436,8 @@ class _MesoscopeVRSystem:
             # Requests the user to provide a valid answer.
             answer = ""
             while answer not in {"y", "n"}:
-                answer = input("Enter 'yes' or 'no': ").lower()[0]
+                user_input = input("Enter 'yes' or 'no': ").strip().lower()
+                answer = user_input[0] if user_input else ""
 
             # Breaks the verification loop if the user confirms the displays are working correctly.
             if answer == "y":
@@ -2506,16 +2510,17 @@ class _MesoscopeVRSystem:
         message = "Runtime abort signal: Received. Are you sure you want to abort the runtime?"
         console.echo(message=message, level=LogLevel.WARNING)
         while True:
-            answer = input("Enter 'yes' or 'no': ").lower()[0]
+            user_input = input("Enter 'yes' or 'no': ").strip().lower()
+            answer = user_input[0] if user_input else ""
 
             # Sets the runtime into the termination state, which aborts all instance cycles and the outer logic function
             # cycle.
-            if answer.lower() == "y":
+            if answer == "y":
                 self._terminated = True
                 return
 
             # Returns without terminating the runtime
-            if answer.lower() == "n":
+            if answer == "n":
                 return
 
     def setup_reinforcing_guidance(
@@ -3783,7 +3788,8 @@ def maintenance_logic() -> None:
     )
     move_zaber_motors = ""
     while move_zaber_motors not in ["y", "n"]:
-        move_zaber_motors = input("Enter 'yes' or 'no': ").lower()[0]
+        user_input = input("Enter 'yes' or 'no': ").strip().lower()
+        move_zaber_motors = user_input[0] if user_input else ""
 
     # All calibration procedures are executed in a temporary directory deleted after runtime
     with tempfile.TemporaryDirectory(prefix="sl_maintenance_") as output_dir:
