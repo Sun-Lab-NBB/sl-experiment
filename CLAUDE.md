@@ -83,6 +83,7 @@ state to prevent integration errors.
 | `/acquisition-system-setup`      | Configure data acquisition systems (uses MCP tools from sl-shared-assets)    |
 | `/experiment-design`             | Interactive guidance for building experiment configurations (uses MCP tools) |
 | `/modifying-mesoscope-vr-system` | Guide for extending mesoscope-vr with new hardware components                |
+| `/data-management`               | Manage session data: preprocessing, animal migration, and deletion           |
 
 ## Project Context
 
