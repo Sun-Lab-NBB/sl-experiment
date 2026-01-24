@@ -793,6 +793,63 @@ sl-manage migrate -s SOURCE_PROJECT -d DESTINATION_PROJECT -a ANIMAL_ID
 
 This moves the animal's data across all accessible storage destinations.
 
+### MCP Servers
+
+This library provides two MCP servers that expose CLI functionality for AI agent integration.
+
+#### Starting the Servers
+
+Start the MCP servers using the CLI:
+
+```bash
+sl-get mcp      # Discovery and evaluation tools
+sl-manage mcp   # Data management tools
+```
+
+#### Available Tools (sl-get MCP)
+
+| Tool                                | Description                                                      |
+|-------------------------------------|------------------------------------------------------------------|
+| `get_zaber_devices_tool`            | Discovers Zaber motor devices connected to the system            |
+| `get_projects_tool`                 | Lists all projects configured for the acquisition system         |
+| `get_experiments_tool`              | Lists experiment configurations for a specified project          |
+| `get_experiment_info_tool`          | Returns detailed experiment configuration summary                |
+| `get_checksum_tool`                 | Calculates CRC32-XFER checksum for an input string               |
+| `get_zaber_device_settings_tool`    | Reads configuration from a Zaber device's non-volatile memory    |
+| `set_zaber_device_setting_tool`     | Writes configuration to a Zaber device's non-volatile memory     |
+| `validate_zaber_configuration_tool` | Validates a Zaber device's configuration for binding library use |
+| `check_mount_accessibility_tool`    | Verifies a filesystem path is accessible and writable            |
+| `check_system_mounts_tool`          | Verifies all configured filesystem paths are accessible          |
+
+#### Available Tools (sl-manage MCP)
+
+| Tool                            | Description                                              |
+|---------------------------------|----------------------------------------------------------|
+| `preprocess_session_tool`       | Preprocesses a session's data on the host machine        |
+| `delete_session_tool`           | Removes a session from all storage locations             |
+| `migrate_animal_tool`           | Transfers all sessions for an animal between projects    |
+| `create_project_tool`           | Creates a new project directory structure                |
+| `create_experiment_config_tool` | Creates an experiment configuration from a task template |
+
+#### Claude Desktop Configuration
+
+Add the following to the Claude Desktop configuration file:
+
+```json
+{
+  "mcpServers": {
+    "sl-experiment-get": {
+      "command": "sl-get",
+      "args": ["mcp"]
+    },
+    "sl-experiment-manage": {
+      "command": "sl-manage",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
 ___
 
 ## API Documentation
