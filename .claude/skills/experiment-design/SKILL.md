@@ -25,6 +25,37 @@ Use the `/acquisition-system-setup` skill to confirm:
 If these prerequisites are not met, the MCP tools will fail. The acquisition-system-setup skill provides MCP tools for
 verification and initial setup.
 
+### Task Templates Directory Verification
+
+**You MUST verify and resolve the task templates directory before template discovery.** Use these MCP tools:
+
+| Tool                                | Purpose                                           |
+|-------------------------------------|---------------------------------------------------|
+| `get_task_templates_directory_tool` | Returns current path or error if not configured   |
+| `set_task_templates_directory_tool` | Sets path to sl-unity-tasks Configurations folder |
+
+**Verification workflow:**
+
+```text
+1. Check current configuration:
+   get_task_templates_directory_tool()
+   -> Task templates directory: /path/to/sl-unity-tasks/Assets/InfiniteCorridorTask/Configurations
+   OR
+   -> Error: Task templates directory is not configured.
+
+2. If not configured or path is invalid, resolve with user:
+   - Ask user for the path to their sl-unity-tasks project
+   - The correct path is: {sl-unity-tasks}/Assets/InfiniteCorridorTask/Configurations/
+   - Set using: set_task_templates_directory_tool(directory="/path/to/Configurations")
+
+3. Verify templates are accessible:
+   list_available_templates_tool()
+   -> Available templates: MF_Reward, SSO_Shared_Base, ...
+```
+
+**If `list_available_templates_tool` returns an error**, the task templates directory is not correctly configured.
+Resolve the path before proceeding with experiment creation.
+
 ---
 
 ## Tool Availability Overview
@@ -50,12 +81,14 @@ Two MCP servers provide tools for experiment design. For system setup and verifi
 
 ### Available Tools
 
-**Template Discovery (sl-shared-assets):**
+**Task Templates Configuration (sl-shared-assets):**
 
-| Tool                            | Purpose                                                     |
-|---------------------------------|-------------------------------------------------------------|
-| `list_available_templates_tool` | Lists all available task templates as YAML files            |
-| `get_template_info_tool`        | Returns template details (cues, segments, trial structures) |
+| Tool                               | Purpose                                                     |
+|------------------------------------|-------------------------------------------------------------|
+| `get_task_templates_directory_tool`| Returns current path to Unity Configurations folder         |
+| `set_task_templates_directory_tool`| Sets path to sl-unity-tasks Configurations folder           |
+| `list_available_templates_tool`    | Lists all available task templates as YAML files            |
+| `get_template_info_tool`           | Returns template details (cues, segments, trial structures) |
 
 **Project and Experiment Management (sl-experiment):**
 
@@ -96,13 +129,15 @@ Copy this checklist when creating a new experiment:
 ```text
 Experiment Creation Progress:
 - [ ] Step 1: Verify system configuration (/acquisition-system-setup skill)
-- [ ] Step 2: Check if project exists (get_projects_tool), create if needed (create_project_tool)
-- [ ] Step 3: Discover available templates (list_available_templates_tool)
-- [ ] Step 4: Review template details (get_template_info_tool)
-- [ ] Step 5: Check if experiment exists (get_experiments_tool)
-- [ ] Step 6: Generate experiment configuration (create_experiment_config_tool)
-- [ ] Step 7: Edit YAML to customize experiment states and trial parameters
-- [ ] Step 8: Validate configuration (see VALIDATION_GUIDE.md)
+- [ ] Step 2: Verify task templates directory (get_task_templates_directory_tool)
+- [ ] Step 3: If not configured, set path to sl-unity-tasks Configurations (set_task_templates_directory_tool)
+- [ ] Step 4: Check if project exists (get_projects_tool), create if needed (create_project_tool)
+- [ ] Step 5: Discover available templates (list_available_templates_tool)
+- [ ] Step 6: Review template details (get_template_info_tool)
+- [ ] Step 7: Check if experiment exists (get_experiments_tool)
+- [ ] Step 8: Generate experiment configuration (create_experiment_config_tool)
+- [ ] Step 9: Edit YAML to customize experiment states and trial parameters
+- [ ] Step 10: Validate configuration (see VALIDATION_GUIDE.md)
 ```
 
 ---
@@ -217,7 +252,29 @@ Set all guidance parameters to 0 for phases where trials are disabled (`supports
 
 Use the `/acquisition-system-setup` skill to verify the system is properly configured before proceeding.
 
-### 2. Check and Create Project
+### 2. Verify Task Templates Directory
+
+Check if the task templates directory is configured:
+
+```text
+get_task_templates_directory_tool()
+-> Task templates directory: /path/to/sl-unity-tasks/Assets/InfiniteCorridorTask/Configurations
+```
+
+If the tool returns an error or the path is incorrect, resolve it with the user:
+
+```text
+Agent: The task templates directory is not configured. This should point to your sl-unity-tasks project's
+       Configurations folder. What is the path to your sl-unity-tasks project?
+
+User: /home/user/projects/sl-unity-tasks
+
+Agent: Setting the task templates directory...
+set_task_templates_directory_tool(directory="/home/user/projects/sl-unity-tasks/Assets/InfiniteCorridorTask/Configurations")
+-> Task templates directory set to: /home/user/projects/sl-unity-tasks/Assets/InfiniteCorridorTask/Configurations
+```
+
+### 3. Check and Create Project
 
 Check if the target project exists:
 
@@ -233,7 +290,7 @@ create_project_tool(project="my_project")
 -> Project created: my_project at /path/to/my_project
 ```
 
-### 3. Discover Templates
+### 4. Discover Templates
 
 List available templates:
 
@@ -254,7 +311,7 @@ Guide the user to select a template based on:
 - Number and type of trials (lick/water reward vs occupancy/gas puff)
 - Segment structure and transition probabilities
 
-### 4. Check and Create Experiment
+### 5. Check and Create Experiment
 
 Check if an experiment with the intended name already exists:
 
@@ -270,7 +327,7 @@ create_experiment_config_tool(project="my_project", experiment="session_1", temp
 -> Experiment created: session_1 from template 'MF_Reward' at /path/to/session_1.yaml
 ```
 
-### 5. Customize via YAML Editing
+### 6. Customize via YAML Editing
 
 After generation, customize the experiment by editing the YAML file directly. Key sections to modify:
 
@@ -344,7 +401,7 @@ trial_structures:
     occupancy_duration_ms: 1000
 ```
 
-### 6. Validate Configuration
+### 7. Validate Configuration
 
 After editing, manually validate the configuration using the [VALIDATION_GUIDE.md](VALIDATION_GUIDE.md) checklist.
 
@@ -476,16 +533,21 @@ Agent: Let me help you create that experiment configuration.
       Trial structures:
         - ABC (lick): segment=Segment_abc_40cm
 
-3. This template has one lick-type (water reward) trial. I'll create the project and generate the configuration:
+3. This template has one lick-type (water reward) trial. Let me check if the project exists and create the configuration:
 
-   sl-configure project -p my_project
+   get_projects_tool()
+   -> Projects: other_project_1, other_project_2
 
-   sl-configure experiment \
-     -p my_project \
-     -e sso_base_session \
-     -t SSO_Shared_Base \
-     --state-count 3 \
-     --reward-size 5.0
+   create_project_tool(project="my_project")
+   -> Project created: my_project at /path/to/my_project
+
+   create_experiment_config_tool(
+       project="my_project",
+       experiment="sso_base_session",
+       template="SSO_Shared_Base",
+       state_count=3
+   )
+   -> Experiment created: sso_base_session from template 'SSO_Shared_Base' at /path/to/sso_base_session.yaml
 
 4. Now I'll edit the generated YAML file to configure the three phases properly:
    - Rename state_1 to "baseline" (600s, supports_trials=false)

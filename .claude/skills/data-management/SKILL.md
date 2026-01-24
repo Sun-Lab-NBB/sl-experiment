@@ -24,6 +24,31 @@ This skill requires the sl-manage MCP server for management operations and the s
 
 If a required MCP server is unavailable, inform the user which server is needed and the command to start it.
 
+### MCP Server Verification
+
+**Before performing any data management operation, verify the required MCP servers are running.**
+
+**Verification workflow:**
+
+1. **Test sl-get connectivity**: Run `get_projects_tool()` as a connectivity check
+   - If successful: sl-get MCP server is running
+   - If fails: Inform user to start with `sl-get mcp`
+
+2. **Test sl-manage connectivity** (before preprocessing/deletion/migration): Attempt the operation
+   - If the tool fails with a connection error: Inform user to start with `sl-manage mcp`
+
+**Verification checklist for each workflow:**
+
+```text
+MCP Server Verification:
+- [ ] Attempted get_projects_tool() to verify sl-get MCP server
+- [ ] If using management tools: confirmed sl-manage MCP server is running
+- [ ] Reported any connection failures with start commands
+```
+
+**Important:** Always verify MCP server availability before presenting workflow options to the user. This prevents
+failed operations partway through a workflow.
+
 ---
 
 ## When to Use This Skill

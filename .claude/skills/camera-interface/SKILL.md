@@ -42,12 +42,45 @@ Follow the **Cross-Referenced Library Verification** procedure in `CLAUDE.md`:
 
 ### Step 1: Content Verification
 
-| File                                                         | What to Check                                    |
-|--------------------------------------------------------------|--------------------------------------------------|
-| `../ataraxis-video-system/README.md`                         | Current usage instructions and MCP server setup  |
-| `../ataraxis-video-system/src/ataraxis_video_system/__init__.py` | Exported classes, functions, and public API  |
-| `../ataraxis-video-system/src/ataraxis_video_system/video_system.py` | VideoSystem constructor parameters and methods |
-| sl-experiment `pyproject.toml`                               | Current pinned version dependency                |
+| File                                                                 | What to Check                                   |
+|----------------------------------------------------------------------|-------------------------------------------------|
+| `../ataraxis-video-system/README.md`                                 | Current usage instructions and MCP server setup |
+| `../ataraxis-video-system/src/ataraxis_video_system/__init__.py`     | Exported classes, functions, and public API     |
+| `../ataraxis-video-system/src/ataraxis_video_system/video_system.py` | VideoSystem constructor parameters and methods  |
+| sl-experiment `pyproject.toml`                                       | Current pinned version dependency               |
+
+### Step 2: Hardware Verification
+
+**Before implementing camera code, verify cameras are connected and accessible using MCP tools.**
+
+The ataraxis-video-system library provides an MCP server for camera discovery. Start the server with:
+```bash
+axvs mcp
+```
+
+**Verification workflow:**
+
+1. **Check runtime requirements**: `check_runtime_requirements()` - Verify FFMPEG and GPU availability
+2. **Check CTI status** (if using Harvesters): `get_cti_status()` - Verify GenTL Producer is configured
+3. **Discover cameras**: `list_cameras()` - Verify expected cameras are detected with correct indices
+
+**Expected output from `list_cameras()`:**
+```
+OpenCV Cameras:
+  Index 0: 1920x1080 @ 30fps
+  Index 1: 640x480 @ 30fps
+
+Harvesters Cameras:
+  Index 0: Allied Vision Mako G-040B (1936x1216)
+```
+
+If cameras are not detected:
+- Check physical USB/GigE connections
+- Verify camera drivers are installed
+- For Harvesters: ensure CTI file is configured (`get_cti_status()`)
+- Check for port conflicts with other applications
+
+**Do not proceed with implementation until expected cameras are verified.**
 
 ---
 
@@ -237,13 +270,13 @@ class SystemCameras:
 ### Camera Not Detected
 
 1. Verify driver software is installed
-2. For Harvesters: check CTI file is configured (`axvs cti status`)
+2. For Harvesters: check CTI file is configured using `get_cti_status()` MCP tool
 3. Check physical connections and power
-4. Run `axvs list` to see available cameras
+4. Run `list_cameras()` MCP tool to see available cameras
 
 ### Encoding Failures
 
-1. Verify FFMPEG installation: `axvs check`
+1. Verify FFMPEG installation using `check_runtime_requirements()` MCP tool
 2. Check GPU availability for hardware encoding
 3. Monitor GPU memory and thermal status
 
@@ -267,10 +300,11 @@ Before integrating cameras into an acquisition system:
 
 ```
 - [ ] Verified ataraxis-video-system version matches requirements
-- [ ] Confirmed FFMPEG and GPU availability
-- [ ] Configured CTI file (for Harvesters cameras)
-- [ ] Discovered cameras and recorded indices
-- [ ] Tested camera with interactive session
+- [ ] Confirmed FFMPEG and GPU availability using check_runtime_requirements() MCP tool
+- [ ] Configured CTI file (for Harvesters cameras) using get_cti_status() and set_cti_file() MCP tools
+- [ ] Verified cameras are detected using list_cameras() MCP tool
+- [ ] Recorded camera indices from discovery output
+- [ ] Tested camera with interactive session using MCP video session tools
 - [ ] Created configuration dataclass in sl-shared-assets
 - [ ] Implemented binding class with lifecycle methods
 - [ ] Allocated unique system IDs for each camera

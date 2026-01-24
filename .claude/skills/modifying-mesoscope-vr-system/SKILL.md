@@ -138,6 +138,28 @@ Follow the **Cross-Referenced Library Verification** procedure in `CLAUDE.md`:
 | sl-experiment    | `mesoscope_vr/data_acquisition.py`                  | Lifecycle integration                 |
 | sl-experiment    | `mesoscope_vr/visualizers.py`                       | Visualization patterns                |
 
+### Pre-Implementation Hardware Verification
+
+**Before implementing hardware modifications, verify the target hardware is connected and accessible.**
+
+Use MCP tools to confirm hardware connectivity before writing integration code:
+
+| Hardware Type    | Verification Skill           | MCP Tool                   | MCP Server              |
+|------------------|------------------------------|----------------------------|-------------------------|
+| Cameras          | `/camera-interface`          | `list_cameras()`           | ataraxis-video-system   |
+| Microcontrollers | `/microcontroller-interface` | `list_microcontrollers()`  | ataraxis-comm-interface |
+| Zaber motors     | `/zaber-interface`           | `get_zaber_devices_tool()` | sl-experiment           |
+
+**Verification workflow:**
+
+1. Start the appropriate MCP server for the hardware type
+2. Run the discovery tool to confirm the hardware is detected
+3. Note hardware identifiers (camera indices, serial ports, device numbers)
+4. If hardware is not detected, troubleshoot connectivity before proceeding
+
+This ensures the target hardware is accessible and properly configured before writing binding class code. Implementing
+code for hardware that cannot be verified leads to untestable integration.
+
 ---
 
 ## Guide Summaries

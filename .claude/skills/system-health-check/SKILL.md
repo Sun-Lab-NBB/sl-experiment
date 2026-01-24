@@ -43,10 +43,14 @@ System Health Check Progress:
 
 ### Phase 1: Configuration Prerequisites
 
-| Check                  | Tool                         | Expected Result              |
-|------------------------|------------------------------|------------------------------|
-| Working directory set  | `get_working_directory_tool` | Returns valid path           |
-| System config exists   | `check_system_mounts_tool`   | Returns system name          |
+| Check                        | Tool                                | Expected Result                     |
+|------------------------------|-------------------------------------|-------------------------------------|
+| Working directory set        | `get_working_directory_tool`        | Returns valid path                  |
+| System config exists         | `check_system_mounts_tool`          | Returns system name                 |
+| Task templates directory set | `get_task_templates_directory_tool` | Returns valid path to Unity configs |
+
+**Task templates directory** must point to the `sl-unity-tasks/Assets/InfiniteCorridorTask/Configurations/` folder.
+If not configured, use `set_task_templates_directory_tool(directory)` to set it before running experiments.
 
 ### Phase 2: Network Storage Mounts
 
