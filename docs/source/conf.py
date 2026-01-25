@@ -4,7 +4,7 @@ import importlib_metadata
 # -- Project information -----------------------------------------------------
 project = 'sl-experiment'
 # noinspection PyShadowingBuiltins
-copyright = '2025, Sun (NeuroAI) lab'
+copyright = '2026, Sun (NeuroAI) lab'
 authors = ['Ivan Kondratyev (Inkaros)', 'Kushaan Gupta', 'Natalie Yeung', 'Katlynn Ryu', 'Jasmine Si']
 # Extracts the project version from the .toml file.
 release = importlib_metadata.version("sl-experiment")
@@ -15,7 +15,7 @@ extensions = [
     'sphinx.ext.napoleon',       # To read google-style docstrings (works with autodoc module).
     'sphinx_autodoc_typehints',  # To parse typehints into documentation
     'sphinx_rtd_theme',          # To format the documentation HTML using ReadTheDocs format.
-    'sphinx_click',              # To read docstrings and command line arguments from click-wrapped python functions.
+    'sphinx_click',              # To read docstrings and command-line arguments from click-wrapped python functions.
     'sphinx_rtd_dark_mode'       # Enables dark mode for RTD theme.
 ]
 

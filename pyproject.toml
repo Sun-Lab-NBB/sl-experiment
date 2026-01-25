@@ -1,16 +1,16 @@
 # Defines the build system used for the project.
 [build-system]
-requires = ["hatchling==1.28.0"]
+requires = ["hatchling>=1,<2"]
 build-backend = "hatchling.build"
 
-# Project metdata section. Provides the genral ID information about the project.
+# Project metadata section. Provides the general ID information about the project.
 [project]
 name = "sl-experiment"
-version = "4.0.0rc1"
+version = "4.0.0"
 description = "Provides the assets for acquiring and preprocessing scientific data in the Sun (NeuroAI) lab."
 readme = "README.md"
 license = { file = "LICENSE" }
-requires-python = ">=3.14, <3.15"
+requires-python = ">=3.14,<3.15"
 authors = [
     { name = "Ivan Kondratyev" },
     { name = "Kushaan Gupta" },
@@ -198,3 +198,15 @@ source = ["src/", ".tox/*/lib/python*/site-packages/"]
 # Same as above, specifies the output directory for the coverage .html report
 [tool.coverage.html]
 directory = "reports/coverage_html"
+
+# Specifies additional ignore directives
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "def __del__",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "pass",
+]

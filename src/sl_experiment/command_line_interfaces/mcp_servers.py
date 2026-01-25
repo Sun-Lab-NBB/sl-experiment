@@ -8,31 +8,34 @@ import os
 import uuid
 from typing import Literal
 from pathlib import Path
+import contextlib
 
 from natsort_rs import natsort as natsorted  # type: ignore[import-untyped]
-from sl_shared_assets import SessionData, get_system_configuration_data
+from sl_shared_assets import (
+    SessionData,
+    GasPuffTrial,
+    TaskTemplate,
+    ExperimentState,
+    WaterRewardTrial,
+    MesoscopeExperimentConfiguration,
+    get_task_templates_directory,
+    get_system_configuration_data,
+    create_experiment_configuration,
+)
 from mcp.server.fastmcp import FastMCP
+from ataraxis_base_utilities import ensure_directory_exists
 
 from ..mesoscope_vr import (
     CRCCalculator,
     purge_session,
     get_zaber_devices_info,
-    get_zaber_device_settings,
-    set_zaber_device_setting,
-    validate_zaber_device_configuration,
     preprocess_session_data,
+    set_zaber_device_setting,
+    get_zaber_device_settings,
     migrate_animal_between_projects,
+    validate_zaber_device_configuration,
 )
 from ..shared_components import get_project_experiments
-from sl_shared_assets import (
-    TaskTemplate,
-    GasPuffTrial,
-    ExperimentState,
-    WaterRewardTrial,
-    get_task_templates_directory,
-    create_experiment_configuration,
-)
-from ataraxis_base_utilities import ensure_directory_exists
 
 # Initializes the MCP server for sl-get tools.
 get_mcp = FastMCP(name="sl-experiment-get", json_response=True)
@@ -138,6 +141,9 @@ def get_zaber_device_settings_tool(port: str, device_index: int) -> str:
     """
     try:
         settings = get_zaber_device_settings(port=port, device_index=device_index)
+    except Exception as exception:
+        return f"Error: {exception}"
+    else:
         return (
             f"Device: {settings.device_label or '(not set)'} | Axis: {settings.axis_label or '(not set)'} | "
             f"Checksum: {settings.checksum} | Shutdown: {settings.shutdown_flag} | Unsafe: {settings.unsafe_flag} | "
@@ -145,8 +151,6 @@ def get_zaber_device_settings_tool(port: str, device_index: int) -> str:
             f"Mount: {settings.mount_position} | Limits: [{settings.limit_min}, {settings.limit_max}] | "
             f"Position: {settings.current_position}"
         )
-    except Exception as exception:
-        return f"Error: {exception}"
 
 
 @get_mcp.tool()
@@ -155,6 +159,7 @@ def set_zaber_device_setting_tool(
     device_index: int,
     setting: str,
     value: str,
+    *,
     confirm: bool = False,
 ) -> str:
     """Writes a configuration setting to a Zaber device's non-volatile memory.
@@ -177,6 +182,9 @@ def set_zaber_device_setting_tool(
     if not confirm:
         try:
             settings = get_zaber_device_settings(port=port, device_index=device_index)
+        except Exception as exception:
+            return f"Error: {exception}"
+        else:
             current_values = {
                 "park_position": settings.park_position,
                 "maintenance_position": settings.maintenance_position,
@@ -190,8 +198,6 @@ def set_zaber_device_setting_tool(
                 return f"Error: Invalid setting '{setting}'. Valid: {', '.join(sorted(current_values.keys()))}"
             current = current_values[setting]
             return f"Preview: {setting} would change from '{current}' to '{value}'. Set confirm=True to apply."
-        except Exception as exception:
-            return f"Error: {exception}"
 
     try:
         # Converts value to appropriate type based on setting.
@@ -206,9 +212,10 @@ def set_zaber_device_setting_tool(
             setting=setting,
             value=typed_value,
         )
-        return f"Success: {result}"
     except Exception as exception:
         return f"Error: {exception}"
+    else:
+        return f"Success: {result}"
 
 
 @get_mcp.tool()
@@ -225,8 +232,10 @@ def validate_zaber_configuration_tool(port: str, device_index: int) -> str:
     try:
         result = validate_zaber_device_configuration(port=port, device_index=device_index)
         status = "VALID" if result.is_valid else "INVALID"
-        parts = [f"Status: {status} | Checksum: {'OK' if result.checksum_valid else 'FAIL'} | "
-                 f"Positions: {'OK' if result.positions_valid else 'FAIL'}"]
+        parts = [
+            f"Status: {status} | Checksum: {'OK' if result.checksum_valid else 'FAIL'} | "
+            f"Positions: {'OK' if result.positions_valid else 'FAIL'}"
+        ]
 
         if result.errors:
             parts.append(f"Errors: {'; '.join(result.errors)}")
@@ -277,14 +286,15 @@ def check_mount_accessibility_tool(path: str) -> str:
         mount_str = "Yes" if is_mount else "No"
         write_str = "Yes" if writable else "No"
         status = "OK" if writable else "FAIL"
-        result = f"Path: {path} | Exists: Yes | Mount: {mount_str} | Writable: {write_str} | Status: {status}"
+        check_result = f"Path: {path} | Exists: Yes | Mount: {mount_str} | Writable: {write_str} | Status: {status}"
 
         if write_error:
-            result += f" | Error: {write_error}"
+            check_result += f" | Error: {write_error}"
 
-        return result
     except Exception as exception:
         return f"Error: {exception}"
+    else:
+        return check_result
 
 
 @get_mcp.tool()
@@ -313,13 +323,11 @@ def check_system_mounts_tool() -> str:
 
         # Tests write capability.
         writable = False
-        try:
+        with contextlib.suppress(Exception):
             test_file = directory / f".mount_test_{uuid.uuid4().hex[:8]}"
             test_file.write_text("test")
             test_file.unlink()
             writable = True
-        except Exception:
-            pass
 
         write_str = "Yes" if writable else "No"
         status = "OK" if writable else "FAIL"
@@ -375,9 +383,6 @@ def get_experiment_info_tool(project: str, experiment: str) -> str:
         if not config_path.exists():
             return f"Error: Experiment '{experiment}' not found in project '{project}'."
 
-        # Loads the experiment configuration using the system-specific class.
-        from sl_shared_assets import MesoscopeExperimentConfiguration
-
         experiment_config = MesoscopeExperimentConfiguration.from_yaml(file_path=config_path)
 
         # Builds the summary.
@@ -395,13 +400,14 @@ def get_experiment_info_tool(project: str, experiment: str) -> str:
             state_info_parts.append(f"{name}(code={state.experiment_state_code}, duration={state.state_duration_s}s)")
         state_info = ", ".join(state_info_parts)
 
+    except Exception as exception:
+        return f"Error: {exception}"
+    else:
         return (
             f"Experiment: {experiment} | Unity scene: {experiment_config.unity_scene_name} | "
             f"Cues: [{cue_info}] | Segments: [{segment_info}] | "
             f"Trials: [{trial_info}] | States: [{state_info}]"
         )
-    except Exception as exception:
-        return f"Error: {exception}"
 
 
 @manage_mcp.tool()
@@ -436,7 +442,7 @@ def preprocess_session_tool(session_path: str) -> str:
 
 
 @manage_mcp.tool()
-def delete_session_tool(session_path: str, confirm_deletion: bool = False) -> str:
+def delete_session_tool(session_path: str, *, confirm_deletion: bool = False) -> str:
     """Removes a session's data from all storage locations accessible to the data acquisition system.
 
     Important:
@@ -528,10 +534,11 @@ def create_project_tool(project: str) -> str:
             return f"Project '{project}' already exists at {project_path}"
 
         ensure_directory_exists(config_path)
-        return f"Project created: {project} at {project_path}"
 
     except Exception as exception:
         return f"Error: {exception}"
+    else:
+        return f"Project created: {project} at {project_path}"
 
 
 @manage_mcp.tool()
@@ -563,10 +570,7 @@ def create_experiment_config_tool(
 
         # Validates project exists.
         if not project_path.exists():
-            return (
-                f"Error: Project '{project}' does not exist. "
-                f"Use create_project_tool to create it first."
-            )
+            return f"Error: Project '{project}' does not exist. Use create_project_tool to create it first."
 
         # Checks if experiment already exists.
         if file_path.exists():
@@ -616,10 +620,11 @@ def create_experiment_config_tool(
             )
 
         experiment_configuration.to_yaml(file_path=file_path)
-        return f"Experiment created: {experiment} from template '{template}' at {file_path}"
 
     except Exception as exception:
         return f"Error: {exception}"
+    else:
+        return f"Experiment created: {experiment} from template '{template}' at {file_path}"
 
 
 def run_get_server(transport: Literal["stdio", "sse", "streamable-http"] = "stdio") -> None:

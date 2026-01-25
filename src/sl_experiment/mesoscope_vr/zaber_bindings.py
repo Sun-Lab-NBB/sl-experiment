@@ -302,8 +302,15 @@ def set_zaber_device_setting(port: str, device_index: int, setting: str, value: 
         IndexError: If device_index is out of range for the connected devices.
         ValueError: If the setting name is invalid, the value type is incorrect, or the value is out of range.
     """
-    valid_settings = {"park_position", "maintenance_position", "mount_position", "unsafe_flag", "shutdown_flag",
-                      "device_label", "axis_label"}
+    valid_settings = {
+        "park_position",
+        "maintenance_position",
+        "mount_position",
+        "unsafe_flag",
+        "shutdown_flag",
+        "device_label",
+        "axis_label",
+    }
     protected_settings = {"checksum"}
 
     if setting in protected_settings:
@@ -314,9 +321,7 @@ def set_zaber_device_setting(port: str, device_index: int, setting: str, value: 
         console.error(message=message, error=ValueError)
 
     if setting not in valid_settings:
-        message = (
-            f"Unable to modify setting '{setting}'. Valid settings are: {', '.join(sorted(valid_settings))}."
-        )
+        message = f"Unable to modify setting '{setting}'. Valid settings are: {', '.join(sorted(valid_settings))}."
         console.error(message=message, error=ValueError)
 
     try:
@@ -337,8 +342,8 @@ def set_zaber_device_setting(port: str, device_index: int, setting: str, value: 
             if setting == "device_label":
                 if not isinstance(value, str):
                     message = f"Unable to set device_label. Expected a string value, but got {type(value).__name__}."
-                    console.error(message=message, error=ValueError)
-                    raise ValueError(message)  # Unreachable, but satisfies type checker.
+                    console.error(message=message, error=TypeError)
+                    raise TypeError(message)  # noqa: TRY301 - Unreachable, but satisfies type checker.
 
                 old_value = device.label or ""
                 device.set_label(label=value)
@@ -353,8 +358,8 @@ def set_zaber_device_setting(port: str, device_index: int, setting: str, value: 
             if setting == "axis_label":
                 if not isinstance(value, str):
                     message = f"Unable to set axis_label. Expected a string value, but got {type(value).__name__}."
-                    console.error(message=message, error=ValueError)
-                    raise ValueError(message)  # Unreachable, but satisfies type checker.
+                    console.error(message=message, error=TypeError)
+                    raise TypeError(message)  # noqa: TRY301 - Unreachable, but satisfies type checker.
 
                 old_value = axis.label or ""
                 axis.set_label(label=value)
@@ -362,11 +367,9 @@ def set_zaber_device_setting(port: str, device_index: int, setting: str, value: 
 
             # Handles numeric settings. Ensures the value is an integer.
             if not isinstance(value, int):
-                message = (
-                    f"Unable to set {setting}. Expected an integer value, but got {type(value).__name__}."
-                )
-                console.error(message=message, error=ValueError)
-                raise ValueError(message)  # Unreachable, but satisfies type checker.
+                message = f"Unable to set {setting}. Expected an integer value, but got {type(value).__name__}."
+                console.error(message=message, error=TypeError)
+                raise TypeError(message)  # noqa: TRY301 - Unreachable, but satisfies type checker.
 
             # Validates position values against motion limits.
             if setting in {"park_position", "maintenance_position", "mount_position"}:
@@ -470,9 +473,7 @@ def validate_zaber_device_configuration(port: str, device_index: int) -> ZaberVa
     for position_name, position_value in position_checks:
         if position_value < limit_min or position_value > limit_max:
             positions_valid = False
-            errors.append(
-                f"{position_name} ({position_value}) is outside motion limits [{limit_min}, {limit_max}]."
-            )
+            errors.append(f"{position_name} ({position_value}) is outside motion limits [{limit_min}, {limit_max}].")
 
     # Checks for potential configuration issues.
     if settings.shutdown_flag == 0 and settings.unsafe_flag == 1:

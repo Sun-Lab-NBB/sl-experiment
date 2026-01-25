@@ -14,11 +14,11 @@ Command Line Interfaces
    :nested: full
 
 .. click:: sl_experiment.command_line_interfaces.manage:manage
-   :prog: sl-devices
+   :prog: sl-manage
    :nested: full
 
 .. click:: sl_experiment.command_line_interfaces.get:get
-   :prog: sl-create-system-config
+   :prog: sl-get
    :nested: full
 
 Mesoscope-VR Acquisition System

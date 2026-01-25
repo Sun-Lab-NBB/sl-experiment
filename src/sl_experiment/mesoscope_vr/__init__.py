@@ -8,8 +8,8 @@ from .zaber_bindings import (
     ZaberValidationResult,
     discover_zaber_devices,
     get_zaber_devices_info,
-    get_zaber_device_settings,
     set_zaber_device_setting,
+    get_zaber_device_settings,
     validate_zaber_device_configuration,
 )
 from .data_acquisition import (
