@@ -807,6 +807,12 @@ class _ControlUIWindow(QMainWindow):
                         border-color: #1e8449;
                     }
 
+                    QPushButton#valveOpenButton:disabled {
+                        background-color: #ecf0f1;
+                        color: #95a5a6;
+                        border-color: #bdc3c7;
+                    }
+
                     QPushButton#valveCloseButton {
                         background-color: #e67e22;
                         color: white;
@@ -817,6 +823,12 @@ class _ControlUIWindow(QMainWindow):
                     QPushButton#valveCloseButton:hover {
                         background-color: #d35400;
                         border-color: #ba4a00;
+                    }
+
+                    QPushButton#valveCloseButton:disabled {
+                        background-color: #ecf0f1;
+                        color: #95a5a6;
+                        border-color: #bdc3c7;
                     }
 
                     QPushButton#rewardButton {
@@ -1051,6 +1063,12 @@ class _ControlUIWindow(QMainWindow):
                         border-color: #1e8449;
                     }
 
+                    QPushButton#gasValveOpenButton:disabled {
+                        background-color: #ecf0f1;
+                        color: #95a5a6;
+                        border-color: #bdc3c7;
+                    }
+
                     QPushButton#gasValveCloseButton {
                         background-color: #e67e22;
                         color: white;
@@ -1061,6 +1079,12 @@ class _ControlUIWindow(QMainWindow):
                     QPushButton#gasValveCloseButton:hover {
                         background-color: #d35400;
                         border-color: #ba4a00;
+                    }
+
+                    QPushButton#gasValveCloseButton:disabled {
+                        background-color: #ecf0f1;
+                        color: #95a5a6;
+                        border-color: #bdc3c7;
                     }
 
                     QPushButton#gasPuffButton {
